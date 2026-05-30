@@ -1,0 +1,19 @@
+# Claude Code config — sync repo
+# Strategy: ignore EVERYTHING by default (secrets, sessions, caches, machine-local
+# state), then explicitly re-include only the portable config worth syncing.
+
+/*
+
+# Defense-in-depth: never track the auth token, even if the rules above change.
+.credentials.json
+
+# --- Tracked config (portable across machines) ---
+!/.gitignore
+!/CLAUDE.md
+!/settings.json
+!/roo-to-claude.md
+!/skills
+!/agents
+!/keybindings.json
+
+# Note: settings.local.json is intentionally NOT tracked — it's for machine-local overrides.
