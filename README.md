@@ -45,6 +45,13 @@ Windows user folder, so they stay portable across machines.
 - **Pushing changes:** run **`/push-config`** in any Claude Code session to commit the tracked
   config and push to GitHub.
 
+## Notification sound
+
+A `Notification` hook runs `hooks/notify-sound.sh`, which plays an alarm tone whenever Claude Code
+needs your answer or permission. It uses `powershell.exe` beeps on WSL, `afplay` on macOS, and
+`paplay`/`aplay` on Linux, falling back to the terminal bell — so it's a no-op (never errors) on a
+machine with no audio path.
+
 ## Setting up on a new machine
 
 ```bash

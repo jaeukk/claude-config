@@ -12,6 +12,18 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/notify-sound.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
