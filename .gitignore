@@ -9,6 +9,7 @@
 
 # --- Tracked config (portable across machines) ---
 !/.gitignore
+!/README.md
 !/CLAUDE.md
 !/settings.json
 !/roo-to-claude.md
