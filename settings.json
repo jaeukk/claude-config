@@ -1,3 +1,17 @@
 {
-  "effortLevel": "xhigh"
+  "effortLevel": "xhigh",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/check-config-updates.sh",
+            "timeout": 15,
+            "statusMessage": "Checking for config updates…"
+          }
+        ]
+      }
+    ]
+  }
 }

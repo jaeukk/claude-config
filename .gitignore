@@ -14,6 +14,8 @@
 !/roo-to-claude.md
 !/skills
 !/agents
+!/commands
+!/hooks
 !/keybindings.json
 
 # Note: settings.local.json is intentionally NOT tracked — it's for machine-local overrides.
