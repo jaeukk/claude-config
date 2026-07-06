@@ -22,7 +22,9 @@ Everything else under `~/.claude` (credentials, `sessions/`, `projects/`, caches
 
 ## Skills
 
-- **`carefulcoding`** — think-before-coding guidelines (simplicity, surgical changes, goal-driven).
+- **`karpathy-guidelines`** — think-before-coding guidelines (simplicity, surgical changes,
+  goal-driven), from [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills)
+  (replaces the earlier `carefulcoding` copy of the same content).
 - **`caveman-skill`** — extreme brevity / code-first output.
 - **`organizer`** — read and reorganize files in the filesystem.
 - **`zotero-obsidian-sync`** — Zotero ↔ Obsidian conventions with per-machine vault-path resolution.
@@ -31,9 +33,13 @@ Everything else under `~/.claude` (credentials, `sessions/`, `projects/`, caches
 
 - **`searcher`** — read-only research: search Zotero, read Obsidian notes, retrieve metadata.
 - **`note`** — Obsidian note specialist (Zettelkasten, LaTeX, template-driven).
+- **`paper-reviewer`** — summarizes a single paper from the local Zotero library into a structured
+  Markdown review (algorithm / methods / results).
+- **`book-summarizer`** — digests a chaptered book or textbook from Zotero (or a PDF) into
+  per-chapter Obsidian notes with LaTeX, figures, and wikilinks.
 
-Both resolve Zotero/Obsidian paths via the `zotero-obsidian-sync` skill rather than hardcoding a
-Windows user folder, so they stay portable across machines.
+All of them resolve Zotero/Obsidian paths via the `zotero-obsidian-sync` skill rather than
+hardcoding a Windows user folder, so they stay portable across machines.
 
 ## Staying in sync
 
@@ -45,12 +51,17 @@ Windows user folder, so they stay portable across machines.
 - **Pushing changes:** run **`/push-config`** in any Claude Code session to commit the tracked
   config and push to GitHub.
 
-## Notification sound
+## Notification sound & status line
 
-A `Notification` hook runs `hooks/notify-sound.sh`, which plays an alarm tone whenever Claude Code
-needs your answer or permission. It uses `powershell.exe` beeps on WSL, `afplay` on macOS, and
-`paplay`/`aplay` on Linux, falling back to the terminal bell — so it's a no-op (never errors) on a
-machine with no audio path.
+- **`hooks/notify-sound.sh`** (`Notification` hook) plays an alarm tone whenever Claude Code needs
+  your answer or permission. It uses `powershell.exe` beeps on WSL, `afplay` on macOS, and
+  `paplay`/`aplay` on Linux, falling back to the terminal bell — so it's a no-op (never errors) on
+  a machine with no audio path.
+- **`hooks/notify-on-question.sh`** (`Stop` hook) plays the same sound when Claude's *final*
+  message asks for a decision or input, and stays silent on purely informational turns — so the
+  alarm always means "your input is needed".
+- **`hooks/statusline.py`** renders the status line: model, live context-token usage (parsed from
+  the session transcript), and session cost.
 
 ## Setting up on a new machine
 
