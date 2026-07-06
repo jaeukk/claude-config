@@ -1,0 +1,29 @@
+{
+  "skill_name": "python-guidelines",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Write a small Python module pair_correlation.py for a computational-physics codebase that computes the radial distribution function g(r) of N particles in a cubic periodic box (positions given as an (N,3) array, box side L, bin width dr). Keep it minimal — the public function plus at most a couple of small helpers.",
+      "expected_output": "Vectorized NumPy (no Python loop over particle pairs, or at worst a single loop with broadcasting), NumPy-style docstrings with units on public functions, type hints, ValueError on bad input, no np.append in loops, np.pi not a literal.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "I need a Python function that computes the static structure factor S(k) from particle positions for a list of wavevectors, to compare against my Monte Carlo results.",
+      "expected_output": "NumPy-style docstring with wavevector units and averaging convention documented, vectorized complex-exponential sum (einsum/broadcasting), type hints.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Review this Python function and fix any problems:\n\nimport numpy as np, os\ndef compute(pos_file):\n    data = np.loadtxt(os.path.join('data', pos_file))\n    np.random.seed(42)\n    energies = np.array([])\n    for i in range(len(data)):\n        if data[i] == 0.0:\n            energies = np.append(energies, 0)\n        else:\n            energies = np.append(energies, 1.0/data[i])\n    return energies",
+      "expected_output": "Identifies quadratic np.append growth, == on floats, legacy np.random.seed, missing docstring/type hints, os.path; rewrites vectorized (np.where / masking), pathlib, default_rng if randomness is even needed, NumPy-style docstring with units.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "My analysis pipeline is slow and messy: three scripts each have their own copy of a minimum-image distance function written with Python for-loops over particles, and the whole pair computation is O(N^2) with N=50000. Clean this up and make it faster.",
+      "expected_output": "Extracts one shared minimum-image helper module; vectorizes with broadcasting; proposes scipy.spatial.cKDTree (with periodic boxsize) or cell lists to beat O(N^2); mentions numba/C++ escalation only if still needed; changes stay surgical.",
+      "files": []
+    }
+  ]
+}

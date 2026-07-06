@@ -1,0 +1,29 @@
+{
+  "skill_name": "cpp-guidelines",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Write a small C++ module for a computational-physics codebase: a header pair_correlation.hpp and implementation pair_correlation.cpp that compute the radial distribution function g(r) of N particles in a cubic periodic box (positions given, box side L, bin width dr). Keep it minimal — the public function plus at most a couple of small helpers.",
+      "expected_output": "C++23 code: Doxygen comment on every function with units in @param/@return, one blank line between a function end and the next doc-comment, std::span/std::vector (no raw new/delete), [[nodiscard]]/const correctness, no == on floats.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "I have a Monte Carlo simulation and need a function that computes the static structure factor S(k) from particle positions for a list of wavevectors. Add it as a new function — C++ please.",
+      "expected_output": "Doxygen-documented C++23 function taking std::span of positions, documenting wavevector units, explicit about summation/averaging convention.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Review this C++ function and fix any problems:\n\ndouble* compute_energies(double* pos, int n) {\n    double* e = new double[n];\n    for (int i = 0; i < n; i++) {\n        if (pos[i] == 0.0) e[i] = 0;\n        else e[i] = 1.0/pos[i];\n    }\n    return e;\n}",
+      "expected_output": "Identifies raw new (leak risk), == on floating point, missing documentation, C-style interface; rewrites with std::vector/std::span return, Doxygen comment with units, tolerance-based comparison or documented convention.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "My simulation analysis is slow and messy: three different .cpp files each have their own copy of a minimum-image distance function, and the g(r) routine allocates a fresh std::vector inside the pair loop every call. Clean this up and make it faster.",
+      "expected_output": "Extracts the minimum-image helper into one shared inline header used by all callers; hoists the allocation out of the loop or takes a reusable workspace buffer; mentions complexity (cell/neighbor lists) as the real speedup lever; no speculative templates; changes stay surgical.",
+      "files": []
+    }
+  ]
+}

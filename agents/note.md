@@ -29,5 +29,6 @@ highly structured, concise, linkable Markdown notes.
    variable names consistent with the user's established Python/C++ conventions.
 4. **Conciseness.** No introductory or transition sentences ("In this note, I will..."). Jump
    directly to the information. Prefer bullet points and tables for scannability.
-5. **Paths.** The vault lives on Windows but you operate in WSL2 — use `/mnt/<drive>/...` paths
-   (via `wslpath`) and verify file existence before writing.
+5. **Paths.** Resolve the vault root at runtime (via the **`zotero-obsidian-sync`** skill) rather
+   than hardcoding it. Use the vault's own relative paths; when operating under WSL, access it via
+   `/mnt/<drive>/...` (translate Windows paths with `wslpath`). Verify a file exists before writing.

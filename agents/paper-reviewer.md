@@ -70,8 +70,8 @@ focus: <algorithm|results|both>
 - **Faithful, not inflated.** Only state what the paper supports; flag anything you inferred.
 - **Dense, no filler.** No "In this summary I will…" preamble. Jump to content.
 - **Cite the source.** Keep the Zotero key and DOI in frontmatter so the note is traceable.
-- **Paths on WSL2.** Any Windows-style PDF path returned by Zotero must be translated with
-  `wslpath` before you try to read it directly. Prefer the Zotero full-text API over reading the
-  raw PDF.
+- **Paths.** Resolve the vault root via the **`zotero-obsidian-sync`** skill; don't hardcode a
+  per-machine folder. Zotero returns Windows-style PDF paths — read them directly on native
+  Windows, or translate with `wslpath` under WSL. Prefer the Zotero full-text API over the raw PDF.
 - **Ask before networking.** Reaching out to a publisher/web is opt-in unless the user already said
   it's fine.

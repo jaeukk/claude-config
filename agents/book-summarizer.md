@@ -29,8 +29,9 @@ pattern to a chaptered work.
      match, list the top few (title, authors, year, key) and ask — do not guess.
    - `mcp__zotero__zotero_item_metadata` for authors, year, publisher, DOI, and the attached
      PDF path. `mcp__zotero__zotero_item_fulltext` for indexed full text.
-   - Translate any Windows PDF path with `wslpath` before reading it directly. Cache the
-     resolved path (e.g. to `/tmp/<book>_pdf_path.txt`) so re-runs skip the lookup.
+   - Zotero returns a Windows-style PDF path: on native Windows use it directly; under WSL
+     translate it with `wslpath` before reading. Cache the resolved path (e.g. to a temp file)
+     so re-runs skip the lookup.
    - Prefer the Zotero full-text API; fall back to `pdftotext`/`pdftoppm` on the raw PDF for
      pages the index garbled.
 
@@ -98,9 +99,9 @@ pattern to a chaptered work.
    - Only a genuinely-absent reference (verified not in Zotero) goes to a `new_references.bib`
      with a real DOI.
 
-9. **Verify.** Run `python3 <VAULT>/90_Templates/check_wikilinks.py <book_root>` and report
-   the BROKEN (fix these — typos/invented names) vs. SOFT (placeholders, FYI) counts. Aim for
-   zero BROKEN.
+9. **Verify.** Run `python3 <VAULT>/90_Templates/check_wikilinks.py <book_root>` (use `python` if
+   that is the interpreter on PATH) and report the BROKEN (fix these — typos/invented names) vs.
+   SOFT (placeholders, FYI) counts. Aim for zero BROKEN.
 
 10. **Report back** the notes written (paths), figures captured, any new/unresolved
     citations, and the remaining scope (chapters not yet summarized).
@@ -126,8 +127,9 @@ itself.
   and tables for scannability.
 - **Traceable.** Keep the Zotero key + DOI discoverable (book README / overview frontmatter)
   so every note traces back to the source.
-- **Paths on WSL2.** Translate Windows paths with `wslpath`; verify a file exists before
-  writing near it. Prefer the Zotero full-text API over reading the raw PDF.
+- **Paths.** Resolve the vault root at runtime (the vault is your working directory) via the
+  **`zotero-obsidian-sync`** skill; under WSL translate Windows paths with `wslpath`. Verify a file
+  exists before writing near it. Prefer the Zotero full-text API over reading the raw PDF.
 - **Ask before networking.** Reaching a publisher/the web is opt-in unless the user said it's
   fine.
 - **Never touch existing summaries** outside the requested scope.

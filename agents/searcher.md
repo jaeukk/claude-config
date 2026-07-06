@@ -18,5 +18,5 @@ metadata. Do not write complex code or make edits — just locate and return inf
 ## Zotero & Obsidian paths — resolve, don't hardcode
 Use the conventions in the **`zotero-obsidian-sync`** skill for the Zotero API endpoint
 (`http://localhost:23119`) and for resolving the Obsidian vault path at runtime. Do **not** hardcode
-a Windows user folder — paths differ per machine. Apply `wslpath`/path translation to any
-Windows-style PDF paths returned by Zotero before reading them.
+a per-machine user folder — paths differ per machine. Zotero returns Windows-style PDF paths: on
+native Windows read them directly; under WSL translate them with `wslpath` first.
