@@ -1,5 +1,34 @@
 {
-  "effortLevel": "xhigh",
+  "permissions": {
+    "allow": [
+      "Bash(ssh -o BatchMode=yes nurion 'tail -25 /scratch/e1837a01/.conda/pmp_rebuild.log 2>&1')",
+      "Bash(ssh -o BatchMode=yes nurion ' *)",
+      "Bash(ssh -o BatchMode=yes nurion 'cat /scratch/e1837a01/.conda/pmp_rebuild.log')",
+      "Bash(ssh -o BatchMode=yes nurion 'tail -15 /scratch/e1837a01/.conda/pmp_rebuild.log 2>&1; echo \"=== env dir ===\"; ls -ld /scratch/e1837a01/.conda/envs/pmp 2>&1')",
+      "Bash(ssh -o BatchMode=yes nurion 'echo \"=== rebuild log tail ===\"; tail -20 /scratch/e1837a01/.conda/pmp_rebuild.log 2>&1; echo \"=== env dir ===\"; ls -ld /scratch/e1837a01/.conda/envs/pmp 2>&1')",
+      "Bash(ssh -o BatchMode=yes nurion 'sed -n \"/VERIFY/,$p\" /scratch/e1837a01/.conda/pmp_rebuild.log 2>&1; echo \"=== env python ===\"; ls -l /scratch/e1837a01/.conda/envs/pmp/bin/python3 2>&1; ls /scratch/e1837a01/.conda/envs/pmp/lib/python3*/encodings/__init__.py 2>&1')",
+      "Bash(ssh -o BatchMode=yes nurion 'cat /scratch/e1837a01/.conda/pmp_rebuild.log; echo \"=== envs dir contents ===\"; ls -la /scratch/e1837a01/.conda/envs/ 2>&1')",
+      "Bash(ls -la \"/mnt/c/Users/김재욱/Downloads/\" | grep -i innocore)",
+      "Read(//mnt/c/Users/김재욱/Downloads/**)",
+      "Bash(ssh -o BatchMode=yes nurion 'tail -20 /scratch/e1837a01/.conda/pmp_rebuild.log; echo \"=== env python sanity ===\"; /scratch/e1837a01/.conda/envs/pmp/bin/python3 -c \"print\\(1+1\\)\" 2>&1 | tail -2')",
+      "Bash(echo \"rc=$?\")",
+      "Bash(ssh -o BatchMode=yes nurion 'echo SOCKET_OK')",
+      "Bash(ssh -o BatchMode=yes nurion 'tail -22 /scratch/e1837a01/.conda/pmp_rebuild.log; echo \"=== direct env python sanity ===\"; /scratch/e1837a01/.conda/envs/pmp/bin/python3 -c \"print\\(\\\\\"py-ok\\\\\", 1+1\\)\" 2>&1 | tail -2')",
+      "Bash(ssh -o BatchMode=yes nurion 'cat > /scratch/e1837a01/.conda/build_pmp.sh')",
+      "Bash(ssh -o BatchMode=yes nurion 'wc -l /scratch/e1837a01/.conda/build_pmp.sh')",
+      "Bash(echo \"check_rc=$?\")",
+      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=8 nurion 'echo ALIVE')",
+      "Bash(echo \"cmd_rc=$?\")",
+      "Bash(ssh -o BatchMode=yes nurion 'echo ALIVE; ls -l /scratch/e1837a01/.conda/build_pmp.sh 2>&1')",
+      "Bash(ssh -o BatchMode=yes nurion 'wc -l /scratch/e1837a01/.conda/build_pmp.sh && echo written')",
+      "Bash(ssh -o BatchMode=yes nurion 'setsid bash /scratch/e1837a01/.conda/build_pmp.sh > /scratch/e1837a01/.conda/pmp_rebuild.log 2>&1 < /dev/null & echo \"launched detached pid=$!\"; sleep 2; echo \"--- early log ---\"; head -5 /scratch/e1837a01/.conda/pmp_rebuild.log 2>&1')",
+      "Bash(ssh -o BatchMode=yes nurion 'for i in $\\(seq 1 60\\); do grep -q BUILD_DONE /scratch/e1837a01/.conda/pmp_rebuild.log 2>/dev/null && break; sleep 30; done; echo \"=== final tail ===\"; tail -20 /scratch/e1837a01/.conda/pmp_rebuild.log')",
+      "Bash(ssh -o BatchMode=yes nurion 'echo \"=== log tail ===\"; tail -15 /scratch/e1837a01/.conda/pmp_rebuild.log; echo \"=== build proc alive? ===\"; pgrep -af \"build_pmp.sh|conda create|conda install\" | grep -v pgrep | head; echo \"=== env python present? ===\"; ls -l /scratch/e1837a01/.conda/envs/pmp/bin/python3 2>&1')"
+    ],
+    "additionalDirectories": [
+      "/home/jaeukk/.claude/agents"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -19,11 +48,30 @@
           {
             "type": "command",
             "command": "$HOME/.claude/hooks/notify-sound.sh",
-            "async": true,
-            "timeout": 10
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/notify-on-question.sh",
+            "timeout": 10,
+            "async": true
           }
         ]
       }
     ]
-  }
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "/home/jaeukk/miniconda3/bin/python3 $HOME/.claude/hooks/statusline.py",
+    "padding": 0
+  },
+  "effortLevel": "max",
+  "model": "claude-fable-5[1m]"
 }

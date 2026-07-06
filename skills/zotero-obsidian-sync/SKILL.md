@@ -10,6 +10,22 @@ survive moving between machines.
 
 ## Zotero
 - **Local Zotero API:** `http://localhost:23119` (identical on every machine).
+- The user's Zotero **userID is `5872032`** (used in `/api/users/5872032/...` paths).
+
+### Reading
+- `GET http://localhost:23119/api/users/5872032/items`, `/collections`, `/collections/<KEY>/items/top`, `.../items/<KEY>` — list/search/fetch. Also exposed via the `mcp__zotero__*` tools (search / metadata / fulltext) and Better BibTeX JSON-RPC at `/better-bibtex/json-rpc`.
+
+### Writing — the local REST API is READ-ONLY; use the Connector
+`POST` to the local REST API fails with `400 "Endpoint does not support method"`. **Do not give up there** — write through the **Zotero Connector** (the channel the browser "Save to Zotero" button uses), which saves into the **currently-selected collection**:
+
+1. `POST http://localhost:23119/connector/getSelectedCollection` (body `{}`) → confirms the target, e.g. `{"name":"MC_method","editable":true,...}`. Ask the user to click the intended collection in Zotero if it's not selected (the Connector has no "choose collection" parameter).
+2. `POST http://localhost:23119/connector/saveItems` with headers `Content-Type: application/json` and `X-Zotero-Connector-API-Version: 3`, body:
+   ```json
+   {"sessionID":"<uuid>","uri":"https://...","items":[ <translator-format items> ]}
+   ```
+   Returns HTTP **201**. Item format = Zotero translator JSON: `itemType`, `creators:[{creatorType,firstName,lastName}]`, `title`, `date`, `publicationTitle`/`proceedingsTitle`, `volume`, `issue`, `pages`, `DOI`, `url`, `tags:[{tag}]`. **No `collections` field** — it follows the selected collection.
+
+Best practice: get authoritative fields from **CrossRef** (`https://api.crossref.org/works/<DOI>`) before building items, batch all items in one `saveItems` array, then **verify** with the read API (`GET /api/users/5872032/collections/<KEY>/items/top`). Creating a *collection* is NOT supported over the API — ask the user to make it in the Zotero UI.
 
 ## Resolving the Obsidian vault path — DO NOT hardcode it
 
