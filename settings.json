@@ -29,6 +29,7 @@
       "/home/jaeukk/.claude/agents"
     ]
   },
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "SessionStart": [
       {
@@ -72,6 +73,5 @@
     "command": "/home/jaeukk/miniconda3/bin/python3 $HOME/.claude/hooks/statusline.py",
     "padding": 0
   },
-  "effortLevel": "max",
-  "model": "claude-fable-5[1m]"
+  "agentPushNotifEnabled": true
 }

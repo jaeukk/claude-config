@@ -109,6 +109,16 @@ Inside function bodies, comment only what the code cannot say: literature refere
 - **Indices and sizes:** use `std::size_t` (or `ssize`/`std::ptrdiff_t` when
   differences appear); beware `-Wconversion` warnings — they catch real bugs in
   index arithmetic.
+- **Loop-variable type follows the bound.** In a `for` loop, the counter and the
+  variable it is compared against must be the **same type** — take the loop
+  variable's type from the external variable that bounds it. Comparing against a
+  `.size()` (a `std::size_t`) ⇒ declare the counter `std::size_t` and compare it
+  directly: `for (std::size_t i = 0; i < v.size(); i++)`. Do **not** fix a
+  `-Wsign-compare` by casting the bound to `int` (`i < (int)v.size()`) or, worse,
+  by mixing a `size_t` counter with a `static_cast<int>` bound — that is
+  inconsistent and doesn't fix the signedness. Keep a signed counter only for a
+  genuinely signed loop (reverse `for (int i = n-1; i >= 0; --i)`), and then keep
+  the whole loop signed. Be consistent across sibling loops in a file.
 
 ## 7. Performance
 
