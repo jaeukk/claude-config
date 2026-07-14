@@ -29,8 +29,21 @@
       "/home/jaeukk/.claude/agents"
     ]
   },
-  "model": "claude-fable-5[1m]",
+  "model": "claude-fable-5",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/fable/hooks/orchestration-gate.py",
+            "timeout": 10,
+            "statusMessage": "fable gate…"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
@@ -73,5 +86,6 @@
     "command": "/home/jaeukk/miniconda3/bin/python3 $HOME/.claude/hooks/statusline.py",
     "padding": 0
   },
+  "theme": "dark",
   "agentPushNotifEnabled": true
 }

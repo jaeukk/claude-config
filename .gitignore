@@ -18,5 +18,10 @@
 !/commands
 !/hooks
 !/keybindings.json
+!/fable
+
+# fable: the on/off switch and its derived symlink are machine-local runtime state
+fable/state
+fable/active.md
 
 # Note: settings.local.json is intentionally NOT tracked — it's for machine-local overrides.

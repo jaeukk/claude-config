@@ -61,3 +61,7 @@ directory or add it to `sys.path`, then `import` by module name.
   # vector-valued f -> r.covariance is the output covariance matrix
   # nonlinear cross-check:  monte_carlo_uncertainty(f, x, u, random_state=0)
   ```
+
+# Fable orchestration (toggle: `fable on|off|status`)
+
+@~/.claude/fable/active.md
