@@ -1,0 +1,6 @@
+interface:
+  display_name: "Orchestration"
+  short_description: "Route Claude and Codex with enforceable contracts"
+  default_prompt: "Use $orchestration to conduct this task with model-independent roles and scoped worker contracts."
+policy:
+  allow_implicit_invocation: true
