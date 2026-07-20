@@ -29,7 +29,7 @@
       "/home/jaeukk/.claude/agents"
     ]
   },
-  "model": "claude-fable-5",
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {

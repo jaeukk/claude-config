@@ -62,6 +62,16 @@ already carries it.
 Leave exactly **one blank line** between the end of a function and the next
 function's doc-comment; no blank line between a doc-comment and its function.
 
+**Never strip a documented parameter's name to silence `-Wunused-parameter`.**
+`-Wunused-parameter` is a `-Wextra` diagnostic, *not* part of `-Wall`, so an
+unused-but-named parameter does **not** warn under a normal `-Wall` build. Removing
+the name (`f(const T&)`) — or commenting it out (`f(const T& /*x*/)`) — breaks the
+Doxygen `\param x` match (Doxygen sees no parameter `x` and warns), so the name and
+its documentation must stay in sync. Keep the name whenever a `\param` documents it,
+and accept the `-Wextra`-only unused-parameter note as out of the normal-bar scope.
+Only drop a parameter name where nothing documents it (e.g. a fixed-signature
+callback lambda like the `IterateThroughNeighbors` visitor, which has no doc block).
+
 ```cpp
 /**
  * @brief Radial distribution function g(r) of a 3D point pattern.
