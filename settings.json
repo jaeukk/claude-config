@@ -31,19 +31,6 @@
   },
   "model": "sonnet",
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/fable/hooks/orchestration-gate.py",
-            "timeout": 10,
-            "statusMessage": "fable gate…"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
@@ -85,6 +72,17 @@
     "type": "command",
     "command": "/home/jaeukk/miniconda3/bin/python3 $HOME/.claude/hooks/statusline.py",
     "padding": 0
+  },
+  "enabledPlugins": {
+    "multi-agent-starter@multi-agent-starter": true
+  },
+  "extraKnownMarketplaces": {
+    "multi-agent-starter": {
+      "source": {
+        "source": "github",
+        "repo": "netwaif/multi-agent-starter"
+      }
+    }
   },
   "theme": "dark",
   "agentPushNotifEnabled": true
