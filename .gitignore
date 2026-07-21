@@ -11,7 +11,11 @@
 !/.gitignore
 !/README.md
 !/CLAUDE.md
-!/settings.json
+!/settings.base.json
+!/settings.machine.wsl.json
+!/settings.machine.windows.json
+!/scripts
+!/.gitattributes
 !/roo-to-claude.md
 !/skills
 !/agents

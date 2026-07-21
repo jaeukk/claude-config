@@ -1,0 +1,12 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "/home/jaeukk/miniconda3/bin/python3 $HOME/.claude/hooks/statusline.py",
+    "padding": 0
+  },
+  "permissions": {
+    "additionalDirectories": [
+      "/home/jaeukk/.claude/agents"
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "agentPushNotifEnabled": true,
+  "enabledPlugins": {
+    "multi-agent-starter@multi-agent-starter": true
+  },
+  "extraKnownMarketplaces": {
+    "multi-agent-starter": {
+      "source": {
+        "source": "github",
+        "repo": "netwaif/multi-agent-starter"
+      }
+    }
+  },
+  "theme": "dark",
+  "model": "sonnet",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/check-config-updates.sh",
+            "timeout": 15,
+            "statusMessage": "Checking for config updates…"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/notify-sound.sh",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/notify-on-question.sh",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "skipWorkflowUsageWarning": true
+}
