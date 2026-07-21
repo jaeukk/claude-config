@@ -27,6 +27,23 @@ survive moving between machines.
 
 Best practice: get authoritative fields from **CrossRef** (`https://api.crossref.org/works/<DOI>`) before building items, batch all items in one `saveItems` array, then **verify** with the read API (`GET /api/users/5872032/collections/<KEY>/items/top`). Creating a *collection* is NOT supported over the API — ask the user to make it in the Zotero UI.
 
+### Tagging (new vs. existing items)
+`saveItems` items carry a `tags:[{tag}]` array — set it at creation time (e.g. `{"tag":"w:raw-build"}`
+for the [[Wiki_Schema]] raw-build convention) and it just works, since the item doesn't exist yet.
+
+**Editing tags on an item that's already in the library is a different problem — there is
+no confirmed working write path**, as of 2026-07-16:
+- `PATCH`/`PUT /api/users/5872032/items/<KEY>` → `501 Method not implemented`
+- `POST` to the same endpoint → `400 "Endpoint does not support method"` (same as any other write)
+- Better BibTeX JSON-RPC (`/better-bibtex/json-rpc`) has no `item.tag.*` method (`rpc.discover`
+  isn't implemented either, so there's no way to enumerate what *is* available — tested by hand)
+- Re-`saveItems`-ing the same item to merge tags was **not attempted** — Zotero Connector
+  dedup behavior on re-save is translator-dependent and unverified; risks creating a duplicate
+  item in a live library. Don't try it without the user's explicit go-ahead.
+
+**Until a real path turns up: ask the user to add/edit tags on existing items by hand** in the
+Zotero desktop UI. Re-test the above periodically (Zotero and Connector versions change).
+
 ## Resolving the Obsidian vault path — DO NOT hardcode it
 
 The vault lives in Google Drive under the stable suffix **`My Drive/_WORKSPACE/20_Notes`**, but the

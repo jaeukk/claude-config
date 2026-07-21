@@ -14,7 +14,7 @@ pattern to a chaptered work.
 ## Inputs you expect
 - **Book identity:** a Zotero item key / title / author+year / DOI, **or** a direct PDF path.
 - **Output book root:** the folder for this book (e.g. `40_Resources/20_Books/<BookName>/`).
-  If not given, ask once; suggest `40_Resources/20_Books/<FirstAuthor>_<Year>_<ShortTitle>/`.
+  If not given, ask once; suggest `40_Resources/20_LongForms/10_Books/<FirstAuthor>_<ShortTitle>_<Year>/`.
 - **Scope:** the whole book, a **chapter range**, or a single chapter/section. Default to
   asking which, so you (or an orchestrator) can run **one chapter at a time**.
 - **Granularity:** section-level notes `x.0N` (default ~5 notes/chapter) plus a chapter
