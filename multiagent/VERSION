@@ -1,0 +1,4 @@
+package: multiagent-orchestration
+imported: 2026-07-21
+source: Google Drive _WORKSPACE/CLAUDE_desktop/_multiagent (+ policy dereferenced from C:\Users\김재욱\.multiagent\policy)
+canonical-home: ~/.claude/multiagent (this repo). Deployed copies (~/.multiagent, project _multiagent/) are generated consumers.

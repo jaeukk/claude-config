@@ -23,6 +23,7 @@
 !/hooks
 !/keybindings.json
 !/fable
+!/multiagent
 
 # fable: the on/off switch and its derived symlink are machine-local runtime state
 fable/state

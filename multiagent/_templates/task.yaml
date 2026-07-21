@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "task_id": "replace-me",
+  "status": "pending",
+  "conductor": {
+    "host": "claude-code",
+    "backend": "claude-frontier",
+    "lease_owner": "replace-with-session-id"
+  },
+  "target_repo": "C:/absolute/path/to/repository",
+  "write_scope": ["src/", "tests/"],
+  "roles_plan": ["implementer", "critic", "verifier"],
+  "approvals": {"user": []},
+  "dispatch": {"current_role": null, "active_workers": 0},
+  "author_family": null,
+  "direct_code_files": 0,
+  "created_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "updated_at": "YYYY-MM-DDTHH:MM:SSZ"
+}

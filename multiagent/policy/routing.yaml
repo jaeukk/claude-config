@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "defaults": {
+    "conductor": "conductor",
+    "single_conductor": true,
+    "recursive_orchestration": false,
+    "max_fanout": 8,
+    "require_task_contract": true,
+    "require_lease": true
+  },
+  "routes": [
+    {"when": "implementation_or_refactor", "role": "implementer"},
+    {"when": "independent_review", "role": "critic", "require_different_family": true},
+    {"when": "test_or_evidence", "role": "verifier", "require_different_family": true},
+    {"when": "independent_shards", "role": "bulk_worker", "fan_in": "conductor"},
+    {"when": "mechanical_lookup_or_command", "role": "runner"}
+  ],
+  "agent_aliases": {
+    "claude-main": "implementer",
+    "codex-main": "implementer",
+    "codex-critic": "critic"
+  },
+  "bulk": {
+    "shared_result_schema": "_templates/shard-result.json",
+    "retryable": ["transport", "timeout", "rate_limit"],
+    "non_retryable": ["invalid_input", "policy_denial", "deterministic_failure"],
+    "max_attempts": 2,
+    "silent_drop": false
+  }
+}

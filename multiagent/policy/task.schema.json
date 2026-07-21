@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/multiagent/task.schema.json",
+  "title": "Multi-agent task contract",
+  "type": "object",
+  "required": ["schema_version", "task_id", "status", "conductor", "target_repo", "write_scope", "roles_plan", "approvals", "dispatch"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "task_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+    "status": {"enum": ["pending", "active", "verifying", "complete", "blocked", "cancelled"]},
+    "conductor": {
+      "type": "object",
+      "required": ["host", "backend", "lease_owner"],
+      "properties": {
+        "host": {"const": "claude-code"},
+        "backend": {"const": "claude-frontier"},
+        "lease_owner": {"type": "string", "minLength": 1}
+      }
+    },
+    "target_repo": {"type": "string", "minLength": 1},
+    "write_scope": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "roles_plan": {"type": "array", "items": {"enum": ["implementer", "critic", "bulk_worker", "verifier", "runner"]}},
+    "approvals": {
+      "type": "object",
+      "required": ["user"],
+      "properties": {"user": {"type": "array", "items": {"type": "string"}}}
+    },
+    "dispatch": {
+      "type": "object",
+      "required": ["current_role", "active_workers"],
+      "properties": {
+        "current_role": {"type": ["string", "null"]},
+        "active_workers": {"type": "integer", "minimum": 0}
+      }
+    },
+    "author_family": {"enum": ["claude", "codex", null]},
+    "direct_code_files": {"type": "integer", "minimum": 0},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "conductor_may_approve": [
+    "read_only_worker_within_contract",
+    "scoped_worker_write_within_contract",
+    "retry_transport_timeout_or_rate_limit"
+  ],
+  "user_must_approve": [
+    "conductor_handoff",
+    "scope_expansion",
+    "destructive_action",
+    "external_side_effect",
+    "secret_or_credential_access",
+    "override_policy_denial"
+  ],
+  "direct_conductor_edit": {
+    "max_code_files": 2,
+    "requires_critic_review": true,
+    "shell_mutation_forbidden": true
+  }
+}

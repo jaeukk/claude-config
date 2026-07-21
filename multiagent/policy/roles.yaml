@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "roles": {
+    "conductor": {
+      "purpose": "Own planning, routing, approvals, lease, and final synthesis.",
+      "may_spawn": true,
+      "may_write": true,
+      "required_capabilities": ["planning", "routing"]
+    },
+    "implementer": {
+      "purpose": "Produce scoped changes or an applicable patch from an approved brief.",
+      "may_spawn": false,
+      "may_write": true,
+      "required_capabilities": ["implementation", "structured_result"]
+    },
+    "critic": {
+      "purpose": "Independently challenge correctness, scope, and design decisions.",
+      "may_spawn": false,
+      "may_write": false,
+      "required_capabilities": ["review", "structured_result"]
+    },
+    "bulk_worker": {
+      "purpose": "Process independent shards and return schema-compatible results.",
+      "may_spawn": false,
+      "may_write": false,
+      "required_capabilities": ["bulk", "structured_result"]
+    },
+    "verifier": {
+      "purpose": "Run verification and collect reproducible evidence independently.",
+      "may_spawn": false,
+      "may_write": false,
+      "required_capabilities": ["verification", "structured_result"]
+    },
+    "runner": {
+      "purpose": "Perform bounded mechanical searches, commands, and metadata collection.",
+      "may_spawn": false,
+      "may_write": false,
+      "required_capabilities": ["mechanical", "structured_result"]
+    }
+  }
+}

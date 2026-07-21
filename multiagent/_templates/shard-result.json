@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "task_id": "replace-me",
+  "shard_id": "replace-me",
+  "role": "bulk_worker",
+  "backend": "replace-me",
+  "status": "complete",
+  "attempt": 1,
+  "summary": "",
+  "evidence": [],
+  "artifacts": [],
+  "issues": [],
+  "retry_class": null
+}

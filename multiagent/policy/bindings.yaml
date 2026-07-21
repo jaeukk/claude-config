@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "bindings": {
+    "conductor": {
+      "mode": "session_assertion",
+      "candidates": [
+        {"backend": "claude-frontier", "effort": "high"}
+      ]
+    },
+    "implementer": {
+      "mode": "first_available",
+      "candidates": [
+        {"backend": "claude-core", "effort": "high"},
+        {"backend": "codex-standard", "effort": "high"}
+      ]
+    },
+    "critic": {
+      "mode": "different_family_from_author",
+      "candidates": [
+        {"backend": "codex-high", "effort": "high"},
+        {"backend": "claude-core", "effort": "high"}
+      ]
+    },
+    "bulk_worker": {
+      "mode": "pool",
+      "pool": [
+        {"backend": "claude-fast", "effort": "low"},
+        {"backend": "codex-low", "effort": "low"}
+      ]
+    },
+    "verifier": {
+      "mode": "different_family_from_author",
+      "candidates": [
+        {"backend": "codex-standard", "effort": "medium"},
+        {"backend": "claude-fast", "effort": "medium"}
+      ]
+    },
+    "runner": {
+      "mode": "first_available",
+      "candidates": [
+        {"backend": "claude-fast", "effort": "low"},
+        {"backend": "codex-low", "effort": "low"}
+      ]
+    }
+  }
+}
