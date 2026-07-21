@@ -21,7 +21,9 @@ dispatching work:
 - `policy/approvals.yaml`
 - the active `tasks/<task-id>/task.yaml`
 
-The machine-readable policy wins when it is stricter than prose. See
+The machine-readable policy wins when it is stricter than prose. If no project policy
+exists, use the global `~/.multiagent/policy` fallback. Keep task runtime files in a
+project installation unless the user explicitly chooses a global task root. See
 `references/policy-layout.md` for the portable fallback and task lifecycle.
 
 ## Conductor procedure
