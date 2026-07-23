@@ -9,14 +9,25 @@ Status JSON schema (subset we use):
   { "model": {"id", "display_name"},
     "transcript_path": "...",
     "cost": {"total_cost_usd", "total_lines_added", "total_lines_removed"},
-    "exceeds_200k_tokens": bool }
+    "context_window": {"context_window_size": int} }
 """
 import json
+import socket
 import sys
+from getpass import getuser
 
 
 def _ansi(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m"
+
+
+def _ps1_prefix(cwd: str) -> str:
+    """Render 'user@host:/path' in the same green/blue style as the shell PS1."""
+    user = getuser()
+    host = socket.gethostname().split(".")[0]
+    user_host = _ansi("01;32", f"{user}@{host}")
+    path = _ansi("01;34", cwd or "")
+    return f"{user_host}:{path}"
 
 
 def _human(n: int) -> str:
@@ -28,8 +39,11 @@ def _human(n: int) -> str:
     return str(n)
 
 
-def _context_limit(model_id: str, exceeds_200k: bool) -> int:
-    """Best-effort context window from the model id."""
+def _context_limit(data: dict, model_id: str) -> int:
+    """Context window size, read from the status JSON when available."""
+    size = (data.get("context_window") or {}).get("context_window_size")
+    if isinstance(size, int) and size > 0:
+        return size
     mid = (model_id or "").lower()
     if "[1m]" in mid or "1m" in mid:
         return 1_000_000
@@ -76,8 +90,10 @@ def main() -> None:
     cost = data.get("cost") or {}
     total_cost = cost.get("total_cost_usd") or 0.0
 
+    cwd = (data.get("workspace") or {}).get("current_dir") or data.get("cwd", "")
+
     usage = _latest_usage(data.get("transcript_path", ""))
-    parts = [_ansi("1;36", model_name)]  # bold cyan model name
+    parts = [_ps1_prefix(cwd), _ansi("1;36", model_name)]  # PS1 prefix, then bold cyan model name
 
     if usage:
         ctx = (
@@ -86,7 +102,7 @@ def main() -> None:
             + (usage.get("cache_creation_input_tokens") or 0)
         )
         out = usage.get("output_tokens") or 0
-        limit = _context_limit(model_id, bool(data.get("exceeds_200k_tokens")))
+        limit = _context_limit(data, model_id)
         pct = (ctx / limit * 100) if limit else 0.0
         # color the context fraction by how full it is
         color = "32" if pct < 50 else ("33" if pct < 80 else "31")

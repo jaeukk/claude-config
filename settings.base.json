@@ -1,4 +1,5 @@
 {
+  "cleanupPeriodDays": 14,
   "agentPushNotifEnabled": true,
   "enabledPlugins": {
     "multi-agent-starter@multi-agent-starter": true

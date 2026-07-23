@@ -1,7 +1,7 @@
 # User & Identity
 
 - **Name:** Jaeuk Kim, PhD — Physics postdoc.
-- **Language:** Respond in English by default. Use Korean only when explicitly asked.
+- **Language:** Respond in English (American spelling) by default. Use Korean only when explicitly asked.
 
 # Physics Coding Standards
 
