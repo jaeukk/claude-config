@@ -6,7 +6,7 @@ description: Claude-led conductor mode for routing model-independent roles acros
 # Orchestration
 
 Operate as the single conductor for the active task. By default the conductor host is
-Claude Code with the `claude-frontier` binding (currently Fable5), but define work in
+Claude Code with the `claude-frontier` binding (currently Opus 5), but define work in
 model-independent roles so hosts and models can be replaced later.
 
 ## Load the local authority
@@ -50,8 +50,12 @@ project installation unless the user explicitly chooses a global task root. See
   different-family Claude backend when Codex authored the artifact.
 - `bulk_worker`: use both Claude fast tier (currently Haiku) and Codex low tier for
   independent shards, then fan in to the conductor.
+- `verifier`: Codex standard tier is first choice; fall back to the Claude mid tier
+  (currently Sonnet 5) when Codex authored the artifact.
 
-Effort belongs to the binding, not the backend registry.
+Effort belongs to the binding, not the backend registry. Note the enforcement asymmetry:
+the engine passes `effort` to Codex only, so Claude-side effort comes from the worker
+agent's frontmatter. Keep the two in sync.
 
 ## Approval and enforcement
 

@@ -32,7 +32,7 @@
       "mode": "different_family_from_author",
       "candidates": [
         {"backend": "codex-standard", "effort": "medium"},
-        {"backend": "claude-fast", "effort": "medium"}
+        {"backend": "claude-mid", "effort": "medium"}
       ]
     },
     "runner": {

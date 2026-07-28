@@ -5,6 +5,11 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+// Must match the claude-frontier model in policy/backends.yaml: the conductor
+// binding is a session assertion, so the installed default has to be the model
+// the conductor actually runs on.
+const CONDUCTOR_MODEL = "claude-opus-5";
+
 function parseArguments(argumentsList) {
   const options = { canonical: "", dryRun: false };
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -67,7 +72,7 @@ function ensureLink(linkPath, target, actions, dryRun) {
 function migrateSettings(settingsPath, actions, dryRun) {
   const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   const legacyGate = settings.hooks?.PreToolUse;
-  const changed = settings.model !== "claude-fable-5" || legacyGate !== undefined;
+  const changed = settings.model !== CONDUCTOR_MODEL || legacyGate !== undefined;
   if (!changed) {
     return;
   }
@@ -78,11 +83,11 @@ function migrateSettings(settingsPath, actions, dryRun) {
       fs.copyFileSync(settingsPath, backup);
     }
   }
-  settings.model = "claude-fable-5";
+  settings.model = CONDUCTOR_MODEL;
   if (settings.hooks) {
     delete settings.hooks.PreToolUse;
   }
-  actions.push({ action: "update", path: settingsPath, detail: "set Fable 5 and remove legacy PreToolUse gate" });
+  actions.push({ action: "update", path: settingsPath, detail: `set ${CONDUCTOR_MODEL} and remove legacy PreToolUse gate` });
   if (!dryRun) {
     fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
   }

@@ -1,7 +1,7 @@
 # Claude-led multi-agent architecture
 
 Claude Code is the default application and the only conductor for an active task. The
-default conductor binding is `claude-frontier` (`Fable5`). Codex participates through
+default conductor binding is `claude-frontier` (`Opus 5`). Codex participates through
 bounded worker calls and may become conductor only after a user-approved, recorded
 handoff.
 

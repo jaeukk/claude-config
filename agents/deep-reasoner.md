@@ -1,7 +1,7 @@
 ---
 name: deep-reasoner
-description: Deep-reasoning specialist (Opus 4.8, max effort) for the hardest judgment calls — architecture/design decisions, root-cause analysis of stubborn bugs, tricky algorithms and math derivations. Returns analysis, decisions, and concrete step-by-step instructions for an executor; does NOT mass-implement code itself. Use when a problem needs sustained hard thinking, not typing.
-model: claude-opus-4-8
+description: Deep-reasoning specialist (Opus 5, max effort) for the hardest judgment calls — architecture/design decisions, root-cause analysis of stubborn bugs, tricky algorithms and math derivations. Returns analysis, decisions, and concrete step-by-step instructions for an executor; does NOT mass-implement code itself. Use when a problem needs sustained hard thinking, not typing.
+model: claude-opus-5
 effort: max
 ---
 

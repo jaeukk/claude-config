@@ -2,7 +2,7 @@
 
 ## Target state
 
-Claude Code is the default application and Fable5 is the asserted conductor. One task
+Claude Code is the default application and Opus 5 is the asserted conductor. One task
 has one conductor and one lease. All delegated work uses model-independent roles;
 bindings select replaceable Claude or Codex backends. `/orchestration` and its policy
 are globally canonical under `~/.multiagent/`, with project-local task runtime state.
@@ -59,12 +59,15 @@ their originals. The migration is reproducible with
 
 | Role | Binding |
 |---|---|
-| `conductor` | Claude frontier / Fable5, high, session assertion |
+| `conductor` | Claude frontier / Opus 5, high, session assertion |
 | `implementer` | Claude core high; Codex standard high alternative |
 | `critic` | Codex high / Sol high; different-family Claude fallback |
 | `bulk_worker` | Claude fast / Haiku low and Codex low in one shard pool |
-| `verifier` | Different family from the implementer |
+| `verifier` | Different family from the implementer; Codex standard, Claude mid / Sonnet 5 fallback |
 | `runner` | Claude fast or Codex low |
+
+`claude-ceiling` (Fable 5) is registered but bound to no role. It records the escalation
+tier above `claude-frontier`; promoting it is a one-line `bindings.yaml` change.
 
 Codex direct writes remain disabled. Codex implementers return applicable patches in a
 read-only sandbox until a future mediated-write adapter is separately threat-modeled,
