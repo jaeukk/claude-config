@@ -28,6 +28,14 @@ If the handwriting is illegible or ambiguous, transcribe your best reading and f
 ## Equations: transcribe in full — never skip detail
 Math is the highest-value content. Read every equation slowly and reproduce **all** of it; do
 not summarize, compress, or jump to the final result.
+- **Number equations with `\tag{}`, never `\eqno`** — `$$ \nabla\times\mathbf{E} = -\partial_t
+  \mathbf{B} \tag{2.7} $$`, keeping whatever number the page shows. `\eqno` is plain TeX, does
+  not render in Obsidian/MathJax, and silently corrupts the equation it labels.
+- **A topic can end mid-page.** When you split by heading, the text above a mid-page break still
+  belongs to the previous topic and the text below to the next — decide per paragraph, not per
+  page, or the shared page gets dropped from both notes. Note the boundary in your report.
+- **Drop page furniture** — bare page numbers, date stamps in the margin, notebook rules and
+  printed folios are not content.
 - **Capture every detail:** each term, subscript/superscript, index, summation/integration limit,
   prime, hat/bar/tilde/vector mark, normalization and overlap factor, $i$/phase, and constant. A
   dropped subscript, limit, or factor changes the meaning.

@@ -25,6 +25,9 @@
 ├── [reviewer] 산출물 리뷰 / 비판적 검증?
 │   └── codex-critic   (Codex의 주된 역할)
 │
+├── [document-reading] few-page 문서(PDF·페이지 이미지) 읽기 · 사실 추출 · 발췌?
+│   └── gemini-reader  ← **우선**. 실패·부적합 시 codex-main → claude-main
+│
 ├── [multimodal] 이미지 · 스크린샷 분석 / 50페이지+ 문서 / 제3자 시각의 검토?
 │   └── gemini
 │
@@ -123,8 +126,87 @@ decision tree로 "누구를" 고른 뒤, "어떻게 엮을지" 고른다. **단�
   백엔드 = Antigravity `agy` CLI(헤드리스), 기본 `gemini-3.1-pro-high`, 폴백 = api(`adapters/gemini_api.sh`). 폐기: `mcp__gemini-pro__*`·`mcp__gemini__*` 프록시 브리지.
 - **소스·다중파일 검토는 인라인 필수**: 소스 코드 발굴·검토를 시킬 땐 **디렉토리나 다수 파일 순회를 시키지 말 것** — agy 헤드리스가 300s 타임아웃(exit 124)으로 실패한다(2026-07-04 실측). 필요한 스니펫을 orchestrator가 brief 본문에 **인라인**하고 "파일 열지 말 것"을 명시하라(동일 과제 인라인 재호출 실측 = 27s exit 0). 단일 이미지/PDF 경로 참조는 예외(~26s 정상). 시간 제한 작업에서 gemini에 의존하기 전 경량 스모크 1회로 가용성부터 확인.
 - **폴백 조건**: api 폴백은 `GEMINI_API_KEY` 필요 — 미설정이면 디스패처가 호출 시작 시 경고를 내고, primary 실패 시 폴백 없이 실패한다(실패 사유는 envelope `stderr_sanitized`에 남음).
-- **비용**: agy 쿼터 소모 → 승인 필요. 빠른 경로는 backends에서 `model`을 flash/pro-low로.
+- **비용**: agy 쿼터 소모 → 승인 필요. 빠른 경로는 `backends.json`의 `args_template`에서 `--model`을 flash 계열(`gemini-3.6-flash-low` 등)이나 `gemini-3.1-pro-low`로.
 - **파일 쓰기**: ❌ MCP 응답을 Orchestrator가 받아 기록
+
+### gemini-reader
+
+- **슬롯**: document-reading (**기본값 — 문서 읽기는 여기서 시작한다**)
+- **용도**: few-page 문서(readable PDF·페이지 이미지) 읽기, 사실·수치·수식 추출, 발췌
+- **모델**: `gemini-3.6-flash-low` (agy). `-medium`은 토큰·지연 2배에 정확도 이득 없어 배제
+- **호출 명령**: `bash _shared/adapters/call_worker.sh gemini-reader <brief-file>`
+  - **선행 조건: `jq`.** 미설치 시 디스패처가 모델 호출 **이전에** exit 5(`call_worker: jq 필요`)로
+    죽는다. 2026-07-31 Sol 감사에서 미설치가 발각되어 `conda install -c conda-forge jq`로 해소
+    (jq-1.8.2). **end-to-end 실증 완료**: `TARGET_REPO=<복사본>` + brief 1문항 →
+    `status: ok, exit_code: 0, model: gemini-3.6-flash-low, 25s, fallback_used: false`, 정답 반환.
+  - ⛔ **`TARGET_REPO`는 반드시 "읽을 문서만 담은 일회용 복사 디렉토리"로 지정할 것.**
+    원본 Zotero 저장소·vault·repo를 직접 가리키지 말 것. 이유: 헤드리스 agy가 파일을 읽으려면
+    `--dangerously-skip-permissions`가 **불가피**한데(아래), 이 플래그는 쓰기 도구까지 자동
+    승인하며 `--sandbox`는 터미널 제한일 뿐 **쓰기 차단이 아니다**. `write_policy: none`도
+    선언일 뿐 `call_worker.sh`가 집행하지 않는다. 따라서 실질 경계는 **cwd를 버려도 되는
+    복사본으로 두는 것**뿐이다.
+  - `TARGET_REPO` 미설정 시 `$ROOT`로 폴백하므로(디스패처 기본값) **반드시 명시**할 것 —
+    미설정은 설치 루트 전체를 워크스페이스로 여는 결과가 된다.
+  - brief에서는 **파일명만** 참조한다(절대경로는 워크스페이스 밖일 수 있다)
+- **권한 플래그 실측(2026-07-31)**: `--sandbox` 단독 → 3/3 실패, `--sandbox --mode plan` →
+  3/3 실패(둘 다 `"command" permission ... headless mode cannot prompt`),
+  `--sandbox --dangerously-skip-permissions` → 3/3 성공. **안전한 중간항이 없다**는 것이 실측
+  결론이므로, 위험은 플래그가 아니라 cwd 격리로 억제해야 한다.
+- **배정 근거**: 2026-07-31 실측 48콜 — 정확도는 최상위 arm과 **동등**(천장효과로 변별 불가)이고,
+  결정적 이유는 **Claude·Codex 주간 한도를 소모하지 않는다**는 쿼터 경제다(agy 자체 쿼터는
+  소모하므로 "0 소모"가 아니다). 성능 우위 주장이 아님. 상세는 `capability-profile.md`
+- **비용**: agy(무료 계정) 쿼터만 소모 → Claude·Codex 주간 한도에 영향 없음. 그래도 승인 대상
+- **파일 쓰기**: ❌ envelope를 Orchestrator가 받아 기록
+- **한계**: 문서읽기 외 과제는 이 슬롯이 아니다. 50페이지+ 대용량·제3자 검토는 `gemini`(pro-high)
+
+### gemini-raw-build (다중 섹션 문서 → 노트 배치 경로)
+
+`gemini-reader`가 **1콜 = 1질의**라면, 이쪽은 **1잡 = N섹션**이다. 책·장문 문서를 섹션 단위로
+끊어 읽어 노트 초안을 만든다. `tasks/landau-raw-ingest/run_sections.py`(Landau §1–10, 37쪽,
+Claude·Codex 주간 0%p)의 정형화.
+
+- **드라이버**: `python3 _shared/adapters/gemini_raw_build.py <job.json>`
+  (`call_worker.sh` 경유가 아니다 — 섹션 루프·재시도·usage 원장이 필요해 전용 드라이버를 쓴다)
+- **읽기 규칙의 정본**: `20_Notes/_shared/contracts/document-note.md`. 드라이버는 이 파일의
+  `<!-- END OF CONTRACT -->` **위쪽만** 프롬프트에 인라인한다(agy는 MCP도 vault 접근도 없다).
+  ⛔ **읽기·추출 규칙을 이 스크립트나 agent 정의에 다시 쓰지 말 것** — 계약 파일만 고친다.
+- **job.json 필드**
+
+  | 키 | 뜻 |
+  |---|---|
+  | `document` | 프롬프트에 들어갈 문서 식별 문자열 |
+  | `pdf` (선택) | 원본 PDF. 주면 페이지를 직접 렌더한다 |
+  | `pages_dir` | `p<인쇄쪽>.png`의 위치 (렌더 결과 또는 기존 이미지) |
+  | `page_offset` | `pdf_page = printed_page + offset` |
+  | `sections` | `{number, title, start}` 배열 — **끝쪽은 주지 않는다** |
+  | `end_page` | 마지막 섹션이 끝나는 인쇄 쪽 |
+  | `work_dir` | 섹션별 일회용 cwd의 부모 |
+  | `out_dir` | `s<NN>.md` 출력 |
+  | `contract`, `model`, `dpi`, `timeout` | 계약 경로 / 기본 `gemini-3.6-flash-low` / 200 / 900 |
+
+- **섹션 끝쪽을 받지 않는 이유**: 드라이버가 "다음 섹션의 시작 쪽"까지로 범위를 잡아 **한 쪽씩
+  겹치게** 만든다. 제목 위치만으로 끊으면 공유 페이지가 **양쪽 노트에서 모두 사라진다** —
+  앞 섹션의 끝 뒤이면서 뒤 섹션의 시작 앞이기 때문. 실제로 Landau §1의 (1.5)–(1.8)이 이렇게
+  사라졌다. 겹침은 계약의 "문단 단위로 판단하고 경계를 보고하라"와 짝을 이룬다.
+- **자기보고**: 계약이 노트 끝에 `BOUNDARY:` / `EQUATIONS:` / `ILLEGIBLE:` 3줄을 요구한다.
+  드라이버가 **말미 블록만** 떼어내 원장에 넣는다(본문 어디서나 지우면 탄성론 노트의
+  `BOUNDARY: u=0 at x=0` 같은 실제 경계조건이 조용히 삭제된다). 미보고는 `(not reported)`로
+  **가시화**한다. 3줄이 다 있으면 **생성이 끝까지 갔다는 증거**이므로 문장부호 휴리스틱보다 우선한다.
+- **재시도 분류**: `truncated`·`empty`만 재시도(최대 3회). `refusal`은 **재시도하지 않는다** —
+  가드레일은 불안정한 네트워크가 아니다. 사람이 판단할 일로 보고하고 끝낸다.
+  refusal 판정은 1인칭 거절 문구로 한정한다 — 맨 단어 `copyright`는 쓰지 않는다(저작권을
+  *다루는* 노트가 거절로 오인되면 재시도조차 되지 않는다).
+- ⛔ **`ok`만 `out_dir`에 쓴다.** refusal·truncated는 `out_dir/rejected/s<NN>.try<N>.md`로
+  격리하고, 하나라도 남으면 **exit 1**. 이유: 거절 응답은 대개 *유창한 요약*이라 노트 자리에
+  놓이면 정상 노트와 구별되지 않는다(landau §2가 정확히 이 사례). 실패본을 버리지 않고
+  남기는 이유는 진단에 본문이 필요하기 때문 — §7이 페이지를 읽기도 전에 거절했다는 사실은
+  토큰 수와 본문 내용에서 드러났다.
+- ⛔ **cwd 격리**: 섹션마다 해당 페이지 이미지만 복사한 폐기용 디렉토리를 만들어 그곳을 cwd로
+  준다. `gemini-reader`의 `TARGET_REPO` 규칙과 같은 이유 —
+  `--dangerously-skip-permissions`가 불가피하고 `--sandbox`는 쓰기 차단이 아니다.
+- **한계 (분리의 정의이지 결함이 아님)**: 이 경로는 Zotero·vault에 **도달할 수 없다**. citekey→PDF
+  해석, frontmatter, wikilink, figure 캡처, 파일 배치는 **Orchestrator가 전후로 감싼다**.
+  계약이 담당하는 것은 "읽기"뿐이다.
 
 ## 모델 정책
 
@@ -135,7 +217,7 @@ decision tree로 "누구를" 고른 뒤, "어떻게 엮을지" 고른다. **단�
 - **codex-main / codex-critic**: 사용자의 `~/.codex/config.toml` 기본값이 자동 적용된다 (현재 예: 최신 gpt + reasoning effort `high`). config.toml이 정본이라 여기에 버전을 핀하지 않는다. MCP 호출 시 `model` 파라미터를 비워두면 config 기본값 사용.
   - 가벼운 작업은 `profile: lightweight`로 전환 가능 (config.toml의 가벼운 모델 프로필)
   - 작업 성격상 다른 모델이 필요하면 brief.md에 명시
-- **gemini**: 백엔드 = Antigravity **`agy` CLI**(`_shared/backends.json` 정본, 디스패처 `call_worker.sh`). 기본 `gemini-3.1-pro-high`(agy에선 정상 — 옛 프록시 `400 INVALID_ARGUMENT`은 비해당), 빠른 경로 `gemini-3-flash`/`pro-low`, 폴백 `api`. 옛 `mcp__gemini-pro__*` 프록시 브리지·CLI 래퍼 `mcp__gemini__*`는 **폐기**. agy 모델은 전역·계정단위(`/model`)라 per-call 핀 불가 → gemini 전용 전역을 pro-high로 둔다. 근거: `_shared/learnings.md` [2026-06-02] · `design-basis.md` D4.
+- **gemini**: 백엔드 = Antigravity **`agy` CLI**(`_shared/backends.json` 정본, 디스패처 `call_worker.sh`). 기본 `gemini-3.1-pro-high`(agy에선 정상 — 옛 프록시 `400 INVALID_ARGUMENT`은 비해당), 빠른 경로 `gemini-3.6-flash-{high,medium,low}`/`gemini-3.1-pro-low`, 폴백 `api`. 옛 `mcp__gemini-pro__*` 프록시 브리지·CLI 래퍼 `mcp__gemini__*`는 **폐기**. **per-call 모델 핀 가능**(2026-07-31 정정) — agy 1.1.8은 `--model`·`--effort low|medium|high`를 인자로 받고 `call_worker.sh`는 `@brief`/`@brief_content` 외 인자를 그대로 통과시키므로, `args_template`에 `--model <id>`를 넣으면 계정 전역 `/model`과 무관하게 고정된다. 그 이전의 "전역이라 per-call 핀 불가" 기술은 agy 구버전 기준이었다. **agy 경유 비-Gemini 모델(`claude-*`·`gpt-oss-*`) 사용 금지** — family가 오표기되어 critic/verifier의 different-family 독립성이 조용히 무너진다(System B `policy_engine.py`가 이 조합을 error로 차단). 사용 가능 모델 전체 목록은 `agy models`. 근거: `_shared/learnings.md` [2026-06-02] · `design-basis.md` D4.
 
 이 정책은 사용자별 config에 따라 달라질 수 있다 — starter clone 받은 학습자는 본인의 `~/.codex/config.toml` 기본값을 한 번 확인하고 자기 환경에 맞게 조정한다.
 

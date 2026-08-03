@@ -48,7 +48,7 @@
       "brief_mode": "content",
       "cli": {
         "command": "agy",
-        "args_template": ["--prompt", "@brief_content"],
+        "args_template": ["--model", "gemini-3.1-pro-high", "--sandbox", "--dangerously-skip-permissions", "--prompt", "@brief_content"],
         "non_interactive": { "stdin": "/dev/null", "no_tty": true, "on_permission_prompt": "fail" }
       },
       "cwd_policy": "isolated_tmp",
@@ -64,6 +64,21 @@
                    "brief_pass": "arg1", "retry": { "max": 2, "backoff_s": 2 } }
         }
       ]
+    },
+    "gemini-reader": {
+      "model": "gemini-3.6-flash-low",
+      "call_type": "cli",
+      "brief_mode": "content",
+      "cli": {
+        "command": "agy",
+        "args_template": ["--model", "gemini-3.6-flash-low", "--add-dir", ".", "--sandbox", "--dangerously-skip-permissions", "--prompt", "@brief_content"],
+        "non_interactive": { "stdin": "/dev/null", "no_tty": true, "on_permission_prompt": "fail" }
+      },
+      "cwd_policy": "target",
+      "write_policy": "none",
+      "approval_class": "worker",
+      "result_capture": "envelope",
+      "timeout": 300
     }
   }
 }

@@ -19,6 +19,10 @@ from typing import Any
 
 POLICY_FILES = ("roles.yaml", "bindings.yaml", "backends.yaml", "routing.yaml", "approvals.yaml")
 VALID_EFFORTS = {"low", "medium", "high"}
+KNOWN_FAMILIES = {"claude", "codex", "gemini"}
+#: A real Gemini model id, e.g. ``gemini-3.6-flash-low``. Anchored so that a
+#: vendor name smuggled after the prefix (``gemini-claude-sonnet-4-6``) fails.
+GEMINI_MODEL = re.compile(r"gemini-\d[\w.]*(?:-[a-z]+)*")
 CODE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".jsx",
     ".kt", ".m", ".php", ".py", ".rb", ".rs", ".scala", ".sh", ".swift", ".ts", ".tsx",
@@ -164,11 +168,25 @@ def validate_policy(bundle: PolicyBundle) -> tuple[list[str], list[str]]:
         for item in bundle.bindings.get("bulk_worker", {}).get("pool", [])
         if item.get("backend") in bundle.backends
     }
-    if bulk_families != {"claude", "codex"}:
+    if not {"claude", "codex"} <= bulk_families:
         errors.append("bulk_worker pool must include Claude and Codex families")
     for alias, backend in bundle.backends.items():
         if backend.get("host") == "codex" and not backend.get("writes_mediated"):
             warnings.append(f"{alias} is intentionally read-only until mediated writes are validated")
+        if backend.get("family") not in KNOWN_FAMILIES:
+            errors.append(f"{alias} declares unknown family {backend.get('family')!r}")
+        # agy fronts several vendors, so its declared family cannot be inferred from the
+        # host. Require both the family and a genuine Gemini model id: a bare "gemini-"
+        # prefix check would accept "gemini-claude-sonnet-4-6".
+        if backend.get("host") == "agy" and (
+            backend.get("family") != "gemini"
+            or not GEMINI_MODEL.fullmatch(str(backend.get("model", "")))
+        ):
+            errors.append(
+                f"{alias} must declare family 'gemini' and a gemini-<version> model; "
+                "agy also serves other vendors, so a mismatch here silently defeats "
+                "different-family independence"
+            )
     return errors, warnings
 
 
@@ -195,6 +213,15 @@ def resolve_binding(
     if binding is None:
         return Decision(False, f"unknown role: {role}")
     candidates = binding.get("candidates", binding.get("pool", []))
+    # Fail closed on independence: a missing or misspelled author_family would
+    # otherwise match no candidate's family and silently return the first one,
+    # which is how a Codex artifact ends up "independently" reviewed by Codex.
+    if binding.get("mode") == "different_family_from_author" and author_family not in KNOWN_FAMILIES:
+        return Decision(
+            False,
+            f"{role} binds different_family_from_author but author_family is "
+            f"{author_family!r}; declare one of {sorted(KNOWN_FAMILIES)}",
+        )
     for candidate in candidates:
         backend = bundle.backends[candidate["backend"]]
         family = backend["family"]
@@ -238,6 +265,13 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
     unknown_roles = sorted(set(task.get("roles_plan", [])) - (set(bundle.roles) - {"conductor"}))
     if unknown_roles:
         errors.append(f"roles_plan contains unknown roles: {unknown_roles}")
+    planned = task.get("roles_plan", [])
+    if isinstance(planned, list) and ({"critic", "verifier"} & set(planned)):
+        if task.get("author_family") not in KNOWN_FAMILIES:
+            errors.append(
+                "tasks planning critic or verifier must declare author_family as one of "
+                f"{sorted(KNOWN_FAMILIES)}; got {task.get('author_family')!r}"
+            )
     dispatch = task.get("dispatch", {})
     if not isinstance(dispatch.get("active_workers"), int) or dispatch.get("active_workers", -1) < 0:
         errors.append("dispatch.active_workers must be a non-negative integer")
@@ -458,6 +492,13 @@ def self_test(root: Path) -> Decision:
         return Decision(False, "policy validation failed", {"errors": errors, "warnings": warnings})
     critic_for_claude = resolve_binding(bundle, "critic", author_family="claude")
     critic_for_codex = resolve_binding(bundle, "critic", author_family="codex")
+    # An undeclared or misspelled author must not resolve at all. Without this,
+    # the family filter matches nothing and the first candidate is returned --
+    # which silently lets a family review its own artifact.
+    for role in ("critic", "verifier"):
+        for bad in (None, "", "cluade", "gemini-flash"):
+            if resolve_binding(bundle, role, author_family=bad).allowed:
+                return Decision(False, f"{role} resolved with undeclared author_family {bad!r}")
     if critic_for_claude.details is None or critic_for_claude.details["family"] != "codex":
         return Decision(False, "critic independence failed for Claude author")
     if critic_for_codex.details is None or critic_for_codex.details["family"] != "claude":
@@ -508,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
     validate_task_parser.add_argument("--task", type=Path, required=True)
     resolve_parser = subparsers.add_parser("resolve")
     resolve_parser.add_argument("--role", required=True)
-    resolve_parser.add_argument("--author-family", choices=("claude", "codex"))
+    resolve_parser.add_argument("--author-family", choices=("claude", "codex", "gemini"))
     authorize_parser = subparsers.add_parser("authorize")
     authorize_parser.add_argument("--task", type=Path, required=True)
     authorize_parser.add_argument("--action", required=True, help="JSON object")

@@ -27,6 +27,28 @@ returns a patch; direct Codex writes remain disabled while `writes_mediated` is 
 The upstream starter remains under `_shared/` and `_templates/`. This overlay is the
 local authority when it is stricter than the upstream prose.
 
+## Hosts and families
+
+Three hosts serve workers: `claude-code`, `codex`, and `agy` (the Antigravity CLI), mapping
+to families `claude`, `codex`, and `gemini`. The third family is not redundancy for its own
+sake — `critic` and `verifier` bind with `different_family_from_author`, so a two-family
+registry leaves exactly one eligible candidate per role and one vendor outage halts
+independent review.
+
+This is availability of a *choice*, not automatic failover: `resolve_binding` returns the
+first eligible candidate without probing health, so the third-ranked Gemini candidate is
+never selected on the normal path and must be chosen deliberately during an outage.
+`agy` also has no dispatcher in the engine — `dispatch_codex` is the only one — so its
+declared capabilities presuppose execution through System A's `call_worker.sh`, and the
+`effort` recorded in its bindings is declarative only.
+
+`agy` backends must run Gemini models. The CLI also serves `claude-*` and `gpt-oss-*`
+models; registering one of those under `family: gemini` would misreport the vendor and
+defeat the independence check without raising an error, so `validate_policy` rejects any
+`host: agy` backend whose model does not start with `gemini-`. `agy` is read-only
+(`write_mode: result-only`) and, unlike Codex, has no dispatch path in the engine yet —
+System A's `_shared/adapters/call_worker.sh` remains its dispatcher.
+
 ## Global policy home
 
 The canonical policy and `orchestration` skill live in the host-global

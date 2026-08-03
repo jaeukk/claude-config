@@ -12,6 +12,7 @@ Status JSON schema (subset we use):
     "context_window": {"context_window_size": int} }
 """
 import json
+import os
 import socket
 import sys
 from getpass import getuser
@@ -37,6 +38,22 @@ def _human(n: int) -> str:
     if n >= 1_000:
         return f"{n / 1_000:.1f}k"
     return str(n)
+
+
+def _ponytail_mode() -> str:
+    """Active ponytail level from its flag file; '' when off, unset, or unreadable.
+
+    Bounded read + allowlist: the file is written by a third-party plugin hook, so
+    anything unexpected (ANSI escapes, a huge blob, bad UTF-8) must not reach the
+    status line. 'off' deliberately renders no badge.
+    """
+    claude_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    try:
+        with open(os.path.join(claude_dir, ".ponytail-active"), encoding="utf-8") as fh:
+            mode = fh.read(16).strip().lower()
+    except (OSError, ValueError):  # ValueError covers UnicodeDecodeError
+        return ""
+    return mode if mode in ("lite", "full", "ultra") else ""
 
 
 def _context_limit(data: dict, model_id: str) -> int:
@@ -109,6 +126,10 @@ def main() -> None:
         ctx_str = f"ctx {_human(ctx)}/{_human(limit)} ({pct:.0f}%)"
         parts.append(_ansi(color, ctx_str))
         parts.append(_ansi("90", f"out {_human(out)}"))
+
+    mode = _ponytail_mode()
+    if mode:
+        parts.append(_ansi("33", f"pony:{mode}"))
 
     parts.append(_ansi("90", f"${total_cost:.4f}"))
 

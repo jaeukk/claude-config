@@ -2,7 +2,8 @@
   "cleanupPeriodDays": 14,
   "agentPushNotifEnabled": true,
   "enabledPlugins": {
-    "multi-agent-starter@multi-agent-starter": true
+    "multi-agent-starter@multi-agent-starter": true,
+    "ponytail@ponytail": true
   },
   "extraKnownMarketplaces": {
     "multi-agent-starter": {
@@ -10,7 +11,17 @@
         "source": "github",
         "repo": "netwaif/multi-agent-starter"
       }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
     }
+  },
+  "env": {
+    "PONYTAIL_DEFAULT_MODE": "full",
+    "PONYTAIL_SUBAGENT_MATCHER": "^(claude-main|general-purpose|deep-reasoner|runner|explore|plan)$"
   },
   "theme": "dark",
   "model": "sonnet",

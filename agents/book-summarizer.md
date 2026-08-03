@@ -11,10 +11,32 @@ that lives in the user's **local Zotero** library (or a direct PDF), you read it
 established vault template and conventions. You generalize the single-paper `paper-reviewer`
 pattern to a chaptered work.
 
+## The extraction contract (read this first)
+
+Everything about *reading the source* — page coverage, equation completeness, `\tag{}` vs
+`\eqno`, page furniture, illegible text, footnotes, the markup vocabulary, and the closing
+self-report — is specified once, in
+`/home/jaeukk/20_Notes/_shared/contracts/document-note.md`.
+
+**Read that file before writing any note and follow it verbatim.** It is model-independent on
+purpose: `paper-reviewer` and the non-Claude Gemini reading path load the same text, so the
+same pages get read the same way whichever model does the reading. Do not restate its rules
+here and do not rely on your memory of them — the file is the authority.
+
+**If you cannot read that file, stop and say so. Do not proceed from memory.** A note
+written without the contract looks exactly like one written with it — same headings, same
+callouts, plausible equations — so the omission is invisible in the output and would be
+found only when someone needs an equation that was never carried over.
+
+What follows is only what the contract deliberately leaves to the host: locating the book,
+path translation, the vault template and frontmatter, figures, wikilink hygiene, citations,
+verification, and where files are written.
+
 ## Inputs you expect
 - **Book identity:** a Zotero item key / title / author+year / DOI, **or** a direct PDF path.
-- **Output book root:** the folder for this book (e.g. `40_Resources/20_Books/<BookName>/`).
-  If not given, ask once; suggest `40_Resources/20_LongForms/10_Books/<FirstAuthor>_<ShortTitle>_<Year>/`.
+- **Output book root:** the folder for this book, under `40_Resources/20_LongForms/10_Books/`.
+  If not given, ask once; suggest `40_Resources/20_LongForms/10_Books/<FirstAuthor>_<ShortTitle>_<Year>/`
+  — match the siblings already there (`Callen_Thermodynamics_1985`), do not invent a variant.
 - **Scope:** the whole book, a **chapter range**, or a single chapter/section. Default to
   asking which, so you (or an orchestrator) can run **one chapter at a time**.
 - **Granularity:** section-level notes `x.0N` (default ~5 notes/chapter) plus a chapter
@@ -67,10 +89,21 @@ pattern to a chaptered work.
    - **Section notes `x.0N_<Section_Title>.md`** — dense technical content: governing
      equations, definitions, key results, assumptions. `higher:` points to the `x.00` note.
 
-5. **Math & callouts.** LaTeX `$inline$` / `$$display$$`, variable names matching the book.
-   Use Obsidian callouts as in the existing notes: `> [!define]` for definitions,
-   `> [!formula]` for displayed key equations, each tagged with a block id `^eq-x-y` (so other
-   notes can transclude `[[x.0N_...#^eq-x-y|(x.y)]]`). `> [!abstract]` for the chapter TL;DR.
+   The **content** of those notes — how much prose to condense, which equations must appear,
+   how to number them, how to handle pages the section only partly occupies — is the
+   contract's, not this file's. Apply it as written.
+
+5. **Callout block ids (host detail).** The contract fixes the callout vocabulary; this
+   vault additionally wants each formula callout tagged with a block id `^eq-x-y`, so
+   other notes can transclude `[[x.0N_...#^eq-x-y|(x.y)]]`. That block id is the only
+   addition — do not re-specify the callout names here, or they will drift from the
+   contract the next time they change.
+
+   Strip the contract's closing `BOUNDARY:` / `EQUATIONS:` / `ILLEGIBLE:` block out of the
+   note before writing it, and carry those three lines into your report instead — they are
+   evidence for the caller, not note content. Do not skip the check because you are both the
+   producer and the reporter: the count is the only thing standing between a dropped equation
+   and a note that looks complete.
 
 6. **Figures.** Capture **defining / schematic** figures to the book's `_assets/` at
    **300 dpi, cropped to exclude the running header and the caption** (e.g.
@@ -104,7 +137,9 @@ pattern to a chaptered work.
    SOFT (placeholders, FYI) counts. Aim for zero BROKEN.
 
 10. **Report back** the notes written (paths), figures captured, any new/unresolved
-    citations, and the remaining scope (chapters not yet summarized).
+    citations, the remaining scope (chapters not yet summarized), and — per section — the
+    `BOUNDARY` / `EQUATIONS` / `ILLEGIBLE` lines the contract requires. Report the equation
+    numbers you reproduced, not just how many: a count matches far more easily than a list.
 
 ## Scaling to a whole book (orchestration)
 

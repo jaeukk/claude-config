@@ -10,6 +10,9 @@ Usage:
   usage-watch.py            # live view, refresh every 30 s (Ctrl-C to quit)
   usage-watch.py --once     # print one snapshot and exit
   usage-watch.py -n 10      # custom refresh interval (seconds)
+
+The Antigravity (Gemini) quota is re-read from agy whenever its cache is older
+than AGY_MAX_AGE; `--agy-max-age 0` keeps whatever agy last reported.
 """
 import argparse
 import datetime as dt
@@ -32,10 +35,13 @@ BAR_WIDTH = 40
 # no standalone API for them (retrieveUserQuotaSummary is 403-gated to
 # Antigravity's OAuth client), so we read the payload agy hands to its custom
 # status line: ~/.claude/scripts/agy-statusline.py caches it here on every agy
-# state change. Refresh without using agy interactively: `usage --refresh-agy`.
+# state change. The cache only moves while agy runs, so a stale one is refreshed
+# automatically (see maybe_refresh_agy); `--refresh-agy` forces it.
 AGY_CACHE = os.path.expanduser("~/.cache/agy-usage.json")
 AGY_NAMES = {"gemini": "Gemini", "3p": "3rd-party"}
 AGY_WINDOWS = {"5h": ("5h", 5), "weekly": ("7d", 168), "daily": ("1d", 24)}
+AGY_MAX_AGE = 600  # refresh the cached quota once it is this many seconds old
+AGY_BACKOFF = 900  # after a failed refresh, wait this long before trying again
 
 # palette (matches the web widget)
 GREEN = (95, 191, 95)
@@ -468,6 +474,32 @@ def refresh_agy(timeout=120):
             _terminate_group(proc)
 
 
+_agy_retry_after = 0.0  # monotonic deadline set after a failed refresh
+
+
+def maybe_refresh_agy(max_age, timeout=45):
+    """Refresh the Antigravity quota cache when it is missing or older than max_age.
+
+    agy publishes quota only while it is running, so between agy sessions the
+    Gemini rows would otherwise show hours-old numbers. Returns True if a
+    refresh ran and produced fresh numbers. A failed refresh (agy absent or not
+    signed in) backs off, so the live loop never stalls on every frame.
+    """
+    global _agy_retry_after
+    if max_age <= 0:
+        return False
+    if time.time() - _agy_quota_seen_at() <= max_age:
+        return False
+    if time.monotonic() < _agy_retry_after:
+        return False
+    sys.stdout.write(fg(MUTED, "Antigravity 갱신 중…") + "\n")
+    sys.stdout.flush()
+    if refresh_agy(timeout=timeout):
+        return True
+    _agy_retry_after = time.monotonic() + AGY_BACKOFF
+    return False
+
+
 def _agy_quota_seen_at():
     """Epoch when the cached quota numbers were observed (0 if none)."""
     try:
@@ -560,6 +592,9 @@ def main():
     ap.add_argument("-n", "--interval", type=float, default=30, help="refresh seconds (default 30)")
     ap.add_argument("--refresh-agy", action="store_true",
                     help="briefly run agy to refresh its quota cache (~30 s, no tokens)")
+    ap.add_argument("--agy-max-age", type=float, default=AGY_MAX_AGE, metavar="SEC",
+                    help=f"auto-refresh the Antigravity quota when the cache is older"
+                         f" than SEC (default {AGY_MAX_AGE:.0f}; 0 disables)")
     args = ap.parse_args()
 
     if args.refresh_agy:
@@ -568,11 +603,13 @@ def main():
             print("  no quota reported; is agy signed in?")
 
     if args.once:
+        maybe_refresh_agy(args.agy_max_age)
         print(snapshot())
         return
     try:
         sys.stdout.write("\033[?25l")  # hide cursor
         while True:
+            maybe_refresh_agy(args.agy_max_age)
             frame = snapshot()
             sys.stdout.write("\033[2J\033[H" + frame + fg(MUTED, "\nCtrl-C to quit") + "\n")
             sys.stdout.flush()

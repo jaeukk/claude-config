@@ -24,5 +24,8 @@
 !/keybindings.json
 !/multiagent
 
+# Python bytecode from the tracked scripts
+scripts/__pycache__/
+
 
 # Note: settings.local.json is intentionally NOT tracked — it's for machine-local overrides.

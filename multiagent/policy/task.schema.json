@@ -33,7 +33,7 @@
         "active_workers": {"type": "integer", "minimum": 0}
       }
     },
-    "author_family": {"enum": ["claude", "codex", null]},
+    "author_family": {"enum": ["claude", "codex", "gemini", null]},
     "direct_code_files": {"type": "integer", "minimum": 0},
     "created_at": {"type": "string"},
     "updated_at": {"type": "string"}

@@ -10,6 +10,26 @@ lives in the user's **local Zotero** library, you locate it, read its full text,
 concise, structured Markdown summary of its **algorithm / method / results** to a file the user
 designates.
 
+## The extraction contract (read this first)
+
+Everything about *reading the source* — how far prose may be condensed, which equations must
+appear, `\tag{}` vs `\eqno`, page furniture, illegible text, footnotes, and the closing
+self-report — is specified once, in
+`/home/jaeukk/20_Notes/_shared/contracts/document-note.md`.
+
+**Read that file before writing the summary and follow it verbatim.** It is model-independent
+on purpose: `book-summarizer` and the non-Claude Gemini reading path load the same text, so
+the same pages get read the same way whichever model does the reading. Do not restate its
+rules here and do not rely on your memory of them — the file is the authority.
+
+**If you cannot read that file, stop and say so. Do not proceed from memory.** A note
+written without the contract looks exactly like one written with it — same headings, same
+callouts, plausible equations — so the omission is invisible in the output and would be
+found only when someone needs an equation that was never carried over.
+
+What follows is only what the contract deliberately leaves to the host: locating the paper in
+Zotero, path translation, the output template and frontmatter, and where the file is written.
+
 ## Inputs you expect
 - A way to identify the paper: title, author+year, DOI, or Zotero item key.
 - A target output path for the `.md` file. If the user did not give one, ask once; if they decline,
@@ -31,7 +51,14 @@ designates.
    Do not pad with generic background.
 4. **Write the summary file** (see template below). Render math in LaTeX (`$inline$` / `$$display$$`)
    with variable names matching the paper. Use tables for parameters/results where it aids scanning.
-5. **Report back** the output path and a 2-3 line synopsis.
+   Equation completeness, numbering, page furniture and illegible text are the contract's —
+   apply it as written rather than deciding these afresh.
+
+   Strip the contract's closing `BOUNDARY:` / `EQUATIONS:` / `ILLEGIBLE:` block out of the
+   file before writing it; those three lines are evidence for the caller, not note content.
+5. **Report back** the output path, a 2-3 line synopsis, and the contract's
+   `BOUNDARY` / `EQUATIONS` / `ILLEGIBLE` lines — listing the equation numbers you reproduced,
+   not just how many, since a count matches far more easily than a list.
 
 ## Output template
 ```markdown
@@ -54,7 +81,8 @@ focus: <algorithm|results|both>
 - ...
 
 ## Method / Algorithm
-<Step-by-step. For algorithms, use a numbered list or pseudocode block. Include the key equations.>
+<Step-by-step. For algorithms, use a numbered list or pseudocode block. Equations per the
+contract — do not restate or tighten its rule here.>
 
 ## Key Results
 <Bullets or a table. Include the headline numbers, not vague claims.>
