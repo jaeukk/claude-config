@@ -17,16 +17,32 @@ CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
 SRC="$CLAUDE_DIR/multiagent"
 [ -d "$SRC" ] || { echo "ERROR: canonical package not found at $SRC" >&2; exit 1; }
 
+SOURCE_COMMIT=$(git -C "$CLAUDE_DIR" rev-parse HEAD) ||
+  { echo "ERROR: $CLAUDE_DIR is not a Git worktree" >&2; exit 1; }
+SOURCE_STATUS=$(git -C "$CLAUDE_DIR" status --porcelain --untracked-files=all -- \
+  multiagent skills/orchestration scripts/deploy-multiagent.sh)
+if [[ -n "$SOURCE_STATUS" && "${MULTIAGENT_ALLOW_DIRTY:-0}" != 1 ]]; then
+  echo "ERROR: deployment sources are dirty; commit/stash them or set MULTIAGENT_ALLOW_DIRTY=1" >&2
+  exit 1
+fi
+SOURCE_DIRTY=$([[ -n "$SOURCE_STATUS" ]] && printf true || printf false)
+SOURCE_REPOSITORY=$(git -C "$CLAUDE_DIR" remote get-url origin 2>/dev/null || printf unknown)
+
 stamp() {  # stamp <target-dir>
   {
     echo "deployed-from: $SRC"
-    echo "source-commit: $(git -C "$CLAUDE_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "source-repository: $SOURCE_REPOSITORY"
+    echo "source-commit: $SOURCE_COMMIT"
+    echo "source-dirty: $SOURCE_DIRTY"
+    echo "deployment-mode: $MODE"
+    echo "reproducible: $([[ "$SOURCE_DIRTY" == false ]] && printf true || printf false)"
     echo "deployed-at: $(date +%F)"
     echo "rule: do not edit here — edit the config repo and re-run scripts/deploy-multiagent.sh"
   } > "$1/.deployed-from"
 }
 
-case "${1:-}" in
+MODE="${1:-}"
+case "$MODE" in
   global)
     DST="${2:-$HOME/.multiagent}"
     mkdir -p "$DST/skills"

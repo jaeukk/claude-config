@@ -8,6 +8,10 @@
     "require_task_contract": true,
     "require_lease": true
   },
+  "conductor_adapters": {
+    "claude-code": {"max_active_children": null, "supports_batch_spawn": true},
+    "codex": {"max_active_children": 3, "supports_batch_spawn": false}
+  },
   "routes": [
     {"when": "implementation_or_refactor", "role": "implementer"},
     {"when": "independent_review", "role": "critic", "require_different_family": true},

@@ -2,8 +2,10 @@
 
 Claude Code is the default application and the only conductor for an active task. The
 default conductor binding is `claude-frontier` (`Opus 5`). Codex participates through
-bounded worker calls and may become conductor only after a user-approved, recorded
-handoff.
+bounded worker calls; conductor handoff to another host is not currently supported —
+`task.schema.json` pins the conductor host and backend as constants and the validator
+enforces them, so a handoff needs a conductor backend, a schema change, and a validator
+change, not just user approval.
 
 The machine-readable policy is split intentionally:
 
@@ -51,10 +53,11 @@ System A's `_shared/adapters/call_worker.sh` remains its dispatcher.
 
 ## Global policy home
 
-The canonical policy and `orchestration` skill live in the host-global
-`~/.multiagent/` directory. This project's `_multiagent/policy` path is a compatibility
-link to that global policy; task contracts, leases, and worker results remain project
-local under `_multiagent/tasks/`.
+The canonical policy and `orchestration` skill live in this repo,
+`~/.claude/multiagent/`. The host-global `~/.multiagent/` directory and a project's
+`_multiagent/policy` path are generated consumers, refreshed from the canonical repo by
+`scripts/deploy-multiagent.sh` and never edited in place; task contracts, leases, and
+worker results remain project local under `_multiagent/tasks/`.
 
 ## Windows and WSL
 

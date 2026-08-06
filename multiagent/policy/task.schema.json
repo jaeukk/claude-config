@@ -10,6 +10,7 @@
     "status": {"enum": ["pending", "active", "verifying", "complete", "blocked", "cancelled"]},
     "conductor": {
       "type": "object",
+      "description": "Policy-enforced orchestration is intentionally limited to claude-code/claude-frontier. The Codex child API can dispatch only Codex-family models, so a Codex conductor cannot guarantee the different-family critic and verifier required for Codex-authored artifacts. Do not widen these constants until a Codex-host adapter can invoke a non-Codex review backend AND binding resolution filters candidates by adapter dispatchability.",
       "required": ["host", "backend", "lease_owner"],
       "properties": {
         "host": {"const": "claude-code"},

@@ -134,6 +134,18 @@ def validate_policy(bundle: PolicyBundle) -> tuple[list[str], list[str]]:
         if missing:
             errors.append(f"backend {alias} lacks {', '.join(missing)}")
 
+    # A malformed max_active_children either crashes min() at dispatch time or, as 0,
+    # silently forbids every dispatch. Reject both here instead.
+    for host, adapter in bundle.documents["routing"].get("conductor_adapters", {}).items():
+        limit = adapter.get("max_active_children")
+        if limit is None:
+            continue
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            errors.append(
+                f"conductor adapter {host} has invalid max_active_children {limit!r}; "
+                "expected null or a positive integer"
+            )
+
     for role, binding in bundle.bindings.items():
         candidates = binding.get("candidates", binding.get("pool", []))
         if not candidates:
@@ -254,7 +266,12 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
         errors.append("invalid task status")
     conductor = task.get("conductor", {})
     if conductor.get("host") != "claude-code" or conductor.get("backend") != "claude-frontier":
-        errors.append("the active conductor must assert claude-code / claude-frontier")
+        errors.append(
+            f"unsupported conductor {conductor.get('host')!r}/{conductor.get('backend')!r}: "
+            "enforced orchestration is intentionally limited to claude-code/claude-frontier; "
+            "Codex cannot dispatch the non-Codex critic/verifier required for Codex-authored "
+            "artifacts. Use advisory mode on unsupported hosts."
+        )
     if not conductor.get("lease_owner"):
         errors.append("conductor.lease_owner is required")
     target = Path(str(task.get("target_repo", "")))
@@ -319,9 +336,17 @@ def authorize_action(bundle: PolicyBundle, task: dict[str, Any], action: dict[st
             return Decision(False, "recursive orchestration is forbidden")
         if role not in task["roles_plan"]:
             return Decision(False, f"worker role is not planned: {role}")
-        max_fanout = bundle.documents["routing"]["defaults"]["max_fanout"]
-        if task["dispatch"]["active_workers"] >= max_fanout:
-            return Decision(False, "fan-out limit reached")
+        routing = bundle.documents["routing"]
+        worker_limit = routing["defaults"]["max_fanout"]
+        host = task["conductor"]["host"]
+        adapter = routing.get("conductor_adapters", {}).get(host)
+        if adapter is None:
+            return Decision(False, f"no conductor adapter configured for host: {host}")
+        adapter_limit = adapter.get("max_active_children")
+        if adapter_limit is not None:
+            worker_limit = min(worker_limit, adapter_limit)
+        if task["dispatch"]["active_workers"] >= worker_limit:
+            return Decision(False, f"active-worker limit reached for {host} ({worker_limit})")
         author_family = task.get("author_family") if role in {"critic", "verifier"} else None
         return resolve_binding(bundle, role, author_family=author_family)
 
@@ -523,6 +548,43 @@ def self_test(root: Path) -> Decision:
     outside = authorize_action(bundle, task, {"kind": "write", "actor_role": "conductor", "path": str(root / "README.md")})
     if not inside.allowed or outside.allowed:
         return Decision(False, "write-scope enforcement failed")
+    routing = bundle.documents["routing"]
+    adapters = routing.get("conductor_adapters", {})
+    saved_fanout = routing["defaults"]["max_fanout"]
+    saved_adapters = dict(adapters)
+    saved_children = adapters.get("claude-code", {}).get("max_active_children")
+    spawn = {"kind": "spawn_worker", "actor_role": "conductor", "role": "critic"}
+    try:
+        routing["defaults"]["max_fanout"] = 2
+        adapters["claude-code"]["max_active_children"] = 1
+        task["dispatch"]["active_workers"] = 0
+        if not authorize_action(bundle, task, spawn).allowed:
+            return Decision(False, "adapter limit denied a dispatch below capacity")
+        task["dispatch"]["active_workers"] = 1
+        if authorize_action(bundle, task, spawn).allowed:
+            return Decision(False, "adapter limit did not cap max_fanout")
+        # A declared adapter with an unmeasured capacity falls back to max_fanout.
+        adapters["claude-code"]["max_active_children"] = None
+        if not authorize_action(bundle, task, spawn).allowed:
+            return Decision(False, "null max_active_children did not fall back to max_fanout")
+        # An undeclared host has no enforceable dispatch contract: deny, never fall back.
+        adapters.pop("claude-code")
+        if authorize_action(bundle, task, spawn).allowed:
+            return Decision(False, "a host without a conductor adapter was allowed to dispatch")
+        # A malformed limit must be a policy error, not a min() crash or a silent zero.
+        adapters["claude-code"] = {"max_active_children": 0}
+        if not any("max_active_children" in message for message in validate_policy(bundle)[0]):
+            return Decision(False, "validate_policy accepted max_active_children of 0")
+        adapters["claude-code"] = {"max_active_children": "3"}
+        if not any("max_active_children" in message for message in validate_policy(bundle)[0]):
+            return Decision(False, "validate_policy accepted a non-integer max_active_children")
+    finally:
+        routing["defaults"]["max_fanout"] = saved_fanout
+        adapters.clear()
+        adapters.update(saved_adapters)
+        if "claude-code" in adapters:
+            adapters["claude-code"]["max_active_children"] = saved_children
+        task["dispatch"]["active_workers"] = 0
     with tempfile.TemporaryDirectory(prefix="multiagent-self-test-") as directory:
         task_dir = Path(directory) / "task"
         first = acquire_lease(task_dir, "alpha", ttl_seconds=60)

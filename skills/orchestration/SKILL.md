@@ -5,9 +5,14 @@ description: Claude-led conductor mode for routing model-independent roles acros
 
 # Orchestration
 
-Operate as the single conductor for the active task. By default the conductor host is
-Claude Code with the `claude-frontier` binding (currently Opus 5), but define work in
-model-independent roles so hosts and models can be replaced later.
+Operate as the policy-enforced conductor **only** on Claude Code with the `claude-frontier`
+binding (currently Opus 5). This is a designed safety invariant, not merely a default: Codex
+child dispatch is Codex-family-only, so a Codex conductor cannot supply a different-family
+critic or verifier for a Codex-authored artifact. On every other host, operate advisory and do
+not acquire the conductor lease.
+
+Within that, define work in model-independent roles, so backends and models can be swapped
+without rewriting the procedure.
 
 ## Load the local authority
 
@@ -29,6 +34,10 @@ project installation unless the user explicitly chooses a global task root. See
 `references/policy-layout.md` for the portable fallback and task lifecycle.
 
 ## Conductor procedure
+
+**Before step 1, check you are allowed to conduct at all** — see "Conductor host support" below.
+Only `claude-code` / `claude-frontier` is a policy-enforced conductor; on any other host, stop
+here and operate advisory. Do not reach step 3 and take a lease you cannot validly hold.
 
 1. Decompose the request into the smallest useful role set: `implementer`, `critic`,
    `bulk_worker`, `verifier`, or `runner`.
@@ -58,6 +67,63 @@ project installation unless the user explicitly chooses a global task root. See
 Effort belongs to the binding, not the backend registry. Note the enforcement asymmetry:
 the engine passes `effort` to Codex only, so Claude-side effort comes from the worker
 agent's frontmatter. Keep the two in sync.
+
+## Host adapter contract
+
+Roles and bindings are model-independent; **dispatch is not**. Concurrency, batching, context
+forking, and model-override syntax are properties of the host the conductor runs on, not of the
+role being filled. Resolve the role and backend first, then hand the call to the current host's
+dispatch adapter. Never encode one host's API shape in a role, a binding, or this procedure.
+
+Adapters declare their limits in `routing.yaml` under `conductor_adapters`. The number of
+children that may be live at once is:
+
+    min(of whichever of these are known)
+      defaults.max_fanout
+      adapter.max_active_children     -- omit when null
+      slots the runtime reports free  -- omit when unreported
+
+An unmeasured limit is **absent, not zero**: drop it from the comparison. Never pass `null`
+into the `min` as a literal — it raises in Python and silently becomes `0` in JavaScript, which
+would stall every dispatch.
+
+`max_fanout` is a **policy ceiling** on simultaneous workers, enforced against
+`dispatch.active_workers` — it is not a statement of host capacity and must not be lowered to
+describe one. A `bulk_worker` job may hold more logical shards than the host can run at once;
+the adapter schedules them in waves. `max_active_children: null` means unmeasured on that host —
+fall back to `max_fanout` alone rather than guessing.
+
+**Claude Code** — batch spawn is available: several dispatches in one message run concurrently.
+
+**Codex** — no batch-spawn call exists; children go out one `spawn_agent` at a time, at most
+three live (the conductor holds one of four slots), so "dispatch all in a single message" is not
+implementable there. When passing `model` or `reasoning_effort`, a full-history fork is
+rejected: use `fork_turns: "none"` (the deterministic default) or a bounded positive turn count
+when the child genuinely needs recent context. The Codex child API exposes **Codex-family models
+only** — it cannot dispatch a Claude or Gemini backend, so binding resolution on a Codex
+conductor must filter to what its adapter can actually invoke, not merely on family and
+capability.
+
+### Conductor host support
+
+Only **`claude-code` / `claude-frontier`** is a policy-enforced conductor: `task.schema.json`
+pins both as constants and the validator rejects anything else. **This is deliberate.** Because
+Codex child dispatch is Codex-family-only, a Codex conductor could never obtain the
+different-family `critic` and `verifier` that `bindings.yaml` requires and `resolve_binding`
+fails closed on — so widening the constants would accept contracts the runtime cannot fulfil.
+Treat it as an invariant to preserve, not an unfinished feature.
+
+A `conductor_adapters` entry does **not** make a host eligible to conduct; it describes dispatch
+mechanics only, and Codex already has one. Codex conductorship becomes supportable only when its
+adapter can invoke at least one non-Codex critic and verifier *and* binding resolution filters
+candidates by adapter dispatchability as well as family independence.
+
+On any other host, do **not** acquire a conductor lease or claim enforced orchestration — say
+plainly that enforced orchestration is limited to Claude Code and why, then fall back to
+advisory operation. Extending this
+means adding a conductor backend, allowing it in the conductor binding, replacing the schema
+constants with validated values, and removing the validator's hard-coded check — not asserting
+a contract the engine will refuse.
 
 ## The Gemini family (`agy`)
 
@@ -106,8 +172,18 @@ destructive actions, external side effects, credentials, or policy overrides.
 
 During an active task, use hook-visible file tools for writes. Do not mutate through
 shell redirection or bulk shell commands. Keep direct conductor code edits to at most
-two small files and send them through independent critic review. Codex must remain
-read-only and return patches until its backend advertises validated mediated writes.
+two small files and send them through independent critic review. Write authority is decided
+per selected backend and enforcement adapter, **not by product family**: a worker whose backend
+declares `writes_mediated: false` returns results or patches even when its host is capable of
+`workspace-write`. Direct writes need both an approved scope and an adapter that validates
+mediated writes.
+
+Treat that as the contract you must honour, not as something the engine checks for you.
+`authorize_action()` currently keys on role and path only — it does not consult the selected
+backend's `writes_mediated` / `write_mode`, and the validator merely *warns* for a read-only
+backend. Today the registered Codex backends are safe only because their dispatcher is
+hard-coded read-only. A future backend that advertises mediated writes would pass validation
+without that protection, so the conductor, not the engine, is the thing keeping this true.
 
 When no policy installation or enforcement adapter is available, apply the same rules
 as advice and choose the more restrictive action.
