@@ -14,8 +14,9 @@ designates.
 
 Everything about *reading the source* — how far prose may be condensed, which equations must
 appear, `\tag{}` vs `\eqno`, page furniture, illegible text, footnotes, and the closing
-self-report — is specified once, in
-`/home/jaeukk/20_Notes/_shared/contracts/document-note.md`.
+self-report — is specified once, in `<VAULT>/_shared/contracts/document-note.md`. Resolve
+`<VAULT>` at runtime via the **`zotero-obsidian-sync`** skill — this agent may be invoked from
+any directory, so never assume the vault is your working directory.
 
 **Read that file before writing the summary and follow it verbatim.** It is model-independent
 on purpose: `book-summarizer` and the non-Claude Gemini reading path load the same text, so
@@ -28,7 +29,8 @@ callouts, plausible equations — so the omission is invisible in the output and
 found only when someone needs an equation that was never carried over.
 
 What follows is only what the contract deliberately leaves to the host: locating the paper in
-Zotero, path translation, the output template and frontmatter, and where the file is written.
+Zotero, path translation, the owner's annotations, the output template and frontmatter, and
+where the file is written.
 
 ## Inputs you expect
 - A way to identify the paper: title, author+year, DOI, or Zotero item key.
@@ -46,6 +48,16 @@ Zotero, path translation, the output template and frontmatter, and where the fil
    - `mcp__zotero__zotero_item_fulltext` for the indexed full text of the attached PDF.
    - If full text is empty/unavailable, say so. Fall back to the abstract, and only use WebSearch/
      WebFetch (e.g. the DOI/landing page) if the user is OK with reaching the network.
+   - **Owner's notes/annotations**: fetch child items via the local API —
+     `curl -s "http://localhost:23119/api/users/0/items/<KEY>/children"` — and keep entries with
+     `itemType: "note"` or `"annotation"` (PDF highlights/comments). These are the owner's own
+     reading notes; they go in a dedicated section (template below), clearly separated from your
+     summary, lightly converted from HTML to Markdown, with annotation page numbers when present.
+     **Skip meaningless notes** — do not include a child note if, after stripping HTML, it is:
+     just a DOI/URL/citation string; an auto-generated attachment list or import artifact (e.g.
+     titles/bodies like "Attachments", "The following values have no corresponding Zotero field");
+     empty or trivially short (< ~40 chars) boilerplate. When every child note is skipped, omit
+     the section entirely.
 3. **Read for substance.** Extract the actual technical content — governing equations, the
    algorithm's steps, key assumptions, parameters, datasets, and the main quantitative results.
    Do not pad with generic background.
@@ -56,7 +68,26 @@ Zotero, path translation, the output template and frontmatter, and where the fil
 
    Strip the contract's closing `BOUNDARY:` / `EQUATIONS:` / `ILLEGIBLE:` block out of the
    file before writing it; those three lines are evidence for the caller, not note content.
-5. **Report back** the output path, a 2-3 line synopsis, and the contract's
+5. **Verify the links you just wrote (gate).** Run
+   `python3 <VAULT>/90_Templates/check_wikilinks.py <output_path>` (use `python` if that is the
+   interpreter on PATH). **Require zero *newly introduced* BROKEN.** This pass writes a
+   source-summary note, so `Wiki_Schema` §Raw-build link verification governs it — not §Ingest.
+
+   **Never link a page that does not exist.** A concept the paper discusses but the vault lacks
+   is **not** a wikilink: write the name as **plain text** and list it in your report so it
+   reaches the ingest queue. There is no "wanted concept" exemption — an unresolved link is a
+   defect, full stop. (The `[[Chapter N]]` / `[[Section N.N]]` placeholder exception belongs to
+   long-form book summaries and does not apply to a paper note.)
+
+   If a link does not resolve, the fix is almost always that the page exists under a slightly
+   different name — search the vault and repoint it. Do **not** auto-repoint on a near match
+   alone: `karaljr_elastic_1959` is a real 1959 companion paper, not a typo of the existing
+   `karaljr_elastic_1964`. A near match is a prompt to look, not a licence to rewrite.
+
+   Wikilink targets are a bare basename or a path **suffix** — never a `../` prefix, which
+   cannot resolve.
+
+6. **Report back** the output path, a 2-3 line synopsis, and the contract's
    `BOUNDARY` / `EQUATIONS` / `ILLEGIBLE` lines — listing the equation numbers you reproduced,
    not just how many, since a count matches far more easily than a list.
 
@@ -74,6 +105,10 @@ focus: <algorithm|results|both>
 
 # <Short title>
 
+<APS bibliography line — see Wiki_Schema §Source summary. Do not hand-type it; generate it:
+  python3 99_SYSTEM/scripts/aps_reference.py  (format_aps(zotero_item(<key>), abbrev))
+  e.g. D. Chen *et al.*, Physica A **415**, 240 (2014). DOI: [10.1016/…](https://doi.org/10.1016/…). Zotero `chen_reconstruction_2014` (NYDL4I2H).>
+
 > [!abstract] One-paragraph TL;DR
 > <what the paper does and why it matters, 2-4 sentences>
 
@@ -89,6 +124,10 @@ contract — do not restate or tighten its rule here.>
 
 ## Assumptions & Limitations
 - ...
+
+## Owner's annotations
+<Only if non-trivial child notes/annotations exist in Zotero. Owner's words verbatim (HTML→md),
+one bullet per note/highlight, `(p. N)` for annotations with pages. Never mix with AI content.>
 
 ## Notes / Relevance
 - <connection to the user's plasmonics / scattering work, if any>

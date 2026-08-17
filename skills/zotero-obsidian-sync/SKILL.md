@@ -9,8 +9,20 @@ Conventions for bridging Zotero and Obsidian (ported from Roo's `master-rules`),
 survive moving between machines.
 
 ## Zotero
-- **Local Zotero API:** `http://localhost:23119` (identical on every machine).
-- The user's Zotero **userID is `5872032`** (used in `/api/users/5872032/...` paths).
+
+**Two different services — never conflate them:**
+
+| | **Local REST API** `http://localhost:23119/api` | **Zotero Web API** `https://api.zotero.org` |
+|---|---|---|
+| what it is | the desktop app's loopback server | Zotero's cloud sync service |
+| reads | yes | yes |
+| writes | **no** (`PATCH`/`PUT` → 501, `POST` → 400) | **yes**, with a write-enabled API key |
+
+A write failure on `localhost:23119` says nothing about `api.zotero.org`. Both use the same
+userID and item keys, so the URLs look almost identical — check the host before concluding
+anything.
+
+- The user's Zotero **userID is `5872032`** (used in `/users/5872032/...` paths on both).
 
 ### Reading
 - `GET http://localhost:23119/api/users/5872032/items`, `/collections`, `/collections/<KEY>/items/top`, `.../items/<KEY>` — list/search/fetch. Also exposed via the `mcp__zotero__*` tools (search / metadata / fulltext) and Better BibTeX JSON-RPC at `/better-bibtex/json-rpc`.
@@ -31,18 +43,31 @@ Best practice: get authoritative fields from **CrossRef** (`https://api.crossref
 `saveItems` items carry a `tags:[{tag}]` array — set it at creation time (e.g. `{"tag":"w:raw-build"}`
 for the [[Wiki_Schema]] raw-build convention) and it just works, since the item doesn't exist yet.
 
-**Editing tags on an item that's already in the library is a different problem — there is
-no confirmed working write path**, as of 2026-07-16:
-- `PATCH`/`PUT /api/users/5872032/items/<KEY>` → `501 Method not implemented`
-- `POST` to the same endpoint → `400 "Endpoint does not support method"` (same as any other write)
-- Better BibTeX JSON-RPC (`/better-bibtex/json-rpc`) has no `item.tag.*` method (`rpc.discover`
-  isn't implemented either, so there's no way to enumerate what *is* available — tested by hand)
-- Re-`saveItems`-ing the same item to merge tags was **not attempted** — Zotero Connector
-  dedup behavior on re-save is translator-dependent and unverified; risks creating a duplicate
-  item in a live library. Don't try it without the user's explicit go-ahead.
+**Editing tags on an item already in the library goes through the Zotero Web API**
+(`https://api.zotero.org` — the cloud service, *not* the read-only local REST API).
+Confirmed working 2026-07-16/17 and again 2026-08-05:
 
-**Until a real path turns up: ask the user to add/edit tags on existing items by hand** in the
-Zotero desktop UI. Re-test the above periodically (Zotero and Connector versions change).
+1. `GET https://api.zotero.org/users/5872032/items/<KEY>` → read the item's current `version`
+   and `tags`.
+2. `PATCH https://api.zotero.org/users/5872032/items/<KEY>` with headers
+   `Zotero-API-Key: <key>` and `If-Unmodified-Since-Version: <version>`, body
+   `{"tags":[<full existing tag list>, {"tag":"w:raw-build"}]}` → HTTP **204**.
+
+Send the **whole** tags array — PATCH replaces the field, it does not merge — and preserve
+`type:1` on automatic tags. Writes hit the synced cloud library, so keep Zotero desktop Sync on
+for them to show up locally.
+
+**API key.** A write-enabled key lives in `~/.claude.json` under
+`mcpServers.zotero.env.ZOTERO_API_KEY`. That file is Claude-specific and won't exist on a
+Codex-only host — there, read the key from the **`ZOTERO_API_KEY` environment variable**
+(check the env var first if `~/.claude.json` is absent).
+
+**Dead ends — do not retry** (all on the local app, unrelated to the web API):
+- `PATCH`/`PUT localhost:23119/api/users/5872032/items/<KEY>` → `501 Method not implemented`
+- `POST` to the same endpoint → `400 "Endpoint does not support method"`
+- Better BibTeX JSON-RPC (`/better-bibtex/json-rpc`) has no `item.tag.*` method
+- Re-`saveItems`-ing an existing item to merge tags — untested, risks a duplicate. Unnecessary
+  now that the web API works.
 
 ## Resolving the Obsidian vault path — DO NOT hardcode it
 

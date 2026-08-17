@@ -11,6 +11,51 @@ Applies when writing computational-physics code (ported from Roo's `code` mode r
 - Use **pyMEEP** / **SMUTHI** for scattering simulations.
 - Write **Doxygen-style** comments for each function.
 
+# Research-code workflow — code vs generated data
+
+Applies to every research-code repo (adopted 2026-08-04 in multi-stealthy after
+a joint Claude+Codex assessment; boundary revised 2026-08-13). One rule:
+**reusable code under git; single-use scripts and generated files live with the
+data.**
+
+- **Reusable code lives under git** — anything imported by other code, rerun with
+  new inputs, or shared across datasets. Library modules at the repo root;
+  exploratory work in a tracked `experiments/` directory. Commit WIP freely.
+- **Single-use scripts live beside their data, unversioned.** A script stays in
+  `20_Data/…` only if **all** of these hold: it is *one* human-authored file (the
+  dataset it reads and the figures it emits don't count); it reads *one* dataset
+  directory; and it has no generic input interface, parameter sweep, driver
+  script, or companion code/config. Resolve paths relative to the dataset
+  directory instead of hardcoding them (Python: `Path(__file__).resolve().parent`).
+  Fail any clause → it belongs in the repo. The test is deliberately about
+  observable properties, not about whether it "feels simple" or you intend to run
+  it once — intent isn't decidable when you write the file.
+- **Generated outputs (PNG, `.pkl`, logs, result JSON/CSV) never go into a
+  repo.** Scripts write to the project's data area (e.g.
+  `20_Data/<topic>/YYYY-MM-DD-name/`); put the output path as a constant at the
+  top of the script. A project's own `CLAUDE.md` records its canonical repo and
+  topic routing.
+- **Imports via editable install** (`pip install -e`, minimal `pyproject.toml`)
+  — never `sys.path` hacks, never copy a library module to tweak it. This applies
+  to dataset-local scripts too: being unversioned buys them no exemption.
+- **Experiment layout:** exploratory work with more than one human-authored
+  code/config file, or intended for repeated/parameterized runs, gets
+  `experiments/YYYY-MM-DD_name/` with a 3-line `README.md` (question, run
+  command, library commit hash from `git rev-parse --short HEAD`), the run
+  script/notebook, and config. Input datasets and generated outputs do **not**
+  count as companion files.
+- **Promotion:** *move* (never copy) a matured function into the library module,
+  or a whole data-local script into `experiments/`; add a small test, update the
+  imports, record the new commit hash in the experiment README. **Before a
+  one-off's output is published, cited, or depended on downstream, promote and
+  commit the script first** — that is what replaces the commit-hash provenance an
+  unversioned script cannot carry.
+- **Retiring:** old experiments stay (code is cheap, it's a lab notebook);
+  sweep clutter into `experiments/_archive/` with `git mv`, don't delete.
+- `.gitignore` is directory-first (`__pycache__/`, `build/`, `temp/`,
+  `evidence/`, `*.pkl`, `*.log`, `*.so`); no global `*.png`/`*.json` ban —
+  fixtures and doc figures stay trackable.
+
 # Ponytail precedence
 
 The `ponytail` plugin injects an always-on "laziest solution that works" ladder
@@ -99,8 +144,10 @@ Other recurring traps:
 
 # Common Python modules (`~/30_Codes/python/Common/`)
 
-Reusable utilities live in `/home/jaeukk/30_Codes/python/Common/`. Run from that
-directory or add it to `sys.path`, then `import` by module name.
+Reusable utilities live in `/home/jaeukk/30_Codes/python/Common/`. Install it
+editable once (`pip install -e /home/jaeukk/30_Codes/python/Common`), then
+`import` by module name from anywhere — no `sys.path` hacks, per the workflow
+rule above.
 
 - **`prop_uncertainty.py`** — propagation of uncertainty (Wikipedia: *Propagation
   of uncertainty*) for an arbitrary scalar- or vector-valued `f`. First-order

@@ -40,6 +40,10 @@ BAR_WIDTH = 40
 AGY_CACHE = os.path.expanduser("~/.cache/agy-usage.json")
 AGY_NAMES = {"gemini": "Gemini", "3p": "3rd-party"}
 AGY_WINDOWS = {"5h": ("5h", 5), "weekly": ("7d", 168), "daily": ("1d", 24)}
+# agy's reported plan_tier lags a subscription change. Set this to the real plan
+# to override the badge; None means show whatever agy reports. Clear it once agy
+# catches up, so this can't quietly outlive the next plan change.
+AGY_PLAN = "Google AI Plus"  # agy still says "Google AI Pro" as of 2026-08-05
 AGY_MAX_AGE = 600  # refresh the cached quota once it is this many seconds old
 AGY_BACKOFF = 900  # after a failed refresh, wait this long before trying again
 
@@ -387,7 +391,7 @@ def agy_card(now):
     )
     return {
         "provider": "Antigravity",
-        "plan": data.get("plan_tier"),
+        "plan": AGY_PLAN or data.get("plan_tier"),
         "updated": age,
         "rows": rows,
     }

@@ -15,8 +15,9 @@ pattern to a chaptered work.
 
 Everything about *reading the source* — page coverage, equation completeness, `\tag{}` vs
 `\eqno`, page furniture, illegible text, footnotes, the markup vocabulary, and the closing
-self-report — is specified once, in
-`/home/jaeukk/20_Notes/_shared/contracts/document-note.md`.
+self-report — is specified once, in `<VAULT>/_shared/contracts/document-note.md`. Resolve
+`<VAULT>` at runtime via the **`zotero-obsidian-sync`** skill — this agent may be invoked
+from any directory, so never assume the vault is your working directory.
 
 **Read that file before writing any note and follow it verbatim.** It is model-independent on
 purpose: `paper-reviewer` and the non-Claude Gemini reading path load the same text, so the
@@ -29,7 +30,7 @@ callouts, plausible equations — so the omission is invisible in the output and
 found only when someone needs an equation that was never carried over.
 
 What follows is only what the contract deliberately leaves to the host: locating the book,
-path translation, the vault template and frontmatter, figures, wikilink hygiene, citations,
+path translation, Zotero annotations, the vault template and frontmatter, figures, wikilink hygiene, citations,
 verification, and where files are written.
 
 ## Inputs you expect
@@ -43,6 +44,10 @@ verification, and where files are written.
   overview note `x.00`. Coarser ("one note per chapter") only if the user asks.
 - **Allow-list (optional):** the set of existing note basenames in the book root, for
   wikilink hygiene. If not provided, build it yourself with `Glob` over the book root.
+  A book-root list cannot see **vault-wide** basename collisions (e.g. `34_Fig34-2.png`
+  exists in both `Feynman_Lectures_I/_assets/` and `Feynman_Lectures_II/_assets/`), so
+  before emitting a bare basename that is not obviously unique, `Glob` it vault-wide;
+  if it hits more than once, link the full vault-root path instead.
 
 ## Workflow
 
@@ -56,6 +61,15 @@ verification, and where files are written.
      so re-runs skip the lookup.
    - Prefer the Zotero full-text API; fall back to `pdftotext`/`pdftoppm` on the raw PDF for
      pages the index garbled.
+   - **Owner's notes/annotations**: fetch child items via the local API —
+     `curl -s "http://localhost:23119/api/users/0/items/<KEY>/children"` — keeping `itemType`
+     `"note"`/`"annotation"`. Fold each into the matching chapter/section note under an
+     `## Owner's annotations` heading (owner's words verbatim, HTML→md, `(p. N)` when present),
+     clearly separated from AI-written content; page-unassignable notes go in the overview note.
+     **Skip meaningless children**: DOI/URL/citation-only strings, auto-generated attachment
+     lists or import artifacts ("Attachments", "The following values have no corresponding
+     Zotero field"), or empty/short (< ~40 chars) boilerplate. Omit the heading when nothing
+     survives the filter.
 
 2. **Establish structure once (before writing any note).**
    - Read the table of contents; record the chapter/section numbering scheme.
@@ -77,9 +91,28 @@ verification, and where files are written.
    creator: Jaeuk Kim
    related:
    preamble: "[[LatexPreamble]]"
-   aliases: [<Author Ch.N>, <Short section title>]
+   aliases: [<Author Ch.N><letter>, <Short section title>]
    ---
    ```
+
+   **Every alias you emit must be unique across the whole book — check this as you write, not
+   after.** A chapter label repeated on each section of that chapter resolves to *none* of them,
+   and you are the only one who can prevent it: you create all the colliding notes in a single
+   run, so no caller can grep for the clash beforehand. Two cases:
+
+   - **`<Author Ch.N>` is a chapter-level label**, so append a distinguishing letter in **note
+     order** — the `x.00` overview takes `a`, `x.01` takes `b`, and so on, every note in the
+     chapter taking one: `Ferraro Ch.1a` … `Ferraro Ch.1h`. Never emit the bare `Ferraro Ch.1`.
+   - **If you use the book's own section numbering** instead (e.g. Hefferon's `I.1`), include the
+     chapter component — `Hefferon One.I.1`, not `Hefferon I.1` — because such numbering normally
+     restarts in every chapter, so the bare form collides once per chapter across the whole book.
+
+   Existing `Ferraro_RamanSpectroscopy_2012/` and `Hefferon_LinearAlgebra_2020/` notes were
+   retrofitted to the lettered form on 2026-08-12; match what is on disk when extending either.
+
+   Where the source has a Zotero record, put the **APS bibliography line** directly under the
+   H1 of the overview note — see `Wiki_Schema` §Source summary. Generate it, never hand-type
+   it: `99_SYSTEM/scripts/aps_reference.py` → `format_aps(zotero_item(<key>), abbrev)`.
 
 4. **Per chapter, write:**
    - **Overview note `x.00_<Chapter_Title>.md`** — a `### Subchapters` wikilink list (one
@@ -111,7 +144,8 @@ verification, and where files are written.
    **illustrative** figures by number only. Embed with a **relative Markdown image whose
    alt text is empty**, and put the **caption on the line directly below** the image as an
    italic paragraph (caption *below*, never inside the embed / "on its side") — not an
-   Obsidian `![[...]]` embed (which the wikilink checker, indexing only `.md`, would flag):
+   Obsidian `![[...]]` embed (the checker does index attachments now, so this is a
+   readability/portability convention, not a checker workaround):
    ```
    ![](../_assets/<fig>.png)
    *Fig. X — <caption, LaTeX math allowed>.*
@@ -121,6 +155,16 @@ verification, and where files are written.
    create in this run). For anything not yet written, emit a **soft placeholder**
    `[[Chapter N]]` / `[[Section x.y]]` rather than an invented filename — these are an
    accepted FYI-only convention, not broken links.
+
+   **Wikilink targets: a bare basename, or a path SUFFIX — never `../`.** Obsidian resolves
+   a bare name from anywhere in the vault, and resolves a target containing `/` by matching
+   the **tail** of a file's path — so `[[05_Similarity/5.00_Similarity]]` correctly finds
+   `40_Resources/…/Hefferon_LinearAlgebra_2020/05_Similarity/5.00_Similarity.md`. What never
+   resolves is a **`../` prefix**: no real path contains `..`, so
+   `[[../05_Similarity/5.00_Similarity]]` is a dead link even though it names a real file.
+   Prefer the shortest unambiguous form — a bare basename when it is unique vault-wide,
+   otherwise enough leading path segments to disambiguate (e.g. `README`, which exists in
+   ~18 book folders, and `34_Fig34-2.png`, which exists in two Feynman volumes).
 
 8. **Citations (traceable).**
    - **Always Zotero-search a cited reference before treating it as new** — index parsers
@@ -132,9 +176,17 @@ verification, and where files are written.
    - Only a genuinely-absent reference (verified not in Zotero) goes to a `new_references.bib`
      with a real DOI.
 
-9. **Verify.** Run `python3 <VAULT>/90_Templates/check_wikilinks.py <book_root>` (use `python` if
-   that is the interpreter on PATH) and report the BROKEN (fix these — typos/invented names) vs.
-   SOFT (placeholders, FYI) counts. Aim for zero BROKEN.
+9. **Verify (gate).** Run `python3 <VAULT>/90_Templates/check_wikilinks.py <book_root>` (use
+   `python` if that is the interpreter on PATH) and report the BROKEN vs. SOFT counts.
+   **Require zero *newly introduced* BROKEN** — pre-existing breakage in a file you merely
+   touched is a lint item, not yours to fix here. See `Wiki_Schema` §Raw-build link
+   verification, which governs this pass (not §Ingest step 9 — you are not running an ingest).
+
+   SOFT is expected and fine, but only in its exact form: the whole target is `Chapter N` or
+   `Section N[.N…]`. **Anything else must resolve.** A concept the book discusses but the vault
+   lacks stays **plain text** — name it in your report so it reaches the ingest queue — never an
+   unresolved wikilink. There is no "wanted concept" exemption: if it does not resolve and is
+   not that exact placeholder, it is a defect.
 
 10. **Report back** the notes written (paths), figures captured, any new/unresolved
     citations, the remaining scope (chapters not yet summarized), and — per section — the
@@ -162,9 +214,9 @@ itself.
   and tables for scannability.
 - **Traceable.** Keep the Zotero key + DOI discoverable (book README / overview frontmatter)
   so every note traces back to the source.
-- **Paths.** Resolve the vault root at runtime (the vault is your working directory) via the
-  **`zotero-obsidian-sync`** skill; under WSL translate Windows paths with `wslpath`. Verify a file
-  exists before writing near it. Prefer the Zotero full-text API over reading the raw PDF.
+- **Paths.** Resolve the vault root at runtime via the **`zotero-obsidian-sync`** skill; under
+  WSL translate Windows paths with `wslpath`. Verify a file exists before writing near it.
+  Prefer the Zotero full-text API over reading the raw PDF.
 - **Ask before networking.** Reaching a publisher/the web is opt-in unless the user said it's
   fine.
 - **Never touch existing summaries** outside the requested scope.
