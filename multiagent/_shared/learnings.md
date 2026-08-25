@@ -93,3 +93,26 @@
 **교훈**: 이 시스템의 모델 배정은 **두 층**이고, 정책층(`policy/backends.yaml`)의 Claude `model:` 값은 **선언적**이다 — 엔진의 유일한 디스패치 경로 `dispatch_codex()`가 `--model`을 codex에만 넘기고(`policy_engine.py:392`), Claude 쪽은 PreToolUse 훅이 role→backend 해석·family만 검사할 뿐 모델 문자열을 읽지 않는다. 따라서 `backends.yaml`만 고치면 **실제로는 아무것도 안 바뀐다**. 세션 레버 3곳(`multiagent/.claude/settings.json`, `engine/adapters/install_wsl_orchestration.js`, `.claude/agents/*.md` frontmatter)을 함께 고쳐야 한다. 특히 installer는 `settings.model`을 하드코딩으로 되돌려 놓으므로, 고치지 않으면 다음 실행에서 조용히 원복된다. 같은 이유로 **effort도 비대칭**: bindings의 `effort`는 codex에만 도달하고 Claude 쪽 실효 레버는 agent frontmatter다 → 엔진(`VALID_EFFORTS`)을 건드리지 않고 frontmatter만으로 xhigh를 얻을 수 있었다(엔진 개정과 그에 딸린 검증 공백을 회피).
 **근거**: 재배정 전 `policy_engine`을 in-memory로 로드해 목표 상태를 시뮬레이션 → `validate-policy errors: []`, 6개 role 해석, critic/verifier 양방향 독립성(author=codex → claude-core / claude-mid) 확인 후에야 파일 수정. 미바인딩 백엔드(`claude-ceiling`=Fable 5)도 validate 통과함을 같은 방법으로 사전 확인 — `validate_policy`는 "바인딩이 참조하는 백엔드가 존재하는가"만 보지 "모든 백엔드가 바인딩되었는가"는 안 본다. 2026-07-25 동일 작업이 예산 소진으로 통째 revert된 전례가 있어 `_local/`의 revert 기록을 먼저 읽고 재적용한 것이 비용을 크게 줄였다.
 **worker**: orchestrator(정책 시뮬레이션·라이브 편집·배포·자가점검)
+
+## [2026-08-25] [conductor-eligibility-generalized]
+**교훈**: "X는 구조적으로 불가능"이라고 적힌 불변식은 **어느 계층의 한계인지** 함께 적지 않으면 수명을 넘겨
+살아남는다. conductor를 claude-code로 고정한 근거는 "Codex child API는 Codex family만 스폰 가능"이었는데,
+이는 **하나의 디스패치 수단**의 한계였을 뿐 호스트의 한계가 아니었다 — `claude`·`codex`·`agy`는 전부 CLI이므로
+서브프로세스로 교차 벤더 호출이 된다(실증: codex/codex-conductor 계약으로 Claude worker dispatch exit 0).
+2026-07-13 D4/INV9의 "pro-high 금지"와 **같은 실패형**이다(원인 계층 미기재 → 원인 소멸 후에도 규칙 잔존).
+→ 금지·고정 규칙에는 반드시 "무엇이 이것을 참으로 만드는가"를 적고, 그 조건을 **엔진이 계산하게** 만들어라.
+여기서는 상수 대신 3조건(후보 등재·어댑터 존재·`dispatch_hosts` 독립 도달성)으로 대체했다(D12).
+
+**부수 교훈 — 검토자에게 자기 권고를 다시 물어라**: codex-critic 2라운드는 "agy 디스패처를 추가하라"고
+권고했고 그대로 구현했으나, 3라운드에서 같은 검토자가 "격리가 거짓이니 이번 릴리스에선 빼라"고 **자기 권고를
+뒤집었다** — 2라운드 권고가 "제대로 격리된 디스패처"를 전제했기 때문이다. 모순이 아니라 정보 증가다.
+라운드를 반복하면 이런 전제 붕괴가 드러난다. 1회 검토였다면 `--dangerously-skip-permissions`가 "격리됨"
+라벨을 달고 그대로 나갔을 것이다.
+
+**부수 교훈 — 플래그를 기억으로 쓰지 마라**: 1라운드에서 `--allowedTools`(허용 추가일 뿐 배타적 제한이 아님)와
+"claude CLI에는 effort 플래그가 없다"(있다: `--effort`)를 둘 다 틀렸고, 검토자가 `--tools`를 지목해 바로잡았다.
+`--help`를 읽는 데 드는 비용이 잘못된 격리 주장을 문서에 박제하는 비용보다 훨씬 싸다.
+
+**근거**: codex-critic(Sol, high) 3라운드 감사 — 9건 → 7건 → 6건, 전부 수용. Claude worker의 도구면은
+실측 확인(도구 나열 요청에 "Glob, Grep, Read"만 응답 = Bash·MCP 제거됨). agy 경로는 쿼터 소진으로 미검증.
+**worker**: orchestrator(설계·구현·검증), codex-critic=codex-high(3라운드 독립 감사)

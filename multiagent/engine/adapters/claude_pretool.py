@@ -23,6 +23,13 @@ DANGEROUS_SHELL = re.compile(
     r"(?:rm\s+-rf|Remove-Item\s+.*-Recurse|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f)",
     re.IGNORECASE,
 )
+#: A worker CLI launched straight from the shell reaches no family-independence
+#: check, because those live on the Task/MCP branch below. This catches the
+#: absent-minded `codex exec ...` typed instead of `dispatch-worker`; it is a
+#: HEURISTIC, not a boundary. A leading space, an absolute path, a variable, or
+#: any interpreter defeats it, and no regex over free-form shell can be
+#: complete. Do not grow it into something that looks authoritative.
+WORKER_CLI_SHELL = re.compile(r"(?:^|[;&|(]\s*)\s*(?:claude|codex|agy)(?:\.cmd)?\s", re.IGNORECASE)
 
 
 def deny(reason: str) -> None:
@@ -140,6 +147,13 @@ def main() -> int:
 
         if tool == "Bash":
             command = str(tool_input.get("command", ""))
+            if WORKER_CLI_SHELL.search(command):
+                deny(
+                    "this looks like a worker CLI launched directly, which skips the "
+                    "family-independence check; dispatch it with policy_engine.py "
+                    "dispatch-worker instead (heuristic match -- rephrase if it was quoted text)"
+                )
+                return 0
             if DANGEROUS_SHELL.search(command):
                 decision = authorize_action(bundle, task, {"kind": "destructive_action", "actor_role": actor})
                 if not decision.allowed:
@@ -173,11 +187,22 @@ def main() -> int:
                     deny(f"{role} blocked: {family} cannot review an artifact {seen} produced")
                     return 0
 
-            decision = authorize_action(bundle, task, {"kind": "spawn_worker", "actor_role": actor, "role": role})
+            decision = authorize_action(
+                bundle,
+                task,
+                {"kind": "spawn_worker", "actor_role": actor, "role": role},
+                task_dir=task_path.parent,
+            )
             if not decision.allowed:
                 deny(decision.reason)
                 return 0
-            binding = resolve_binding(bundle, str(role), task.get("author_family"), required_family=family)
+            binding = resolve_binding(
+                bundle,
+                str(role),
+                task.get("author_family"),
+                required_family=family,
+                conductor_host=task.get("conductor", {}).get("host"),
+            )
             if not binding.allowed:
                 deny(f"current role {role} has no compatible {family} backend")
                 return 0

@@ -1,11 +1,13 @@
-# Claude-led multi-agent architecture
+# Multi-agent architecture
 
-Claude Code is the default application and the only conductor for an active task. The
-default conductor binding is `claude-frontier` (`Opus 5`). Codex participates through
-bounded worker calls; conductor handoff to another host is not currently supported —
-`task.schema.json` pins the conductor host and backend as constants and the validator
-enforces them, so a handoff needs a conductor backend, a schema change, and a validator
-change, not just user approval.
+Claude Code is the default application for an active task, with the conductor binding
+`claude-frontier` (`Opus 5`); Codex may also conduct as `codex-conductor`. Eligibility is
+computed rather than pinned: a host may conduct when its backend is a declared `conductor`
+candidate and its `conductor_adapters` entry declares `dispatch_hosts` reaching an
+independent critic and verifier for every author family. Adding a conductor therefore means
+giving a host a real cross-family dispatch path, not editing a constant. Note the remaining
+asymmetry: contracts are *validated* on both hosts but *enforced* only on Claude Code, which
+alone has a PreToolUse adapter. Conductor handoff still requires user approval (D12).
 
 The machine-readable policy is split intentionally:
 
@@ -14,7 +16,9 @@ The machine-readable policy is split intentionally:
 - `backends.yaml`: replaceable host/model registry and operational capabilities.
 - `routing.yaml`: task classification, fan-out, retry, and independence rules.
 - `approvals.yaml`: conductor approvals versus actions requiring the user.
-- `task.schema.json`: per-task contract shape.
+`docs/task-contract.schema.json` describes the per-task contract shape, but nothing loads it:
+`validate_task()` in `engine/policy_engine.py` is the only thing that checks a contract, and it
+covers a subset. The schema sits in `docs/` to make that visible from its path.
 
 The `.yaml` files use the JSON-compatible YAML subset, so the Python 3.14 standard
 library can validate them without another dependency.
@@ -40,16 +44,21 @@ independent review.
 This is availability of a *choice*, not automatic failover: `resolve_binding` returns the
 first eligible candidate without probing health, so the third-ranked Gemini candidate is
 never selected on the normal path and must be chosen deliberately during an outage.
-`agy` also has no dispatcher in the engine — `dispatch_codex` is the only one — so its
-declared capabilities presuppose execution through System A's `call_worker.sh`, and the
-`effort` recorded in its bindings is declarative only.
+`agy` has a builder in `WORKER_CLI`, but it is **withheld from every adapter's
+`dispatch_hosts`**, so no engine-resolved role can reach it and System A's
+`_shared/adapters/call_worker.sh` remains its only dispatcher. Two things must hold before it
+is re-added: containment must be established (`--sandbox` restricts the terminal, not the
+filesystem, so a throwaway cwd does not stop an absolute-path write), and a completion must
+actually be observed through the engine path. Re-adding it then needs more than the
+`routing.yaml` line: the prompt travels as one argv element, against a 32,767-character
+Windows command-line ceiling, so prompt transport must move to stdin or a file first.
 
 `agy` backends must run Gemini models. The CLI also serves `claude-*` and `gpt-oss-*`
 models; registering one of those under `family: gemini` would misreport the vendor and
 defeat the independence check without raising an error, so `validate_policy` rejects any
-`host: agy` backend whose model does not start with `gemini-`. `agy` is read-only
-(`write_mode: result-only`) and, unlike Codex, has no dispatch path in the engine yet —
-System A's `_shared/adapters/call_worker.sh` remains its dispatcher.
+`host: agy` backend whose model does not start with `gemini-`. `agy` is expected to return
+results rather than write (`write_mode: result-only`), but its `sandbox` field reads
+`containment-unverified`: that expectation is not enforced by anything.
 
 ## Global policy home
 
@@ -69,7 +78,9 @@ host, not a Windows-command compatibility shim.
 
 ## Concurrency protocol
 
-Each task owns `tasks/<task-id>/lease.json`. Lease creation is exclusive; only its owner
-may append `events.ndjson`, change dispatch state, or synthesize results. A stale lease
-may be replaced after its expiry. Recursive orchestration is forbidden. Bulk workers
+Each task owns `tasks/<task-id>/lease.json`. Lease creation is exclusive, and the engine
+lets only its owner append `events.ndjson`, claim worker slots, or release the lease. This
+is a protocol among cooperating callers, not a filesystem boundary: any local process can
+edit `task.yaml` or a result file directly, and nothing prevents it. A stale lease may be
+replaced after its expiry. Recursive orchestration is forbidden. Bulk workers
 operate on independent shards, use one result schema, and fan in to the conductor.

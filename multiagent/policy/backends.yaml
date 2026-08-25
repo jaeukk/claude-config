@@ -51,6 +51,16 @@
       "write_mode": "result-only",
       "supports_subagents": false
     },
+    "codex-conductor": {
+      "host": "codex",
+      "family": "codex",
+      "model": "gpt-5.6-sol",
+      "capabilities": ["planning", "routing", "review", "verification", "structured_result"],
+      "sandbox": "host-permissions",
+      "writes_mediated": false,
+      "write_mode": "host-approval",
+      "supports_subagents": true
+    },
     "codex-high": {
       "host": "codex",
       "family": "codex",
@@ -86,7 +96,7 @@
       "family": "gemini",
       "model": "gemini-3.1-pro-high",
       "capabilities": ["multimodal", "review", "verification", "structured_result"],
-      "sandbox": "read-only",
+      "sandbox": "containment-unverified",
       "writes_mediated": false,
       "write_mode": "result-only",
       "supports_subagents": false
@@ -96,7 +106,7 @@
       "family": "gemini",
       "model": "gemini-3.6-flash-low",
       "capabilities": ["bulk", "mechanical", "structured_result"],
-      "sandbox": "read-only",
+      "sandbox": "containment-unverified",
       "writes_mediated": false,
       "write_mode": "result-only",
       "supports_subagents": false

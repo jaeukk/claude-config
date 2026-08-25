@@ -17,8 +17,10 @@ host with the same policy and canonical skill.
    plugin; generated its Claude flavor under `_multiagent/`.
 2. Installed the standalone Codex CLI and registered `codex.cmd mcp-server` in Claude
    Code's local scope for this workspace.
-3. Added machine-readable roles, bindings, backend capabilities, routing, approvals,
-   and task-contract schema as a stricter overlay over the upstream starter.
+3. Added machine-readable roles, bindings, backend capabilities, routing, and approvals as
+   a stricter overlay over the upstream starter. (The task-contract schema was part of this
+   overlay but was later moved to `docs/task-contract.schema.json`: nothing ever loaded it,
+   so it documents the contract rather than constraining it — see D13.)
 4. Added a Python 3.14 policy engine with binding resolution, scope authorization,
    exclusive leases, owned event append, native/WSL Codex dispatch, and self-tests.
 5. Added Claude `PreToolUse` enforcement for scoped file tools, non-recursive worker

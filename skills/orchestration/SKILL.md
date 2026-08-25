@@ -1,15 +1,20 @@
 ---
 name: orchestration
-description: Claude-led conductor mode for routing model-independent roles across Claude Code and Codex with task contracts, approval tiers, independent review, bounded fan-out, and policy-enforced write scopes. Use when invoked as /orchestration, when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
+description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude, Codex, and Gemini backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /orchestration, when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
 ---
 
 # Orchestration
 
-Operate as the policy-enforced conductor **only** on Claude Code with the `claude-frontier`
-binding (currently Opus 5). This is a designed safety invariant, not merely a default: Codex
-child dispatch is Codex-family-only, so a Codex conductor cannot supply a different-family
-critic or verifier for a Codex-authored artifact. On every other host, operate advisory and do
-not acquire the conductor lease.
+Operate as the conductor on any host declared in the `conductor` binding — today Claude Code
+(`claude-frontier`, currently Opus 5) and Codex (`codex-conductor`). The invariant being
+protected is not "Claude conducts": it is that **a host may conduct only if it can actually
+reach a different-family critic and verifier**. That is a property of the host's dispatch
+adapter, not of its vendor, and the engine checks it directly instead of trusting a hard-coded
+name. On a host with no conductor adapter, operate advisory and do not acquire the lease.
+
+Say **policy-validated**, not policy-enforced. The contract is validated on every host; it is
+*enforced* only on Claude Code, where a PreToolUse hook can actually refuse a tool call. On
+Codex nothing intercepts you — see "Conductor host support".
 
 Within that, define work in model-independent roles, so backends and models can be swapped
 without rewriting the procedure.
@@ -36,8 +41,11 @@ project installation unless the user explicitly chooses a global task root. See
 ## Conductor procedure
 
 **Before step 1, check you are allowed to conduct at all** — see "Conductor host support" below.
-Only `claude-code` / `claude-frontier` is a policy-enforced conductor; on any other host, stop
-here and operate advisory. Do not reach step 3 and take a lease you cannot validly hold.
+Run `policy_engine.py validate-policy` **and** `validate-task` on your draft contract — the two
+answer different questions and neither calls the other. `validate-policy` checks the
+installation (can each declared conductor reach an independent critic at all?); `validate-task`
+checks your contract (is this host a declared conductor, can it dispatch every role you
+planned?). Do not reach step 3 and take a lease you cannot validly hold.
 
 1. Decompose the request into the smallest useful role set: `implementer`, `critic`,
    `bulk_worker`, `verifier`, or `runner`.
@@ -64,9 +72,10 @@ here and operate advisory. Do not reach step 3 and take a lease you cannot valid
   (currently Sonnet 5) when Codex authored the artifact.
 - `runner`: Claude fast tier first, then Codex low tier, then `agy-fast`.
 
-Effort belongs to the binding, not the backend registry. Note the enforcement asymmetry:
-the engine passes `effort` to Codex only, so Claude-side effort comes from the worker
-agent's frontmatter. Keep the two in sync.
+Effort belongs to the binding, not the backend registry, and `dispatch-worker` transmits it on
+every CLI path: `-c model_reasoning_effort` for Codex, `--effort` for Claude and `agy`. The one
+place it is *not* transmitted is a Claude worker spawned natively as a subagent, which takes
+effort from its agent frontmatter — keep that frontmatter in sync with the binding.
 
 ## Host adapter contract
 
@@ -87,9 +96,32 @@ An unmeasured limit is **absent, not zero**: drop it from the comparison. Never 
 into the `min` as a literal — it raises in Python and silently becomes `0` in JavaScript, which
 would stall every dispatch.
 
-`max_fanout` is a **policy ceiling** on simultaneous workers, enforced against
-`dispatch.active_workers` — it is not a statement of host capacity and must not be lowered to
-describe one. A `bulk_worker` job may hold more logical shards than the host can run at once;
+`max_fanout` is a **policy ceiling** on simultaneous workers — it is not a statement of host
+capacity and must not be lowered to describe one. It is counted in two places, and only one of
+them is trustworthy:
+
+- **`dispatch-worker` counts on the lease.** The engine claims a slot before launching and
+  releases it in a `finally`. Every lease mutation — acquire, heartbeat, claim, release —
+  runs under one lock file and writes atomically, so parallel dispatches cannot lose an
+  increment or read a half-written lease. This is why a real dispatch requires a live lease
+  you own: no lease, no place to keep the count. The lease is heartbeaten for the worker's
+  lifetime, bound to the lease generation so an abandoned dispatcher cannot prop up a lease
+  it no longer belongs to.
+- **Both counts charge one ceiling**, from whichever side asks: a CLI claim adds the
+  contract's native count, and the hook's native check adds the lease's held slots.
+
+What this does **not** do, so nobody mistakes it for more: it bounds *accidental* fan-out for
+one cooperating conductor on one machine. It is not a security boundary. A `SIGKILL`ed
+dispatcher leaves its child running and its slot held — until the lease expires unrenewed, at
+which point the count is lost while the orphan may still be alive. A natively-spawned worker
+is counted only because the conductor says so, and nothing stops a native spawn that never
+took a lease at all. A process killed mid-update leaves `lease.lock` behind and wedges the
+task: every later lease operation times out with a message naming the file, and lease expiry
+will not clear it — stop the task's processes and remove it by hand. Anything needing to
+survive a crashed or hostile participant needs a supervisor, not a JSON counter.
+- **Native spawns count on the contract.** A Claude `Task` or Codex `spawn_agent` goes nowhere
+  near the engine, so the hook can only read `dispatch.active_workers` — which the conductor
+  writes itself. Keep it accurate; nothing else can. A `bulk_worker` job may hold more logical shards than the host can run at once;
 the adapter schedules them in waves. `max_active_children: null` means unmeasured on that host —
 fall back to `max_fanout` alone rather than guessing.
 
@@ -99,31 +131,62 @@ fall back to `max_fanout` alone rather than guessing.
 three live (the conductor holds one of four slots), so "dispatch all in a single message" is not
 implementable there. When passing `model` or `reasoning_effort`, a full-history fork is
 rejected: use `fork_turns: "none"` (the deterministic default) or a bounded positive turn count
-when the child genuinely needs recent context. The Codex child API exposes **Codex-family models
-only** — it cannot dispatch a Claude or Gemini backend, so binding resolution on a Codex
-conductor must filter to what its adapter can actually invoke, not merely on family and
-capability.
+when the child genuinely needs recent context.
+
+The Codex **child API** exposes Codex-family models only. That is a limit of one dispatch
+mechanism, not of the host: `codex`, `claude`, and `agy` are all ordinary CLIs, so a Codex
+conductor dispatches a Claude critic as a subprocess instead. Use
+`policy_engine.py dispatch-worker --task … --role critic --brief …`, which resolves the binding
+under your host, refuses anything your adapter cannot reach, and runs the resolved backend's CLI
+with the brief on stdin. Never fill a cross-family role with `spawn_agent`; it cannot do it.
+
+The dispatchers do **not** contain a worker equally well, and the dry run reports which you get
+as `enforcement`:
+
+| Host | Enforcement | What that actually means |
+|---|---|---|
+| `codex` | `os-sandbox-read-only` | The OS refuses the write. A real guarantee. |
+| `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops inherited MCP servers. Binds the agent, not the process — a settings-level hook could still act. |
+| `agy` | `isolated-cwd-containment-unverified` | Not currently dispatchable — see "The Gemini family" below for why. |
+
+An allowlist is not a substitute for `--tools`: `--allowedTools` only grants permissions and
+leaves every other tool present. Never claim a Claude-hosted worker is sandboxed.
 
 ### Conductor host support
 
-Only **`claude-code` / `claude-frontier`** is a policy-enforced conductor: `task.schema.json`
-pins both as constants and the validator rejects anything else. **This is deliberate.** Because
-Codex child dispatch is Codex-family-only, a Codex conductor could never obtain the
-different-family `critic` and `verifier` that `bindings.yaml` requires and `resolve_binding`
-fails closed on — so widening the constants would accept contracts the runtime cannot fulfil.
-Treat it as an invariant to preserve, not an unfinished feature.
+A host may conduct when three things hold, all machine-checked:
 
-A `conductor_adapters` entry does **not** make a host eligible to conduct; it describes dispatch
-mechanics only, and Codex already has one. Codex conductorship becomes supportable only when its
-adapter can invoke at least one non-Codex critic and verifier *and* binding resolution filters
-candidates by adapter dispatchability as well as family independence.
+1. Its backend is a declared candidate of the `conductor` binding (`claude-frontier`,
+   `codex-conductor`).
+2. Its host has a `conductor_adapters` entry in `routing.yaml`.
+3. That entry's `dispatch_hosts` reaches an independent `critic` and `verifier` for **every**
+   author family — `validate_policy` rejects a conductor candidate that cannot, and
+   `resolve_binding` skips any candidate the conducting adapter cannot invoke.
 
-On any other host, do **not** acquire a conductor lease or claim enforced orchestration — say
-plainly that enforced orchestration is limited to Claude Code and why, then fall back to
-advisory operation. Extending this
-means adding a conductor backend, allowing it in the conductor binding, replacing the schema
-constants with validated values, and removing the validator's hard-coded check — not asserting
-a contract the engine will refuse.
+`dispatch_hosts` is required and **fails closed**: an adapter that omits it dispatches nothing.
+So the way to keep a host out of the conductor seat is to withhold reachability, not to hard-code
+a name — and the way to add one is to give it a genuine cross-family dispatch path, not to widen
+an enum.
+
+Two asymmetries remain real on Codex, and neither blocks conducting:
+
+- **Nothing intercepts a Codex conductor.** `claude_pretool.py` gives Claude Code a
+  PreToolUse gate on writes and on family independence; Codex has no equivalent adapter, so
+  there **is no enforcement on Codex** — only what you choose to ask. Nothing stops a Codex
+  conductor from filling `critic` with `spawn_agent` and reviewing its own artifact, and the
+  Codex host's approval prompts do not help: they ask about side effects, not about which
+  vendor is reviewing whom. So on Codex, call `policy_engine.py authorize` before acting and
+  `dispatch-worker` for every worker, and describe the result as a contract you kept, never as
+  a contract that was enforced. (Claude Code's gate is narrower than it sounds too: it sees
+  tool calls, so a worker CLI launched from `Bash` bypasses the independence check. The hook
+  denies what looks like one and redirects you to `dispatch-worker`, but that match is a
+  **heuristic** — a leading space or an absolute path defeats it. It catches the slip, not an
+  adversary; do not grow the regex into something that looks authoritative.)
+- **Fan-out of three.** `max_active_children: 3` caps simultaneous workers; schedule larger
+  `bulk_worker` jobs in waves.
+
+On a host with no conductor adapter at all, do **not** acquire a lease or claim enforced
+orchestration. Say plainly which hosts are declared and why yours is not, then operate advisory.
 
 ## The Gemini family (`agy`)
 
@@ -140,11 +203,17 @@ Two limits to state plainly, because the registry entry can read as more than it
   and performs no health check, so the third candidate is never reached on the normal
   path. During an outage the conductor must select it deliberately. What the registration
   buys is that such a choice *exists*, not that it happens by itself.
-- **System B cannot dispatch it.** The engine's only dispatcher is `dispatch_codex`. The
-  `agy-*` capability declarations presuppose execution through System A's
-  `call_worker.sh`; they are not evidence that the policy engine can invoke `agy` itself.
-  Likewise `effort` in the binding is declarative for `agy` — nothing transmits it, since
-  the Gemini tier is carried by the model name instead.
+- **The engine has a builder for it, and still will not dispatch it.** `WORKER_CLI` knows how
+  to launch `agy`, but `agy` is absent from every adapter's `dispatch_hosts`, so
+  `resolve_binding` skips it and `--required-family gemini` returns "no compatible backend".
+  That is deliberate, and the reason is not laziness: `--sandbox` restricts the terminal but
+  is not a filesystem boundary, so a throwaway cwd does not stop an absolute-path write, and
+  no completion has ever been observed through this path. Until containment is established
+  *and* a run succeeds, Gemini is reachable only through System A's `call_worker.sh`.
+  Re-enabling is *not* just the one line in `routing.yaml`: the prompt goes out as a single
+  argv element, and Windows caps a command line at 32,767 characters, so an inlined brief of
+  any real size needs moving to stdin or a file in the worker's cwd first. Routing change
+  plus prompt-transport work, after both preconditions hold.
 
 Three rules govern it:
 
@@ -160,9 +229,11 @@ Three rules govern it:
   open many files. Inline the snippets it needs into the brief and tell it not to open
   files. A single image or PDF path is fine.
 
-`agy` is read-only in this system: `write_mode: result-only`, isolated temp cwd, and the
-conductor records its output. It supports `--json-schema` and `--output-format json`, which
-is how a `bulk_worker` shard conforms to the shared result schema.
+`agy` is *expected* to write nothing — `write_mode: result-only`, isolated temp cwd, and the
+conductor records its output — but that is a convention, not a guarantee: its `sandbox` field
+reads `containment-unverified` precisely because nothing stops an absolute-path write. It
+supports `--json-schema` and `--output-format json`, which is how a `bulk_worker` shard
+conforms to the shared result schema.
 
 ## Approval and enforcement
 
@@ -171,7 +242,9 @@ contract. Obtain explicit user approval for conductor handoff, scope expansion,
 destructive actions, external side effects, credentials, or policy overrides.
 
 During an active task, use hook-visible file tools for writes. Do not mutate through
-shell redirection or bulk shell commands. Keep direct conductor code edits to at most
+shell redirection or bulk shell commands. On a host without a PreToolUse adapter (Codex), the
+same rule holds without a hook to catch you: call `policy_engine.py authorize` with the write
+before making it, and keep every mutation inside `write_scope`. Keep direct conductor code edits to at most
 two small files and send them through independent critic review. Write authority is decided
 per selected backend and enforcement adapter, **not by product family**: a worker whose backend
 declares `writes_mediated: false` returns results or patches even when its host is capable of

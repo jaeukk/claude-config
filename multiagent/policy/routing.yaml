@@ -9,8 +9,8 @@
     "require_lease": true
   },
   "conductor_adapters": {
-    "claude-code": {"max_active_children": null, "supports_batch_spawn": true},
-    "codex": {"max_active_children": 3, "supports_batch_spawn": false}
+    "claude-code": {"max_active_children": null, "supports_batch_spawn": true, "dispatch_hosts": ["claude-code", "codex"]},
+    "codex": {"max_active_children": 3, "supports_batch_spawn": false, "dispatch_hosts": ["codex", "claude-code"]}
   },
   "routes": [
     {"when": "implementation_or_refactor", "role": "implementer"},

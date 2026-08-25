@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://local.invalid/multiagent/task.schema.json",
-  "title": "Multi-agent task contract",
+  "$id": "https://local.invalid/multiagent/docs/task-contract.schema.json",
+  "title": "Multi-agent task contract (documentation, not enforcement)",
+  "$comment": "DESCRIPTIVE ONLY. Nothing loads this file. The authority is validate_task() in engine/policy_engine.py, which hand-checks a subset of what is written here -- approvals.user, for instance, is required below but never inspected there. It lives in docs/ rather than policy/ so that its status is visible from its path: editing it changes no behaviour. Change validate_task() instead, then update this file to match.",
   "type": "object",
   "required": ["schema_version", "task_id", "status", "conductor", "target_repo", "write_scope", "roles_plan", "approvals", "dispatch"],
   "properties": {
@@ -10,11 +11,11 @@
     "status": {"enum": ["pending", "active", "verifying", "complete", "blocked", "cancelled"]},
     "conductor": {
       "type": "object",
-      "description": "Policy-enforced orchestration is intentionally limited to claude-code/claude-frontier. The Codex child API can dispatch only Codex-family models, so a Codex conductor cannot guarantee the different-family critic and verifier required for Codex-authored artifacts. Do not widen these constants until a Codex-host adapter can invoke a non-Codex review backend AND binding resolution filters candidates by adapter dispatchability.",
+      "description": "Eligibility is computed, not listed here: validate_task() requires the host/backend pair to be a declared conductor-binding candidate whose adapter can dispatch every planned role. Enumerating the pair in this schema too would only drift from bindings.yaml and would still admit invalid cross-products such as codex + claude-frontier.",
       "required": ["host", "backend", "lease_owner"],
       "properties": {
-        "host": {"const": "claude-code"},
-        "backend": {"const": "claude-frontier"},
+        "host": {"type": "string", "minLength": 1},
+        "backend": {"type": "string", "minLength": 1},
         "lease_owner": {"type": "string", "minLength": 1}
       }
     },

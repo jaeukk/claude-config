@@ -53,6 +53,59 @@
 
 - **D11 agy = System B 1급 백엔드 + per-call 모델 핀** = (a) `policy/backends.yaml`에 `agy-multimodal`(`gemini-3.1-pro-high`)·`agy-fast`(2026-07-31 step 1 실측 후 `gemini-3.6-flash-low`로 재핀 — 최초 등재값은 `-medium`)를 **family `gemini`**로 등재하고 `bulk_worker`·`runner` 풀 및 `critic`·`verifier`의 3순위 후보에 편입. 근거: 2-family 구성에서는 critic/verifier의 different-family 후보가 각 1개뿐이라 **해당 벤더 장애 = 독립 검증 정지**라는 단일 실패점이 있다. 3번째 family가 이 구조적 공백을 없앤다. **단 자동 failover는 아니다** — `resolve_binding`은 가용성을 탐지하지 않고 첫 적격 후보를 반환하므로 3순위 gemini는 정상 경로에서 결코 선택되지 않는다. 벤더 장애 시 Orchestrator가 **명시적으로 선택**해야 하는 후보이며, 그 선택지가 존재한다는 것이 이 변경의 효용이다(codex-critic 2026-07-31 지적 반영). 또한 System B에는 agy 디스패치 경로가 없다(`dispatch_codex` 단독) — `agy-*`의 capability 선언은 System A `call_worker.sh` 경유 실행을 전제한 것이지 System B가 자체 호출할 수 있다는 뜻이 아니다. 이를 위해 `engine/policy_engine.py`의 `bulk_families != {"claude","codex"}` **정확일치**를 **부분집합**(`{"claude","codex"} <= bulk_families`)으로 완화 — Claude·Codex 필수 요구는 그대로 두고 추가 family만 허용한다(요구 완화 아님). `resolve --author-family` choices에 `gemini` 추가. (b) **D7(c) 근거 정정**: agy 1.1.8은 `--model`·`--effort low|medium|high`를 **인자로** 받으므로 "agy 모델은 전역이라 per-call 핀 불가"는 더 이상 성립하지 않는다. `call_worker.sh`는 `@brief`/`@brief_content` 외 인자를 그대로 통과시키므로 **코드 변경 없이** `args_template`에 `--model <id>`를 넣어 핀한다. D7(c)의 *결론*(backends.json 명시 핀이 정본)은 유지되고 *근거*만 "전역이라 불가피"에서 "명시적 선택"으로 바뀐다 — 결론 불변이므로 D7 자체는 재논의 대상 아님. (c) **agy 경유 비-Gemini 모델 등재 금지**: agy는 `claude-sonnet-4-6`·`claude-opus-4-6-thinking`·`gpt-oss-120b-medium`도 노출하나, 이를 등재하면 `family: gemini`가 실제 모델 벤더와 어긋나 critic/verifier 독립성이 **조용히**(에러 없이) 무너진다. 엔진이 `host == "agy"`이면서 `model`이 `gemini-` 접두가 아닌 항목을 error로 차단 — 음성 테스트로 확인. 검증: `policy_engine.py validate-policy`·`self-test` + INV13. 주의: vault 사본(`20_Notes/_shared/`)은 System A 전용 미러라 D10·D11·INV13을 담지 않는다. (2026-07-31, tasks/agy-integration/)
 
+- **D12 conductor 자격 = 호스트 이름이 아니라 디스패치 도달성** = `task.schema.json`이 conductor
+  host/backend를 상수로 고정하던 방식을 폐기하고, **계산되는 3조건**으로 대체한다: (a) 해당 backend가
+  `bindings.yaml`의 `conductor` 후보일 것, (b) 그 host에 `conductor_adapters` 항목이 있을 것,
+  (c) 그 항목의 `dispatch_hosts`가 **모든 author family에 대해** 독립 critic·verifier에 도달할 것.
+  `validate_policy`가 (c)를 전 후보에 대해 검사하고 `resolve_binding`은 어댑터가 호출할 수 없는 후보를
+  건너뛴다. 근거: 기존 상수의 정당화("Codex child API는 Codex family만 스폰 가능")는 **하나의 디스패치
+  수단**의 한계였지 호스트의 한계가 아니다 — `claude`·`codex`·`agy`는 모두 CLI이므로 Codex conductor도
+  서브프로세스로 Claude critic을 호출할 수 있다(실증: codex/codex-conductor 계약으로 Claude worker
+  dispatch, exit 0). 따라서 `codex-conductor` 백엔드를 등재하고 conductor 후보에 편입한다.
+  `dispatch_hosts`는 **필수·fail-closed**(누락 = 아무것도 디스패치 못 함)이며, `WORKER_CLI`에 빌더가
+  없는 host를 선언하면 validation error다 — "도달 가능"이 조용히 의미를 잃는 것을 막는 장치.
+  **여기서 "도달 가능"은 정적 도달성**이다 — 빌더와 설정이 존재한다는 뜻이지 실행 가능성·인증·쿼터·
+  헬스를 뜻하지 않는다. `resolve_binding`은 여전히 가용성을 탐지하지 않는다.
+  **D10·D11 부분 정정**: (i) D10의 "엔진은 codex에만 모델 문자열을 전달"은 `dispatch-worker` CLI 경로에
+  한해 폐기된다 — 이 경로는 claude에도 `--model`·`--effort`를 전달하므로 해당 핀이 load-bearing이다.
+  단 **네이티브 Task 경로로 스폰된 Claude subagent는 여전히 선언적**이며 세션·frontmatter가 정본이다
+  (D10의 세션 레버 3곳 경고는 그 경로에 대해 그대로 유효).
+  (ii) D11의 "System B에는 agy 디스패치 경로가 없다"는 **부분 폐기**다 — `WORKER_CLI`에 `agy` 빌더는
+  추가했으나(prompt는 argv, 일회용 cwd, `--add-dir` 없음), **어떤 어댑터의 `dispatch_hosts`에도 넣지
+  않았다**. 즉 빌더는 존재하되 엔진이 선택할 수 없다. 보류 사유 2가지: (1) **격리가 입증되지 않았다** —
+  `--sandbox`는 터미널 제한이지 파일시스템 경계가 아니어서 절대경로 쓰기를 막지 못하며, 그래서 System A가
+  쓰는 `--dangerously-skip-permissions`를 여기서는 **의도적으로 뺐다**. (2) 이 경로로 **완료를 한 번도
+  관측하지 못했다**(agy 쿼터 소진). 해제 조건은 이 둘의 충족이며, 그때 argv 길이 한계(Windows 32,767자)도
+  함께 처리해야 한다. D11의 *결론*(3번째 family는 자동 failover가 아니라 명시적 선택지)은 유지되지만,
+  현재 그 선택지는 System A `call_worker.sh` 경유로만 실재한다.
+  **미해결(의도적)**: Codex에는 PreToolUse 어댑터가 없어 **강제가 없다** — 계약은 검증될 뿐 집행되지
+  않으므로 문서·프롬프트에서 "policy-enforced"가 아니라 **"policy-validated"**로 쓴다. Claude Code의
+  훅도 Bash로 워커 CLI를 직접 띄우면 우회되며, 이를 막는 정규식은 **휴리스틱**(실수 방지용)이지 경계가
+  아니다. (2026-08-25, codex-critic Sol high 2라운드 감사 반영 — 1라운드 9건·2라운드 7건)
+
+- **D13 세어야 하는 수는 세어지는 쪽이 소유한다** = (a) `dispatch.active_workers`는 **제한 대상인
+  conductor 자신이 쓰는 값**이라 0으로 두면 fan-out 상한이 무력화됐다. `dispatch-worker`는 이제
+  **lease에 슬롯을 claim/release**한다(`claim_worker_slot`·`release_worker_slot`, `finally`에서 반환). 카운터 변경은 **lock 파일(O_EXCL) 아래 read-modify-write**다 — fan-out은 곧 여러 `dispatch-worker` 프로세스가 한 lease를 동시에 고치는 상황이라, 잠금 없이는 증가분이 유실되어 상한을 넘긴다(40스레드 경쟁 실측: limit 3 → 정확히 3건 승인). 또한 claim은 **lease 세대(`acquired_at`)에 묶이고**, 워커 실행 중에는 **heartbeat 스레드가 lease를 갱신**한다(기본 TTL 300초는 실제 워커보다 짧다 — 이 감사 자체가 그랬다). release는 만료된 lease에서도 허용하되(슬롯 누수 방지) **세대가 다르면 거부하고 stderr로 경고**한다.
+  lease는 (협조적 참여자 전제 하에) 단일 소유자가 관리되는 유일한 파일이므로 **위조되면 안 되는 수**가 있을 자리다. 부수 효과로
+  실제 dispatch는 **살아있는 자기 소유 lease를 요구**한다(없으면 거부) — 절차 3(lease)→4(dispatch) 순서를
+  엔진이 강제하게 됐다. 네이티브 스폰(Claude `Task`·Codex `spawn_agent`)은 엔진을 거치지 않으므로 여전히
+  계약값에 의존한다 — **두 카운터가 공존**하며 신뢰도가 다르다. 단 **상한은 하나**이며 **양방향**이다:
+  CLI claim은 계약값을 `reserved`로 charge하고, 훅의 네이티브 검사는 lease의 보유 슬롯을 더한다
+  (한쪽만 하면 각자 limit만큼 떠서 총량이 2배가 된다 — codex 지적).
+  **위협 모델을 명시한다**: 이 카운터가 막는 것은 **협조적인 conductor 1명의 사고성 fan-out**이지
+  보안 경계가 아니다. dispatcher가 SIGKILL되면 자식은 살아남고 슬롯은 물린 채 남으며, lease 만료 후에는
+  카운트만 사라지고 고아 워커가 남을 수 있다. 네이티브 워커는 conductor가 신고해야만 세어진다.
+  크래시·적대적 참여자까지 견뎌야 한다면 JSON 카운터가 아니라 supervisor가 필요하다 — 이 문단보다
+  강한 약속을 암시하는 장치를 여기에 더 붙이지 말 것.
+  (b) `dispatch-worker`가 `--role`로 인가하면서 훅은 `dispatch.current_role`을 읽어 **두 집행 경로가 서로
+  다른 역할을 볼 수 있었다** → 불일치 시 거부한다.
+  (c) `policy/task.schema.json`은 **어떤 코드도 로드하지 않았다**(정본은 `validate_task()`이고 부분집합만
+  검사 — 예: `approvals.user` 미검사). "machine-readable policy"라는 표기가 실제보다 과대였으므로
+  **`docs/task-contract.schema.json`으로 이동**하고 `$comment`에 설명적 문서임을 박아 넣었다. 경로 자체가
+  지위를 드러내게 하는 것이 목적 — 스키마를 고쳐도 동작은 안 바뀐다. 강제로 승격하는 선택지도 있었으나
+  중복 정본 2개를 만드는 비용이 더 크다고 판단했다.
+  근거: codex 자가 적격성 점검(2026-08-25)에서 (a)(b)(c) 지적. (2026-08-25)
+
 ## 4. 불변식
 
 구체 항목·검증 명령은 `_shared/system-invariants.md`. 시스템 수정 후 그 자가점검을 돌린다.

@@ -4,7 +4,8 @@
     "conductor": {
       "mode": "session_assertion",
       "candidates": [
-        {"backend": "claude-frontier", "effort": "high"}
+        {"backend": "claude-frontier", "effort": "high"},
+        {"backend": "codex-conductor", "effort": "high"}
       ]
     },
     "implementer": {

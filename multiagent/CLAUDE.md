@@ -2,9 +2,10 @@
 
 > **Local policy overlay:** Before creating or dispatching a task, read `policy/roles.yaml`,
 > `policy/bindings.yaml`, `policy/backends.yaml`, `policy/routing.yaml`, and
-> `policy/approvals.yaml`. These machine-readable files and `policy/task.schema.json` are
-> authoritative where they are stricter than the generated upstream prose. Operational
-> details are in `docs/architecture.md` and `docs/task-contract.md`.
+> `policy/approvals.yaml`. These machine-readable files are authoritative where they are
+> stricter than the generated upstream prose. Operational details are in
+> `docs/architecture.md` and `docs/task-contract.md`; `docs/task-contract.schema.json`
+> describes the contract shape but is documentation — `validate_task()` is what runs.
 
 ## Architecture
 
