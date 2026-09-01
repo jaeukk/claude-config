@@ -49,7 +49,6 @@ planned_workers: []
 #   purpose:
 # - role: codex-critic
 #   purpose:
-# - role: gemini
 #   purpose:
 ```
 

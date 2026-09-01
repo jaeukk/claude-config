@@ -31,8 +31,7 @@
 | claude-main | 중간 | Claude API/구독 쿼터 차감 |
 | codex-main | 중간 | Codex 호출 쿼터 |
 | codex-critic | 낮음-중간 | Codex 호출 쿼터 |
-| gemini flash | 낮음 | Gemini 쿼터 |
-| gemini pro | 중간-높음 | Gemini 쿼터 |
+| ~~gemini flash / pro~~ | — | 비활성 (D14) |
 
 claude-main이 "내부 추론"과 같은 모델이라도 별도 호출이므로 쿼터·비용 발생.
 

@@ -26,10 +26,10 @@
 │   └── codex-critic   (Codex의 주된 역할)
 │
 ├── [document-reading] few-page 문서(PDF·페이지 이미지) 읽기 · 사실 추출 · 발췌?
-│   └── gemini-reader  ← **우선**. 실패·부적합 시 codex-main → claude-main
+│   └── codex-main  → 실패·부적합 시 claude-main   (gemini 비활성, D14)
 │
 ├── [multimodal] 이미지 · 스크린샷 분석 / 50페이지+ 문서 / 제3자 시각의 검토?
-│   └── gemini
+│   └── claude-main (이미지 첨부 가능) 또는 codex-main   (gemini 비활성, D14)
 │
 └── 판단 어려움?
     └── claude-main으로 시작 후 필요 시 추가
@@ -42,7 +42,7 @@
 1. **선행 의존성 우선**: codex-critic은 리뷰 대상(보통 claude-main 결과)이 먼저 있어야 함 → 해당 산출물 뒤에 호출
 2. **Orchestrator 내부 추론 우선**: 별도 worker 호출 전에 orchestrator 자체 추론으로 해결 가능한지 먼저 판단. 그래도 부족할 때만 claude-main 호출 (claude-main도 비용·쿼터 대상)
 3. **검증은 한 번만**: codex-critic은 작업당 1회 원칙. 재호출은 검증 실패 시만
-4. **gemini는 명시적 트리거 시만**: 멀티모달 또는 "제3자 시각의 검토 필요" 명시 없으면 호출 금지
+4. **gemini는 비활성**(D14): worker pool에서 제거됐다. 멀티모달·문서읽기는 claude-main/codex-main이 맡는다 — Claude·Codex 주간 한도를 쓰므로 필요할 때만 호출
 
 ## 토폴로지 패턴 (worker를 어떻게 엮을까)
 
@@ -51,7 +51,7 @@ decision tree로 "누구를" 고른 뒤, "어떻게 엮을지" 고른다. **단�
 | 패턴 | 언제 | 이 시스템에서 |
 |------|------|-------------|
 | Pipeline (순차) | 앞 결과가 뒤 입력 | 기본. claude-main → codex-critic → claude-main(반영) |
-| Fan-out/Fan-in (병렬→통합) | 서로 독립된 산출물 여럿을 하나로 통합 | 예: claude-main(코드) ∥ gemini(이미지). 각 brief에 "타 worker 결과 미참조" 명시. 통합은 아래 Fan-in 규칙 |
+| Fan-out/Fan-in (병렬→통합) | 서로 독립된 산출물 여럿을 하나로 통합 | 예: claude-main(코드) ∥ codex-main(테스트). 각 brief에 "타 worker 결과 미참조" 명시. 통합은 아래 Fan-in 규칙 |
 | Expert Pool (전문가 선택) | 작업 성격에 맞는 worker만 | 새 실행 패턴이 아니라 **worker 선택 정책** — 위 decision tree + 최소 worker set이 곧 이 패턴 |
 | Producer-Reviewer (생성+게이트) | 산출물 품질 검증 필요 | claude-main(생성) → codex-critic(adversarial 게이트) |
 
@@ -115,51 +115,15 @@ decision tree로 "누구를" 고른 뒤, "어떻게 엮을지" 고른다. **단�
 - **비용**: 있음 → 승인 필요
 - **파일 쓰기**: ❌ 직접 X. Orchestrator 경유
 
-### gemini
-- **슬롯**: multimodal
-- **용도**: 이미지/스크린샷/다이어그램 분석, 50페이지+ 문서 스캔, 제3자 시각의 검토
-- **결과물**: 분석 텍스트, 요약
-- **호출 명령**: `_shared/backends.json`의 `gemini` 항목이 정본. 디스패처로 호출:
-  ```
-  bash _shared/adapters/call_worker.sh gemini <brief-file>   # 결과 = JSON envelope
-  ```
-  백엔드 = Antigravity `agy` CLI(헤드리스), 기본 `gemini-3.1-pro-high`, 폴백 = api(`adapters/gemini_api.sh`). 폐기: `mcp__gemini-pro__*`·`mcp__gemini__*` 프록시 브리지.
-- **소스·다중파일 검토는 인라인 필수**: 소스 코드 발굴·검토를 시킬 땐 **디렉토리나 다수 파일 순회를 시키지 말 것** — agy 헤드리스가 300s 타임아웃(exit 124)으로 실패한다(2026-07-04 실측). 필요한 스니펫을 orchestrator가 brief 본문에 **인라인**하고 "파일 열지 말 것"을 명시하라(동일 과제 인라인 재호출 실측 = 27s exit 0). 단일 이미지/PDF 경로 참조는 예외(~26s 정상). 시간 제한 작업에서 gemini에 의존하기 전 경량 스모크 1회로 가용성부터 확인.
-- **폴백 조건**: api 폴백은 `GEMINI_API_KEY` 필요 — 미설정이면 디스패처가 호출 시작 시 경고를 내고, primary 실패 시 폴백 없이 실패한다(실패 사유는 envelope `stderr_sanitized`에 남음).
-- **비용**: agy 쿼터 소모 → 승인 필요. 빠른 경로는 `backends.json`의 `args_template`에서 `--model`을 flash 계열(`gemini-3.6-flash-low` 등)이나 `gemini-3.1-pro-low`로.
-- **파일 쓰기**: ❌ MCP 응답을 Orchestrator가 받아 기록
+### gemini · gemini-reader — **비활성 (D14, 2026-08-26)**
 
-### gemini-reader
+agy 백엔드를 껐다. 두 워커는 `_shared/backends.json`에서 제거됐고 `call_worker.sh`로 호출할 수 없다.
+멀티모달·문서읽기는 codex-main → claude-main 순으로 대체한다. 되살리려면 backends.json 항목과
+`policy/bindings.yaml` 후보를 함께 복원해야 한다.
 
-- **슬롯**: document-reading (**기본값 — 문서 읽기는 여기서 시작한다**)
-- **용도**: few-page 문서(readable PDF·페이지 이미지) 읽기, 사실·수치·수식 추출, 발췌
-- **모델**: `gemini-3.6-flash-low` (agy). `-medium`은 토큰·지연 2배에 정확도 이득 없어 배제
-- **호출 명령**: `bash _shared/adapters/call_worker.sh gemini-reader <brief-file>`
-  - **선행 조건: `jq`.** 미설치 시 디스패처가 모델 호출 **이전에** exit 5(`call_worker: jq 필요`)로
-    죽는다. 2026-07-31 Sol 감사에서 미설치가 발각되어 `conda install -c conda-forge jq`로 해소
-    (jq-1.8.2). **end-to-end 실증 완료**: `TARGET_REPO=<복사본>` + brief 1문항 →
-    `status: ok, exit_code: 0, model: gemini-3.6-flash-low, 25s, fallback_used: false`, 정답 반환.
-  - ⛔ **`TARGET_REPO`는 반드시 "읽을 문서만 담은 일회용 복사 디렉토리"로 지정할 것.**
-    원본 Zotero 저장소·vault·repo를 직접 가리키지 말 것. 이유: 헤드리스 agy가 파일을 읽으려면
-    `--dangerously-skip-permissions`가 **불가피**한데(아래), 이 플래그는 쓰기 도구까지 자동
-    승인하며 `--sandbox`는 터미널 제한일 뿐 **쓰기 차단이 아니다**. `write_policy: none`도
-    선언일 뿐 `call_worker.sh`가 집행하지 않는다. 따라서 실질 경계는 **cwd를 버려도 되는
-    복사본으로 두는 것**뿐이다.
-  - `TARGET_REPO` 미설정 시 `$ROOT`로 폴백하므로(디스패처 기본값) **반드시 명시**할 것 —
-    미설정은 설치 루트 전체를 워크스페이스로 여는 결과가 된다.
-  - brief에서는 **파일명만** 참조한다(절대경로는 워크스페이스 밖일 수 있다)
-- **권한 플래그 실측(2026-07-31)**: `--sandbox` 단독 → 3/3 실패, `--sandbox --mode plan` →
-  3/3 실패(둘 다 `"command" permission ... headless mode cannot prompt`),
-  `--sandbox --dangerously-skip-permissions` → 3/3 성공. **안전한 중간항이 없다**는 것이 실측
-  결론이므로, 위험은 플래그가 아니라 cwd 격리로 억제해야 한다.
-- **배정 근거**: 2026-07-31 실측 48콜 — 정확도는 최상위 arm과 **동등**(천장효과로 변별 불가)이고,
-  결정적 이유는 **Claude·Codex 주간 한도를 소모하지 않는다**는 쿼터 경제다(agy 자체 쿼터는
-  소모하므로 "0 소모"가 아니다). 성능 우위 주장이 아님. 상세는 `capability-profile.md`
-- **비용**: agy(무료 계정) 쿼터만 소모 → Claude·Codex 주간 한도에 영향 없음. 그래도 승인 대상
-- **파일 쓰기**: ❌ envelope를 Orchestrator가 받아 기록
-- **한계**: 문서읽기 외 과제는 이 슬롯이 아니다. 50페이지+ 대용량·제3자 검토는 `gemini`(pro-high)
+### gemini-raw-build (다중 섹션 문서 → 노트 배치 경로) — **비활성 (D14)**
 
-### gemini-raw-build (다중 섹션 문서 → 노트 배치 경로)
+> 이 드라이버도 `agy`를 직접 호출하므로 agy 비활성화와 함께 멈춘다. 아래 기술은 되살릴 때를 위한 보존 기록이다.
 
 `gemini-reader`가 **1콜 = 1질의**라면, 이쪽은 **1잡 = N섹션**이다. 책·장문 문서를 섹션 단위로
 끊어 읽어 노트 초안을 만든다. `tasks/landau-raw-ingest/run_sections.py`(Landau §1–10, 37쪽,
@@ -217,7 +181,7 @@ Claude·Codex 주간 0%p)의 정형화.
 - **codex-main / codex-critic**: 사용자의 `~/.codex/config.toml` 기본값이 자동 적용된다 (현재 예: 최신 gpt + reasoning effort `high`). config.toml이 정본이라 여기에 버전을 핀하지 않는다. MCP 호출 시 `model` 파라미터를 비워두면 config 기본값 사용.
   - 가벼운 작업은 `profile: lightweight`로 전환 가능 (config.toml의 가벼운 모델 프로필)
   - 작업 성격상 다른 모델이 필요하면 brief.md에 명시
-- **gemini**: 백엔드 = Antigravity **`agy` CLI**(`_shared/backends.json` 정본, 디스패처 `call_worker.sh`). 기본 `gemini-3.1-pro-high`(agy에선 정상 — 옛 프록시 `400 INVALID_ARGUMENT`은 비해당), 빠른 경로 `gemini-3.6-flash-{high,medium,low}`/`gemini-3.1-pro-low`, 폴백 `api`. 옛 `mcp__gemini-pro__*` 프록시 브리지·CLI 래퍼 `mcp__gemini__*`는 **폐기**. **per-call 모델 핀 가능**(2026-07-31 정정) — agy 1.1.8은 `--model`·`--effort low|medium|high`를 인자로 받고 `call_worker.sh`는 `@brief`/`@brief_content` 외 인자를 그대로 통과시키므로, `args_template`에 `--model <id>`를 넣으면 계정 전역 `/model`과 무관하게 고정된다. 그 이전의 "전역이라 per-call 핀 불가" 기술은 agy 구버전 기준이었다. **agy 경유 비-Gemini 모델(`claude-*`·`gpt-oss-*`) 사용 금지** — family가 오표기되어 critic/verifier의 different-family 독립성이 조용히 무너진다(System B `policy_engine.py`가 이 조합을 error로 차단). 사용 가능 모델 전체 목록은 `agy models`. 근거: `_shared/learnings.md` [2026-06-02] · `design-basis.md` D4.
+- **gemini**: **비활성 (D14, 2026-08-26)** — `_shared/backends.json`에서 `gemini`·`gemini-reader`를 제거했고 `policy/bindings.yaml`의 `agy-*` 후보도 뺐다. 백엔드 레지스트리(`policy/backends.yaml`)의 `agy-multimodal`·`agy-fast` 항목과 엔진의 `_agy_cli` 빌더는 남아 있으나 어떤 바인딩·`dispatch_hosts`도 참조하지 않아 도달 불가다. 되살리려면 backends.json 워커 + bindings 후보 + `dispatch_hosts`를 함께 복원하고, 복원 전에 `_agy_cli` docstring이 적어 둔 두 전제(격리 입증·완료 관측)를 확인할 것.
 
 이 정책은 사용자별 config에 따라 달라질 수 있다 — starter clone 받은 학습자는 본인의 `~/.codex/config.toml` 기본값을 한 번 확인하고 자기 환경에 맞게 조정한다.
 
@@ -230,7 +194,7 @@ Claude·Codex 주간 0%p)의 정형화.
 | 대규모 구현·테스트 | claude-main (설계) → codex-main (구현·테스트) |
 | 브라우저 자동화 / 이미지 생성 | codex-main |
 | 구현 + 비평 | 생성 워커 → codex-critic → 반영 |
-| 대용량 문서 처리 | gemini |
+| 대용량 문서 처리 | codex-main (gemini 비활성) |
 | 전체 검토 | claude-main → codex-critic |
 
 모든 worker를 기본 호출하지 말 것. 필요한 worker만 선택.
@@ -239,4 +203,4 @@ Claude·Codex 주간 0%p)의 정형화.
 
 - 이미 있는 worker 결과로 해결 가능하면 추가 호출 금지
 - 이전 결과가 검증 미통과 시에만 동일 worker 재호출 가능
-- gemini는 "제3자 시각의 검토"가 명시적으로 필요할 때만
+- gemini는 비활성 (D14) — 제3자 시각이 필요하면 codex-critic이 그 역할을 맡는다

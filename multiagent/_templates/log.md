@@ -9,7 +9,7 @@
 ========================================
 형식 예시 (이 블록은 사용 시 삭제)
 ========================================
-[2026-05-11 14:30] [DECISION] routing.md 참조 → claude-main(설계) + codex-main(구현) + codex-critic(검증) 선택. gemini 제외 (이미지 없음)
+[2026-05-11 14:30] [DECISION] routing.md 참조 → claude-main(설계) + codex-main(구현) + codex-critic(검증) 선택. codex-critic은 구현 후 1회
 [2026-05-11 14:31] [APPROVAL] claude-main 사용자 승인. purpose: 설계·아키텍처 초안 (strategist)
 [2026-05-11 14:45] [WORKER_CALL] claude-main brief 전달. input: context.md + sources/spec.md
 [2026-05-11 15:10] [VERIFICATION] claude-main result 검토 — output_format ✅, constraints ✅, paths ✅

@@ -12,8 +12,8 @@
 | engineer | codex-main | 대규모 구현·테스트 철저, 비용·속도·토큰 효율 우위 |
 | computer-use | codex-main | 브라우저 조작·복잡 워크플로우 수행 우위 |
 | reviewer | codex-critic | 교차 벤더 독립 검증 (자기검수 회피) |
-| multimodal | gemini | 멀티모달·대용량 문서 처리 |
-| document-reading | **gemini-reader** (agy, `gemini-3.6-flash-low`) — 디스패처 end-to-end 실증 완료 | 문서 2건 실측에서 **차이 미검출**. 별도 agy 계정이라 **Claude·Codex 주간 한도를 소모하지 않음**(agy 자체 쿼터는 소모) |
+| multimodal | *(비활성)* → claude-main 또는 codex-main | gemini 비활성화 (D14) |
+| document-reading | *(비활성)* → codex-main → claude-main | gemini 비활성화 (D14). Claude·Codex 주간 한도를 쓴다 |
 
 ## 배정 이력 (append-only)
 
@@ -69,6 +69,16 @@
     일회용 cwd에서 돌므로 계약을 **인라인**한다. `run_sections.py`(landau 실증)의 정형화.
   - 남은 비대칭: agy 경로는 Zotero·vault에 도달할 수 없으므로 **Orchestrator가 전후를 감싼다**.
     이는 결함이 아니라 분리의 정의다 — 계약이 담당하는 것은 "읽기"뿐이다.
+
+- **2026-08-26** `agy`(gemini) **전면 비활성**. `multimodal`·`document-reading` 두 슬롯의 담당을
+  codex-main → claude-main으로 되돌린다. 근거: 사용자 지시. 성능 판정 변경이 아니라 **백엔드 철회**다 —
+  두 슬롯의 *정의*는 그대로 두고 담당만 비운다. 제거 범위: `_shared/backends.json`의 `gemini`·
+  `gemini-reader` 워커, `policy/bindings.yaml`의 `agy-multimodal`·`agy-fast` 후보(critic·verifier
+  3순위, bulk_worker·runner 풀). 남긴 것: `policy/backends.yaml`의 `agy-*` 레지스트리 항목과 엔진의
+  `_agy_cli` 빌더 — 어떤 바인딩도 참조하지 않아 도달 불가하며, 복원 시 재작성을 피하려 보존한다.
+  **대가**: 2026-07-31에 기록한 배정 근거(별도 agy 계정이라 Claude·Codex 주간 한도를 소모하지 않음)가
+  사라진다. 문서읽기가 이제 Claude·Codex 쿼터를 쓴다. 또한 D11의 3번째 family 장애 대비 후보가
+  없어져 critic·verifier의 different-family 후보가 다시 각 1개다(D14).
 
 ## 갱신 절차
 

@@ -106,6 +106,25 @@
   중복 정본 2개를 만드는 비용이 더 크다고 판단했다.
   근거: codex 자가 적격성 점검(2026-08-25)에서 (a)(b)(c) 지적. (2026-08-25)
 
+- **D14 agy(gemini) 전면 비활성 — D11 철회, D4·INV9 폐기** = 사용자 지시로 agy 백엔드를 껐다.
+  제거: `_shared/backends.json`의 `gemini`·`gemini-reader` 워커(System A), `policy/bindings.yaml`의
+  `agy-multimodal`·`agy-fast` 후보(System B — critic·verifier 3순위, bulk_worker·runner 풀).
+  **남긴 것**: `policy/backends.yaml`의 `agy-*` 레지스트리 항목, 엔진의 `_agy_cli` 빌더,
+  `host: agy` → `family: gemini`·`gemini-` 모델 강제 검사. 어떤 바인딩·`dispatch_hosts`도 참조하지
+  않으므로 도달 불가이며, 복원 시 재작성을 피하려 보존한다(삭제는 별도 결정 사항).
+  **대가를 명시한다**: (a) D11이 없애려던 단일 실패점이 **되돌아온다** — 2-family 구성에서
+  critic·verifier의 different-family 후보가 다시 각 1개뿐이라, 한 벤더 장애가 독립 검증을 정지시킨다.
+  (b) capability-profile의 `document-reading`·`multimodal` 슬롯 담당이 비고, codex-main → claude-main이
+  대신한다. 2026-07-31에 기록한 배정 근거(agy는 별도 계정이라 Claude·Codex 주간 한도를 소모하지 않음)가
+  사라지므로 **문서읽기가 이제 Claude·Codex 쿼터를 쓴다**. (c) `gemini_raw_build.py` 경로(섹션 단위
+  문서→노트 배치)도 agy를 직접 호출하므로 함께 멈춘다.
+  **INV9 폐기**: "backends.json의 gemini 백엔드가 agy CLI·pro-high" 불변식은 이제 거짓이며, 자기점검
+  스크립트가 실패한다. 반대 방향(agy/gemini 워커가 **없어야** 함)으로 뒤집었다. INV13(agy 항목의
+  family 정합성)은 레지스트리 항목을 남겼으므로 그대로 유효하다.
+  **복원 조건**: bindings 후보 + `dispatch_hosts` + backends.json 워커를 **함께** 복원해야 하며, 그 전에
+  `_agy_cli` docstring의 두 전제(격리 입증·완료 관측)와 argv 길이 한계(Windows 32,767자)를 처리할 것.
+  절반만 되살리면 D13 이전처럼 "등록됐지만 도달 불가한 죽은 설정"이 된다. (2026-08-26)
+
 ## 4. 불변식
 
 구체 항목·검증 명령은 `_shared/system-invariants.md`. 시스템 수정 후 그 자가점검을 돌린다.

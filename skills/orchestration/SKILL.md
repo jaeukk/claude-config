@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude, Codex, and Gemini backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /orchestration, when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
+description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude and Codex backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /orchestration, when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
 ---
 
 # Orchestration
@@ -66,14 +66,13 @@ planned?). Do not reach step 3 and take a lease you cannot validly hold.
 - `critic`: Codex high tier is first choice (currently Codex Sol); fall back to a
   different-family Claude backend when Codex authored the artifact.
 - `bulk_worker`: use both Claude fast tier (currently Haiku) and Codex low tier for
-  independent shards, then fan in to the conductor. The Gemini fast tier (`agy-fast`) is
-  a third pool member; Claude and Codex must both stay present.
+  independent shards, then fan in to the conductor. Claude and Codex must both stay present.
 - `verifier`: Codex standard tier is first choice; fall back to the Claude mid tier
   (currently Sonnet 5) when Codex authored the artifact.
-- `runner`: Claude fast tier first, then Codex low tier, then `agy-fast`.
+- `runner`: Claude fast tier first, then Codex low tier.
 
 Effort belongs to the binding, not the backend registry, and `dispatch-worker` transmits it on
-every CLI path: `-c model_reasoning_effort` for Codex, `--effort` for Claude and `agy`. The one
+every CLI path: `-c model_reasoning_effort` for Codex, `--effort` for Claude. The one
 place it is *not* transmitted is a Claude worker spawned natively as a subagent, which takes
 effort from its agent frontmatter — keep that frontmatter in sync with the binding.
 
@@ -107,8 +106,15 @@ them is trustworthy:
   you own: no lease, no place to keep the count. The lease is heartbeaten for the worker's
   lifetime, bound to the lease generation so an abandoned dispatcher cannot prop up a lease
   it no longer belongs to.
+- **Native spawns count on the contract.** A Claude `Task` or Codex `spawn_agent` goes nowhere
+  near the engine, so the hook can only read `dispatch.active_workers` — which the conductor
+  writes itself. Keep it accurate; nothing else can.
 - **Both counts charge one ceiling**, from whichever side asks: a CLI claim adds the
   contract's native count, and the hook's native check adds the lease's held slots.
+
+A `bulk_worker` job may hold more logical shards than the host can run at once; the adapter
+schedules them in waves. `max_active_children: null` means unmeasured on that host — fall back
+to `max_fanout` alone rather than guessing.
 
 What this does **not** do, so nobody mistakes it for more: it bounds *accidental* fan-out for
 one cooperating conductor on one machine. It is not a security boundary. A `SIGKILL`ed
@@ -119,11 +125,6 @@ took a lease at all. A process killed mid-update leaves `lease.lock` behind and 
 task: every later lease operation times out with a message naming the file, and lease expiry
 will not clear it — stop the task's processes and remove it by hand. Anything needing to
 survive a crashed or hostile participant needs a supervisor, not a JSON counter.
-- **Native spawns count on the contract.** A Claude `Task` or Codex `spawn_agent` goes nowhere
-  near the engine, so the hook can only read `dispatch.active_workers` — which the conductor
-  writes itself. Keep it accurate; nothing else can. A `bulk_worker` job may hold more logical shards than the host can run at once;
-the adapter schedules them in waves. `max_active_children: null` means unmeasured on that host —
-fall back to `max_fanout` alone rather than guessing.
 
 **Claude Code** — batch spawn is available: several dispatches in one message run concurrently.
 
@@ -147,7 +148,7 @@ as `enforcement`:
 |---|---|---|
 | `codex` | `os-sandbox-read-only` | The OS refuses the write. A real guarantee. |
 | `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops inherited MCP servers. Binds the agent, not the process — a settings-level hook could still act. |
-| `agy` | `isolated-cwd-containment-unverified` | Not currently dispatchable — see "The Gemini family" below for why. |
+| `agy` | — | Disabled; not dispatchable. See "The Gemini family" below. |
 
 An allowlist is not a substitute for `--tools`: `--allowedTools` only grants permissions and
 leaves every other tool present. Never claim a Claude-hosted worker is sandboxed.
@@ -188,52 +189,26 @@ Two asymmetries remain real on Codex, and neither blocks conducting:
 On a host with no conductor adapter at all, do **not** acquire a lease or claim enforced
 orchestration. Say plainly which hosts are declared and why yours is not, then operate advisory.
 
-## The Gemini family (`agy`)
+## The Gemini family (`agy`) — disabled
 
-The Antigravity CLI `agy` is registered alongside `claude-code` and `codex` as
-`agy-multimodal` (Gemini Pro tier) and `agy-fast` (Gemini Flash tier), both
-`family: gemini`. It exists to close a structural gap: with only two families, `critic` and
-`verifier` each have exactly one different-family candidate, so one vendor outage leaves
-independent review with no eligible backend at all. Gemini is the third candidate for both
-roles, never the first — prefer Codex, then Claude, then Gemini.
+`agy` is **off**. It holds no binding candidate and appears in no adapter's `dispatch_hosts`,
+so no role can resolve to it and `--required-family gemini` returns "no compatible backend".
+System A's `call_worker.sh` no longer defines `gemini` or `gemini-reader` either.
 
-Two limits to state plainly, because the registry entry can read as more than it is:
+What remains, unreferenced: the `agy-multimodal` / `agy-fast` entries in `backends.yaml`, the
+`_agy_cli` builder, and the engine's check that a `host: agy` backend must declare a Gemini
+model. They are kept so re-enabling is a configuration change rather than a rewrite. Nothing
+reaches them.
 
-- **It is not automatic failover.** `resolve_binding` returns the first eligible candidate
-  and performs no health check, so the third candidate is never reached on the normal
-  path. During an outage the conductor must select it deliberately. What the registration
-  buys is that such a choice *exists*, not that it happens by itself.
-- **The engine has a builder for it, and still will not dispatch it.** `WORKER_CLI` knows how
-  to launch `agy`, but `agy` is absent from every adapter's `dispatch_hosts`, so
-  `resolve_binding` skips it and `--required-family gemini` returns "no compatible backend".
-  That is deliberate, and the reason is not laziness: `--sandbox` restricts the terminal but
-  is not a filesystem boundary, so a throwaway cwd does not stop an absolute-path write, and
-  no completion has ever been observed through this path. Until containment is established
-  *and* a run succeeds, Gemini is reachable only through System A's `call_worker.sh`.
-  Re-enabling is *not* just the one line in `routing.yaml`: the prompt goes out as a single
-  argv element, and Windows caps a command line at 32,767 characters, so an inlined brief of
-  any real size needs moving to stdin or a file in the worker's cwd first. Routing change
-  plus prompt-transport work, after both preconditions hold.
+Know what turning it off costs, because it was registered for a reason. With two families,
+`critic` and `verifier` each have exactly **one** different-family candidate, so a single
+vendor outage leaves independent review with no eligible backend at all. Gemini was the third
+candidate that closed that gap. It is now gone, and the gap is back.
 
-Three rules govern it:
-
-- **Gemini models only.** `agy` also serves `claude-*` and `gpt-oss-*`. Registering one of
-  those under `family: gemini` would misreport the vendor and silently defeat the
-  different-family independence check. The engine rejects any `host: agy` backend whose
-  model does not start with `gemini-`.
-- **Pin the model per call.** `agy` accepts `--model` and `--effort low|medium|high` as
-  arguments, so the account-global `/model` setting is not authoritative. System A's
-  dispatcher passes through any argument that is not `@brief`/`@brief_content`, so pinning
-  is a data change in `args_template`, not a code change.
-- **Inline the sources.** Headless `agy` times out at 300s when told to walk a directory or
-  open many files. Inline the snippets it needs into the brief and tell it not to open
-  files. A single image or PDF path is fine.
-
-`agy` is *expected* to write nothing — `write_mode: result-only`, isolated temp cwd, and the
-conductor records its output — but that is a convention, not a guarantee: its `sandbox` field
-reads `containment-unverified` precisely because nothing stops an absolute-path write. It
-supports `--json-schema` and `--output-format json`, which is how a `bulk_worker` shard
-conforms to the shared result schema.
+Re-enabling needs all of: restore the binding candidates, add `agy` to `dispatch_hosts`, and
+restore the System A workers — plus the two preconditions `_agy_cli` records (containment
+actually established, a completion actually observed) and the argv-length work its docstring
+names. Do not re-add it halfway.
 
 ## Approval and enforcement
 

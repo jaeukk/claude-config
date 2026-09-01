@@ -19,32 +19,28 @@
       "mode": "different_family_from_author",
       "candidates": [
         {"backend": "codex-high", "effort": "high"},
-        {"backend": "claude-core", "effort": "high"},
-        {"backend": "agy-multimodal", "effort": "high"}
+        {"backend": "claude-core", "effort": "high"}
       ]
     },
     "bulk_worker": {
       "mode": "pool",
       "pool": [
         {"backend": "claude-fast", "effort": "low"},
-        {"backend": "codex-low", "effort": "low"},
-        {"backend": "agy-fast", "effort": "low"}
+        {"backend": "codex-low", "effort": "low"}
       ]
     },
     "verifier": {
       "mode": "different_family_from_author",
       "candidates": [
         {"backend": "codex-standard", "effort": "medium"},
-        {"backend": "claude-mid", "effort": "medium"},
-        {"backend": "agy-multimodal", "effort": "medium"}
+        {"backend": "claude-mid", "effort": "medium"}
       ]
     },
     "runner": {
       "mode": "first_available",
       "candidates": [
         {"backend": "claude-fast", "effort": "low"},
-        {"backend": "codex-low", "effort": "low"},
-        {"backend": "agy-fast", "effort": "low"}
+        {"backend": "codex-low", "effort": "low"}
       ]
     }
   }

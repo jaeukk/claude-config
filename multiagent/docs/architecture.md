@@ -35,30 +35,24 @@ local authority when it is stricter than the upstream prose.
 
 ## Hosts and families
 
-Three hosts serve workers: `claude-code`, `codex`, and `agy` (the Antigravity CLI), mapping
-to families `claude`, `codex`, and `gemini`. The third family is not redundancy for its own
-sake — `critic` and `verifier` bind with `different_family_from_author`, so a two-family
-registry leaves exactly one eligible candidate per role and one vendor outage halts
-independent review.
+Two hosts serve workers: `claude-code` and `codex`, mapping to families `claude` and `codex`.
+A third was registered for a reason worth restating, since it no longer applies: `critic` and
+`verifier` bind with `different_family_from_author`, so a two-family registry leaves exactly
+one eligible candidate per role, and one vendor outage halts independent review. It was never
+automatic failover — `resolve_binding` returns the first eligible candidate without probing
+health, so a third-ranked candidate had to be chosen deliberately during an outage.
 
-This is availability of a *choice*, not automatic failover: `resolve_binding` returns the
-first eligible candidate without probing health, so the third-ranked Gemini candidate is
-never selected on the normal path and must be chosen deliberately during an outage.
-`agy` has a builder in `WORKER_CLI`, but it is **withheld from every adapter's
-`dispatch_hosts`**, so no engine-resolved role can reach it and System A's
-`_shared/adapters/call_worker.sh` remains its only dispatcher. Two things must hold before it
-is re-added: containment must be established (`--sandbox` restricts the terminal, not the
-filesystem, so a throwaway cwd does not stop an absolute-path write), and a completion must
-actually be observed through the engine path. Re-adding it then needs more than the
-`routing.yaml` line: the prompt travels as one argv element, against a 32,767-character
-Windows command-line ceiling, so prompt transport must move to stdin or a file first.
+`agy` is **disabled** (D14): no binding candidate, absent from every `dispatch_hosts`, and
+its System A workers (`gemini`, `gemini-reader`) are removed from `_shared/backends.json`. The
+`agy-multimodal`/`agy-fast` registry entries and the `_agy_cli` builder remain but are
+unreachable, kept so re-enabling is configuration rather than a rewrite. The cost: with two
+families, `critic` and `verifier` again have exactly one different-family candidate each.
 
 `agy` backends must run Gemini models. The CLI also serves `claude-*` and `gpt-oss-*`
 models; registering one of those under `family: gemini` would misreport the vendor and
 defeat the independence check without raising an error, so `validate_policy` rejects any
-`host: agy` backend whose model does not start with `gemini-`. `agy` is expected to return
-results rather than write (`write_mode: result-only`), but its `sandbox` field reads
-`containment-unverified`: that expectation is not enforced by anything.
+`host: agy` backend whose model does not start with `gemini-`. That check still runs, though
+nothing currently registers a reachable agy backend.
 
 ## Global policy home
 

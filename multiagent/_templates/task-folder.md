@@ -12,7 +12,7 @@ tasks/<task-name>/
 ├── sources/             # 선택. 원본 자료 (긴 문서, 참고 spec 등)
 │   └── *.md, *.pdf, *.txt
 ├── workers/             # worker 호출 시 동적 생성
-│   └── <role>/          # claude-main | codex-main | codex-critic | gemini
+│   └── <role>/          # claude-main | codex-main | codex-critic
 │       ├── brief.md     # _templates/worker-brief.md 복사. ≤ 1200자 한글 / 240단어 영문
 │       └── result.md    # _templates/worker-result.md 복사
 └── artifacts/           # 선택. worker 산출물 원본 (생성된 코드, 다이어그램 등)
@@ -42,7 +42,7 @@ codex-main이 planned_workers에 포함되거나 코드·문서·이미지를 �
 답을 task.md의 메모 또는 후속 brief.md의 `target_repo` 필드에 기록한다.
 
 **예외 (묻지 않음)**:
-- 분석·리뷰·요약·기획만 하는 작업 (gemini 단독 또는 claude-main 단독 문서 작성)
+- 분석·리뷰·요약·기획만 하는 작업 (claude-main 단독 문서 작성)
 - 사용자가 자연어 요청에 이미 target_repo 경로를 포함한 경우
 
 ### Step 2: task.md 채우기
@@ -69,7 +69,7 @@ mkdir -p "$ROOT/tasks/$TASK/sources"
 
 #### 5-1. brief 먼저 생성·작성
 ```bash
-ROLE=claude-main  # 또는 codex-main, codex-critic, gemini
+ROLE=claude-main  # 또는 codex-main, codex-critic
 mkdir -p "$ROOT/tasks/$TASK/workers/$ROLE"
 cp "$ROOT/_templates/worker-brief.md" "$ROOT/tasks/$TASK/workers/$ROLE/brief.md"
 # brief.md 작성 (≤ 1200자/240단어)
@@ -95,7 +95,6 @@ wc -w "$ROOT/tasks/$TASK/workers/$ROLE/brief.md"   # 영문 단어수 ≤ 240
   - `prompt`: brief.md 내용 그대로
   - `model`: agent frontmatter `model: opus` 자동 적용
   - 응답 텍스트를 Orchestrator가 받아 `result.md`에 기록
-- **gemini**: `_shared/backends.json`의 `gemini`(백엔드 = Antigravity `agy` CLI, 기본 `gemini-3.1-pro-high`). 디스패처 `bash _shared/adapters/call_worker.sh gemini <brief-file>` → JSON envelope. Orchestrator가 envelope의 stdout을 `result.md`에 기록. (옛 `mcp__gemini-pro__*` 브리지 폐기)
 - **codex-main / codex-critic**: `mcp__codex__codex` MCP 도구 호출
   - `prompt`: brief.md 내용 그대로
   - `cwd`:

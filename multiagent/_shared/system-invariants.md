@@ -16,7 +16,7 @@
 | INV6 | 매뉴얼 `workers_approved` 예시 스키마가 approval-policy.md와 일치 (`worker:`/date-only/`purpose:`/`approved_by:`, `HH:MM` 없음) | B1/B6 재발 |
 | INV7 | 권위 우선순위 문구가 매뉴얼 §3과 design-basis.md §2에서 동일 (CLAUDE.md > routing/approval/orchestrator-rules > 매뉴얼) | Clash 해소 규칙 붕괴 |
 | INV8 | 인터랙티브 전용 + worktree/백그라운드 세션 금지 규칙이 orchestrator-rules.md와 매뉴얼에 모두 존재 | D5 위반 |
-| INV9 | gemini 백엔드가 `_shared/backends.json`에서 `agy` CLI(call_type cli·command agy)이고 기본 모델 `gemini-3.1-pro-high`, routing.md·D4가 backends를 정본으로 참조 | 정본이 폐기 프록시/known-bad 경로 호출 (D4 위반) |
+| INV9 | **폐기 (D14, 2026-08-26)** — gemini/agy 백엔드는 비활성이다. `_shared/backends.json`에 `gemini`·`gemini-reader` 워커가 **없어야** 한다 | 비활성화한 백엔드가 되살아나 승인 없이 호출됨 |
 | INV10 | 폐기 브리지 **`mcp__gemini__gemini_*`(CLI 래퍼) 및 `mcp__gemini-pro__*`(프록시)** 가 routing.md·task-folder.md·CLAUDE.md에 **활성 호출**로 없음. 잔여 언급은 **폐기 안내 문맥에서만** | C2 재발 — 폐기 브리지 잔존 호출이 즉시 실패 (D4 위반) |
 | INV11 | 재진입 프로토콜이 orchestrator-rules.md §3 **와** CLAUDE.md Task Lifecycle 포인터에 **둘 다** 존재. routing.md 토폴로지표에 4패턴(Pipeline/Fan-out·in/Expert Pool/Producer-Reviewer) 모두 존재하고, Supervisor·Hierarchical은 "배제" 줄에만 등장(채택표 행으로 등장 금지) | D6 위반 — 재진입/패턴 규정 유실 또는 배제 패턴 부활 |
 | INV12 | 카파시 4원칙: CLAUDE.md에 "운영 원칙 (Operating Principles)" 섹션 존재, _templates/worker-brief.md에 "Worker 행동 규약" 고정 블록 존재, **블록 안에 사용자질문 지시(질문/ask) 없음**, worker-result.md 체크리스트에 표면화 항목 존재 | D8 위반 — 층별 적용 붕괴(워커 one-shot 구조와 모순) 또는 워커 규약 유실 |
@@ -55,9 +55,9 @@ grep -liE '권위 우선순위|CLAUDE.md가 가장 높|문서가 충돌' "$ROOT/
 echo "INV8 인터랙티브/worktree 금지 (orchestrator-rules 에 존재해야)"
 grep -lin 'worktree\|배경\|백그라운드\|background session' "$ROOT/_shared/orchestrator-rules.md"
 
-echo "INV9 gemini 백엔드 (backends.json gemini=agy cli·pro-high 여야; 둘 다 출력돼야 PASS)"
+echo "INV9 gemini 비활성 (backends.json에 agy/gemini 워커가 없어야; 출력 없어야 PASS)"
 grep -n '"command": "agy"' "$ROOT/_shared/backends.json"
-grep -n 'gemini-3.1-pro-high' "$ROOT/_shared/backends.json"
+grep -n '"gemini' "$ROOT/_shared/backends.json"
 
 echo "INV10 폐기 브리지 호출형 mcp__gemini__gemini_* / mcp__gemini-pro__ 활성호출 (출력 없어야 PASS)"
 grep -rn 'mcp__gemini__gemini_' "$ROOT/_shared/routing.md" "$ROOT/_templates/task-folder.md" "$ROOT/CLAUDE.md"
