@@ -89,11 +89,19 @@ verification, and where files are written.
    higher: "[[x.00_<Chapter_Title>]]"   # for the overview note: the book README
    status: summarised
    creator: Jaeuk Kim
+   agent: <your model id> via book-summarizer, <YYYY-MM-DD>
    related:
    preamble: "[[LatexPreamble]]"
    aliases: [<Author Ch.N><letter>, <Short section title>]
    ---
    ```
+
+   **`agent:` is required and it is about you.** Write your own model id and today's date —
+   e.g. `agent: claude-opus-5 via book-summarizer, 2026-08-23`. Do not copy the placeholder,
+   do not omit the line, and never inherit a value from a note you were shown as an example.
+   It exists because the 2026-08-23 corpus audit measured a 65% defect rate across machine-built
+   notes and could not attribute any of it: 130 notes recorded no builder. An unattributed defect
+   cannot be swept for later.
 
    **Every alias you emit must be unique across the whole book — check this as you write, not
    after.** A chapter label repeated on each section of that chapter resolves to *none* of them,
@@ -131,6 +139,34 @@ verification, and where files are written.
    other notes can transclude `[[x.0N_...#^eq-x-y|(x.y)]]`. That block id is the only
    addition — do not re-specify the callout names here, or they will drift from the
    contract the next time they change.
+
+   **Where the block id goes — this is not cosmetic.** Obsidian registers a `^id` only on a
+   **top-level** block. An id written inside a callout is callout *content*: it renders as
+   literal text and creates no anchor, so every `[[note#^eq-x]]` pointing at it silently
+   fails. An id written inside `$$...$$` is worse — MathJax typesets it as part of the
+   equation. Both mistakes are invisible in the source and obvious in the rendered note.
+
+   ```markdown
+   > [!formula] Optional title
+   > $$ F_X(x) = P(X \le x) \tag{2.1} $$
+
+   ^eq-2-2.1
+   ```
+
+   Blank line, id on its own unprefixed line, blank line. **Never** `> ^eq-...` and **never**
+   `$$ ... ^eq-... $$`.
+
+   **One id per callout.** If a callout would carry two equations needing two ids, split it
+   into two callouts — two ids in one callout means only the last is reachable. (A 2026-08-27
+   vault-wide repair moved 7371 ids out of callouts and split 602 of them; every one had been
+   dead since it was written.)
+
+   **The callout type must match what is inside it.** A theorem goes in `[!theorem]`, a lemma
+   in `[!lemma]`, a definition in `[!define]`, a displayed result in `[!formula]`. `[!abstract]`
+   is for the chapter's *own* abstract or an explicitly labelled summary — never a wrapper for
+   a theorem statement, which reads as "Summary" over something that is not one. And never nest
+   a callout inside another of the **same** type: `[!formula]` inside `[!formula]` says nothing.
+   (`[!define]` containing `[!formula]` is fine — a definition stating its formula.)
 
    Strip the contract's closing `BOUNDARY:` / `EQUATIONS:` / `ILLEGIBLE:` block out of the
    note before writing it, and carry those three lines into your report instead — they are

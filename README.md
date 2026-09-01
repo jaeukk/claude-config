@@ -14,6 +14,7 @@ working tree of this repository, with secrets and machine-local runtime state gi
 | `agents/` | Subagents — delegated, persistent-role helpers ("use the X subagent"). |
 | `commands/` | Custom slash commands. |
 | `hooks/` | Scripts wired into lifecycle events via `settings.json`. |
+| `shell/bash_aliases.sh` | Portable interactive Bash functions sourced through `~/.bash_aliases`. |
 | `roo-to-claude.md` | Cheatsheet mapping the old Roo Code setup to its Claude Code equivalents. |
 
 Everything else under `~/.claude` (credentials, `sessions/`, `projects/`, caches, and
@@ -44,9 +45,14 @@ hardcoding a Windows user folder, so they stay portable across machines.
 ## Staying in sync
 
 - **On session start (notify-only):** `hooks/check-config-updates.sh` fetches and warns if the
-  local checkout is behind `origin/main`. It never auto-pulls — update manually:
+  local checkout is behind `origin/main`. It never auto-pulls.
+- **Updating this machine:** run `update-config`. It refuses a dirty worktree, validates the
+  remote Bash fragment before fast-forwarding, composes live settings, and checks the managed
+  `~/.bash_aliases` symlink. Machine-specific shell values live outside Git in
+  `~/.bash_aliases.local`; start from `shell/bash_aliases.local.example` on a new machine.
+  The underlying command remains available by path during bootstrap:
   ```bash
-  git -C ~/.claude pull --ff-only
+  ~/.claude/scripts/update-config.sh
   ```
 - **Pushing changes:** run **`/push-config`** in any Claude Code session to commit the tracked
   config and push to GitHub.

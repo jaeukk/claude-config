@@ -66,8 +66,38 @@ where the file is written.
    Equation completeness, numbering, page furniture and illegible text are the contract's —
    apply it as written rather than deciding these afresh.
 
+   **Callout type must match content.** A theorem goes in `[!theorem]`, a lemma in `[!lemma]`,
+   a definition in `[!define]`, a displayed result in `[!formula]`. `[!abstract]` is for the
+   paper's own abstract or an explicitly labelled TL;DR — never a wrapper around a theorem.
+   Never nest a callout inside another of the **same** type (`[!formula]` in `[!formula]` says
+   nothing); `[!define]` containing `[!formula]` is fine.
+
+   **Block ids go after the callout, at top level.** If you tag an equation so other notes can
+   cite it, Obsidian registers a `^id` only on a top-level block. Inside a callout it is
+   callout *content* — rendered as literal text, creating no anchor, so every
+   `[[note#^eq-x]]` pointing at it silently fails. Inside `$$...$$` MathJax typesets it into
+   the equation. Both look fine in the source.
+
+   ```markdown
+   > [!formula] Optional title
+   > $$ \varepsilon_e = \varepsilon_1\,[1 + 3\phi_2\beta_{21}] \tag{7} $$
+
+   ^eq-7
+   ```
+
+   Blank line, id unprefixed on its own line, blank line. **One id per callout** — two ids in
+   one callout leaves only the last reachable; split the callout instead. (A 2026-08-27
+   vault-wide repair moved 7371 ids out of callouts and split 602; all had been dead since
+   they were written.)
+
    Strip the contract's closing `BOUNDARY:` / `EQUATIONS:` / `ILLEGIBLE:` block out of the
    file before writing it; those three lines are evidence for the caller, not note content.
+
+   **Exception — the rebuild workflow inverts this.** If the caller's brief tells you to write the
+   §8 self-report **into** the note, do that and do not strip it. `99_SYSTEM/scripts/verify_rebuild.py`
+   is the gate for those jobs and it parses `BUILDER` / `BOUNDARY` / `EQUATIONS` / `EQPAGES` **out of
+   the file body**, plus an `agent:` frontmatter field; a stripped note fails the gate it is required
+   to pass. Follow the brief, and say in your report that you did.
 5. **Verify the links you just wrote (gate).** Run
    `python3 <VAULT>/90_Templates/check_wikilinks.py <output_path>` (use `python` if that is the
    interpreter on PATH). **Require zero *newly introduced* BROKEN.** This pass writes a
@@ -101,6 +131,7 @@ venue: <journal/conf>
 doi: <doi>
 zotero_key: <key>
 focus: <algorithm|results|both>
+agent: <your model id> via paper-reviewer, <YYYY-MM-DD>
 ---
 
 # <Short title>
@@ -111,6 +142,12 @@ focus: <algorithm|results|both>
 
 > [!abstract] One-paragraph TL;DR
 > <what the paper does and why it matters, 2-4 sentences>
+
+<!-- Keep the "One-paragraph TL;DR" title. A bare `> [!abstract]` reads as the authors' own
+     abstract; a synthesized summary under that heading is a false attribution. A 2026-08-26
+     audit checked 11 such blocks against their PDFs: 0 were the printed abstract. If you do
+     reproduce the printed abstract verbatim, title it
+     `> [!abstract] Paper's own abstract (verbatim, p. N)` and say where it came from. -->
 
 ## Problem / Motivation
 - ...
@@ -137,6 +174,10 @@ one bullet per note/highlight, `(p. N)` for annotations with pages. Never mix wi
 - **Faithful, not inflated.** Only state what the paper supports; flag anything you inferred.
 - **Dense, no filler.** No "In this summary I will…" preamble. Jump to content.
 - **Cite the source.** Keep the Zotero key and DOI in frontmatter so the note is traceable.
+- **Name yourself.** `agent:` is your own model id plus today's date — `agent: claude-opus-5 via
+  paper-reviewer, 2026-08-23`. Required on every note you write; never copied from an example note.
+  The 2026-08-23 corpus audit found 65% of machine-built notes defective and could not attribute a
+  single one, because 130 of them recorded no builder.
 - **Paths.** Resolve the vault root via the **`zotero-obsidian-sync`** skill; don't hardcode a
   per-machine folder. Zotero returns Windows-style PDF paths — read them directly on native
   Windows, or translate with `wslpath` under WSL. Prefer the Zotero full-text API over the raw PDF.

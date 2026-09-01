@@ -104,13 +104,28 @@ read-only (`POST` → `400 "Endpoint does not support method"`). Add items via t
 **Connector** `POST /connector/saveItems` into the currently-selected collection
 — full recipe in the **`zotero-obsidian-sync`** skill. Don't conclude "can't write."
 
-# HPC — KISTI Nurion
+# HPC — KISTI (Nurion and Neuron)
 
-SSH hosts in `~/.ssh/config`: **`nurion`** (nurion.ksc.re.kr) and **`nurion-dm`**
-(nurion-dm.ksc.re.kr, data-mover). User `e1837a01`. Both use `ControlMaster auto`
-+ `ControlPath ~/.ssh/controlmasters/%r@%h:%p` + `ControlPersist 10m`.
+**Two different machines, easy to confuse by name:**
 
-**The two hosts have strictly disjoint roles — neither substitutes for the other:**
+- **Nurion** — `nurion` (nurion.ksc.re.kr) + `nurion-dm` (data-mover). **PBS Pro**
+  (`qsub`/`qstat`/`qdel`). Where the FDTD/meep work runs.
+- **Neuron** — `neuron` (neuron01.ksc.re.kr) + `neuron-dm`. **SLURM**
+  (`sbatch`/`squeue`/`sacct`/`scancel`), GPU partitions e.g. `amd_a100nv_8`, conda env
+  `zeta2`. Where the three-point $\zeta$/$\eta$ Monte-Carlo runs live
+  (`/scratch/e1837a01/plasmon/three-point/`). Neuron **rejects** a bare
+  `#SBATCH --comment etc`; it now requires `--comment="field=<field>;appl=<program>"`
+  (`showappl` lists the values; use `field=phys;appl=in_house` for the in-house code).
+
+User `e1837a01` on all of them. All use `ControlMaster auto` +
+`ControlPath ~/.ssh/controlmasters/%r@%h:%p` + `ControlPersist 12h`, plus
+`ServerAliveInterval 60` / `ServerAliveCountMax 10` / `TCPKeepAlive yes` (added
+2026-08-21). ControlPersist alone did **not** keep sockets alive: it is a client-side
+*idle* timer and cannot hold a TCP connection the network or server has dropped, which
+is why masters kept vanishing after ~2 h idle. The keepalives are the actual fix, and
+they only apply to masters started **after** the change.
+
+**The two Nurion hosts have strictly disjoint roles — neither substitutes for the other:**
 
 - **File I/O** (`scp`/`rsync`, all data movement) works **only through `nurion-dm`**.
   Do *not* route transfers through `nurion` even though `/scratch` is the same
@@ -127,15 +142,25 @@ Non-interactive use works only while the user has a live master socket. Check wi
 open it** (`ssh nurion` / `ssh nurion-dm`, enter OTP, leave it open) — do **not**
 retry ssh repeatedly. Repeated failures (`ssh_askpass: … No such file or
 directory`, `Too many authentication failures`) risk **account lockout**; stop
-after the first failure. Ping `ssh nurion true` every ~3 min to keep a socket warm
-during long sequences.
+after the first failure. (The periodic `ssh <host> true` warm-up ping is no longer
+needed — `ServerAliveInterval` does it.)
+
+**Distinguish a dead socket from a wedged one.** `ssh -O check` can report
+"Master running" while every new session hangs. Cause: one hung remote command holds a
+channel and starves the multiplexed master. Most common self-inflicted trigger is a
+multi-line `python -c` sent over ssh — the newlines collapse and the remote interpreter
+hangs. Send remote scripts via a heredoc written to a file, not inline `-c`. Recovery is
+`ssh -O exit <host>` then reopen; killing the local client alone does not clear it. A
+command that hangs is **not** an auth failure and carries no lockout risk.
 
 Other recurring traps:
 
 - **`scp`**: the default SFTP-based scp fails with `Connection closed`. Use the
   legacy protocol: `scp -O …`.
-- **Scheduler is PBS Pro, not Slurm** — `qsub`, never `sbatch`. Job IDs look like
-  `23342240.pbs`; scripts carry `#PBS` directives.
+- **Nurion's scheduler is PBS Pro** — `qsub`, never `sbatch`. Job IDs look like
+  `23342240.pbs`; scripts carry `#PBS` directives. **Neuron is the opposite** (Slurm,
+  `#SBATCH`, numeric job ids) — check which machine before reaching for a command, and
+  note that a `sim-tracker` block for a Neuron job cannot be polled with `qstat`.
 - **PBS `.e`/`.o` files are usually empty** (`-k eo` plus a redirect); the real
   Python/meep traceback is in the working directory as `./*_o.log`.
 - `qstat -x` history is purged quickly. For a job it no longer knows, fall back to

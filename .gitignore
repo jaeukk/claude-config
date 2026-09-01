@@ -23,6 +23,10 @@
 !/hooks
 !/keybindings.json
 !/multiagent
+!/shell
+shell/*
+!/shell/bash_aliases.sh
+!/shell/bash_aliases.local.example
 
 # Python bytecode from the tracked scripts
 scripts/__pycache__/

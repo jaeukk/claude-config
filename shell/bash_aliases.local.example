@@ -1,0 +1,18 @@
+# Copy to ~/.bash_aliases.local and adjust for this machine. Do not commit that local file.
+BACKUP_WINDOWS_DRIVE="D:"
+BACKUP_VOLUME_LABEL="Backup2"
+BACKUP_MOUNT_POINT="/mnt/backup2"
+BACKUP_RETENTION_DAYS=30
+
+SYNC_DIRS=(
+    "10_Projects/10_Active/Plasmon"
+    "10_Projects/10_Active/multi-stealthy"
+)
+RSYNC_DST="${HOME}"
+CODES_EXCLUDES=(
+    --exclude=Julia/
+    --exclude=99_installs/
+    --exclude=MATLAB/
+    --exclude=meep/
+    --exclude=obsolate/
+)
