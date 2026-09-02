@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""Claude Code status line: show model, context-token usage, and session cost.
+"""Claude Code status line: three stacked lines.
 
-Reads the status JSON that Claude Code feeds on stdin, then parses the session
-transcript (JSONL) to recover the most recent token-usage record so the line
-reflects live context consumption. Output is a single line (ANSI-colored).
+  1. user@host:/cwd │  branch*            (PS1 prefix + git branch, * = dirty)
+  2. model │ ctx used │ out │ pony:<mode> │ skills invoked this session │ $cost
+  3. Claude <bar> <pct> · <reset> left   (5h window)
+  4. Codex  <bar> <pct> · <reset> left   (5h window)
+
+The bars carry a blue tick showing how far the 5h window itself has run, so
+fill behind the tick means the budget is outlasting the clock.
+
+Line 3 reuses the quota readers in ~/.claude/scripts/usage-watch.py, but those
+cost an HTTPS round trip and a `codex app-server` spawn, so the values are kept
+in a small JSON cache refreshed by a detached `--refresh-usage` run of this same
+file. Rendering never blocks on the network.
 
 Status JSON schema (subset we use):
   { "model": {"id", "display_name"},
@@ -11,11 +20,24 @@ Status JSON schema (subset we use):
     "cost": {"total_cost_usd", "total_lines_added", "total_lines_removed"},
     "context_window": {"context_window_size": int} }
 """
+import importlib.util
+import itertools
 import json
 import os
 import socket
+import subprocess
 import sys
+import time
 from getpass import getuser
+
+CACHE = os.path.expanduser("~/.cache/claude-usage-5h.json")
+BAR_W = 28  # bar cells
+WINDOW = 5 * 3600  # the 5h quota window, in seconds
+GREEN, AMBER, RED = (95, 191, 95), (214, 159, 44), (229, 83, 75)
+BLUE, TRACK = (74, 144, 226), (74, 82, 96)
+CACHE_TTL = 180  # seconds before the cached quota is considered stale
+SPAWN_TTL = 60  # min seconds between background refresh spawns
+USAGE_WATCH = os.path.expanduser("~/.claude/scripts/usage-watch.py")
 
 
 def _ansi(code: str, text: str) -> str:
@@ -29,6 +51,27 @@ def _ps1_prefix(cwd: str) -> str:
     user_host = _ansi("01;32", f"{user}@{host}")
     path = _ansi("01;34", cwd or "")
     return f"{user_host}:{path}"
+
+
+def _git_branch(cwd: str) -> str:
+    """'branch' (plus '*' when the tree is dirty), or '' outside a git repo."""
+    if not cwd:
+        return ""
+    try:
+        out = subprocess.run(
+            ["git", "-C", cwd, "status", "--porcelain=v2", "--branch",
+             "--untracked-files=no"],
+            capture_output=True, text=True, timeout=1,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    branch, dirty = "", False
+    for line in out.splitlines():
+        if line.startswith("# branch.head "):
+            branch = line.split(" ", 2)[2]
+        elif not line.startswith("#"):
+            dirty = True
+    return f"{branch}{'*' if dirty else ''}" if branch else ""
 
 
 def _human(n: int) -> str:
@@ -67,20 +110,22 @@ def _context_limit(data: dict, model_id: str) -> int:
     return 200_000
 
 
-def _latest_usage(transcript_path: str):
-    """Return the most recent assistant `message.usage` dict, or None.
+def _scan_transcript(transcript_path: str):
+    """(latest assistant `message.usage`, skills invoked in order) from the transcript.
 
     The last turn's context size is input_tokens + cache_read + cache_creation
     (all tokens sent to the model for that turn); output_tokens is the reply.
     """
     if not transcript_path:
-        return None
+        return None, []
     try:
         with open(transcript_path, "r", encoding="utf-8") as fh:
             lines = fh.readlines()
     except OSError:
-        return None
-    for line in reversed(lines):
+        return None, []
+
+    usage, skills = None, []
+    for line in lines:
         line = line.strip()
         if not line:
             continue
@@ -88,13 +133,150 @@ def _latest_usage(transcript_path: str):
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
-        usage = (rec.get("message") or {}).get("usage")
-        if isinstance(usage, dict) and usage.get("input_tokens") is not None:
-            return usage
-    return None
+        msg = rec.get("message") or {}
+        u = msg.get("usage")
+        if isinstance(u, dict) and u.get("input_tokens") is not None:
+            usage = u  # keep overwriting: the last one wins
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if (isinstance(block, dict) and block.get("type") == "tool_use"
+                        and block.get("name") == "Skill"):
+                    name = (block.get("input") or {}).get("skill")
+                    if isinstance(name, str) and name not in skills:
+                        skills.append(name)
+    return usage, skills
+
+
+def _load_cache():
+    try:
+        with open(CACHE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def _stale(path: str, ttl: float) -> bool:
+    try:
+        return time.time() - os.path.getmtime(path) > ttl
+    except OSError:
+        return True
+
+
+def _spawn_refresh() -> None:
+    """Kick off a detached quota refresh, at most once per SPAWN_TTL."""
+    lock = CACHE + ".lock"
+    if not _stale(lock, SPAWN_TTL):
+        return
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        open(lock, "w").close()  # touch: throttles the next spawn
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--refresh-usage"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+    except (OSError, ValueError):
+        pass
+
+
+def refresh_usage() -> None:
+    """Write Codex's 5h quota to CACHE (background entry point).
+
+    Claude's own window comes free on stdin, so only Codex needs fetching.
+    """
+    spec = importlib.util.spec_from_file_location("usage_watch", USAGE_WATCH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    try:
+        rows = (mod.codex_card(mod.dt.datetime.now(mod.KST)) or {}).get("rows") or []
+    except Exception:  # codex missing, not logged in, malformed payload
+        return
+    for row in rows:
+        if row.get("label") == "5h":
+            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+            with open(CACHE, "w", encoding="utf-8") as fh:
+                json.dump({"codex": {"pct": row["usage"], "period": row["period"],
+                                  "reset": row["reset"]}}, fh)
+            return
+
+
+def _fmt_left(seconds: float) -> str:
+    h, m = divmod(max(0, int(seconds)) // 60, 60)
+    return f"{h}h {m:02d}m"
+
+
+def _rgb(color, text: str) -> str:
+    r, g, b = color
+    return f"\033[38;2;{r};{g};{b}m{text}\033[0m"
+
+
+def _bar(pct: float, period: float) -> str:
+    """A BAR_W-cell usage bar with a blue tick marking how far the window has run.
+
+    Fill left of the tick means the budget is being spent slower than the clock.
+    """
+    pct = min(max(pct, 0.0), 100.0)
+    filled = round(BAR_W * pct / 100)
+    tick = min(BAR_W - 1, int(BAR_W * min(max(period, 0.0), 100.0) / 100))
+    color = RED if pct >= 90 else (AMBER if pct >= 50 else GREEN)
+    cells = [
+        (BLUE, "┃") if i == tick
+        else (color if i < filled else TRACK, "█" if i < filled else "░")
+        for i in range(BAR_W)
+    ]
+    # merge runs of one color into a single escape sequence
+    return "".join(_rgb(c, "".join(ch for _, ch in g))
+                   for c, g in itertools.groupby(cells, key=lambda cell: cell[0]))
+
+
+def _quota_rows(data: dict):
+    """[(name, pct, period, reset)] for the 5h windows of Claude Code and Codex.
+
+    Claude's window rides in on stdin; only Codex needs the cached background
+    fetch (see refresh_usage).
+    """
+    if _stale(CACHE, CACHE_TTL):
+        _spawn_refresh()
+    rows = []
+
+    five = (data.get("rate_limits") or {}).get("five_hour") or {}
+    if five.get("used_percentage") is not None:
+        # absent on the first renders of a fresh session, until the first API reply
+        left = (five.get("resets_at") or 0) - time.time()
+        period = 100.0 * (WINDOW - min(max(left, 0), WINDOW)) / WINDOW
+        rows.append(("Claude", five["used_percentage"], period, _fmt_left(left)))
+    else:
+        rows.append(("Claude", 0, 0.0, None))
+
+    codex = _load_cache().get("codex")
+    if codex:
+        # reset/period are as of the cache write: <=CACHE_TTL of drift on a 5h window
+        rows.append(("Codex", codex["pct"], codex["period"], codex["reset"]))
+    else:
+        rows.append(("Codex", 0, 0.0, None))
+    return rows
+
+
+def _quota_lines(data: dict):
+    out = []
+    for name, pct, period, reset in _quota_rows(data):
+        if reset is None:
+            out.append(f"{_ansi('90', name.ljust(6))} {_rgb(TRACK, '░' * BAR_W)} {_ansi('90', '  --')}")
+            continue
+        color = "31" if pct >= 90 else ("33" if pct >= 50 else "32")
+        out.append(
+            f"{_ansi('1', name.ljust(6))} {_bar(pct, period)} "
+            f"{_ansi(color, f'{pct:>3.0f}%')} {_ansi('90', f'↻ {reset}')}"
+        )
+    return out
 
 
 def main() -> None:
+    if "--refresh-usage" in sys.argv[1:]:
+        refresh_usage()
+        return
+
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
@@ -102,6 +284,9 @@ def main() -> None:
 
     model = data.get("model") or {}
     model_name = model.get("display_name") or model.get("id") or "claude"
+    effort = (data.get("effort") or {}).get("level")
+    if effort:
+        model_name = f"{model_name} · {effort}"
     model_id = model.get("id") or ""
 
     cost = data.get("cost") or {}
@@ -109,9 +294,18 @@ def main() -> None:
 
     cwd = (data.get("workspace") or {}).get("current_dir") or data.get("cwd", "")
 
-    usage = _latest_usage(data.get("transcript_path", ""))
-    parts = [_ps1_prefix(cwd), _ansi("1;36", model_name)]  # PS1 prefix, then bold cyan model name
+    sep = _ansi("90", " │ ")
 
+    # line 1: where we are
+    line1 = [_ps1_prefix(cwd)]
+    branch = _git_branch(cwd)
+    if branch:
+        line1.append(_ansi("35", f" {branch}"))
+
+    # line 2: model, context, skills
+    usage, skills = _scan_transcript(data.get("transcript_path", ""))
+    usage = (data.get("context_window") or {}).get("current_usage") or usage
+    line2 = [_ansi("1;36", model_name)]
     if usage:
         ctx = (
             (usage.get("input_tokens") or 0)
@@ -123,17 +317,16 @@ def main() -> None:
         pct = (ctx / limit * 100) if limit else 0.0
         # color the context fraction by how full it is
         color = "32" if pct < 50 else ("33" if pct < 80 else "31")
-        ctx_str = f"ctx {_human(ctx)}/{_human(limit)} ({pct:.0f}%)"
-        parts.append(_ansi(color, ctx_str))
-        parts.append(_ansi("90", f"out {_human(out)}"))
-
+        line2.append(_ansi(color, f"ctx {_human(ctx)}/{_human(limit)} ({pct:.0f}%)"))
+        line2.append(_ansi("90", f"out {_human(out)}"))
     mode = _ponytail_mode()
     if mode:
-        parts.append(_ansi("33", f"pony:{mode}"))
+        line2.append(_ansi("33", f"pony:{mode}"))
+    if skills:
+        line2.append(_ansi("36", "skills: " + ", ".join(skills[-4:])))
+    line2.append(_ansi("90", f"${total_cost:.4f}"))
 
-    parts.append(_ansi("90", f"${total_cost:.4f}"))
-
-    sys.stdout.write(_ansi("90", " │ ").join(parts))
+    sys.stdout.write("\n".join([sep.join(line1), sep.join(line2)] + _quota_lines(data)))
 
 
 if __name__ == "__main__":

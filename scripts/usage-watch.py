@@ -147,6 +147,8 @@ def claude_card(now):
                 label, hours = f"{model} 7d", 168
             else:
                 continue
+            if not lim.get("resets_at"):
+                continue  # inactive window (e.g. an unused scoped weekly): no reset time yet
             rows.append(make_row(label, lim["percent"], parse_iso(lim["resets_at"]), now, hours))
         except (KeyError, TypeError, ValueError):
             continue  # skip one malformed entry, keep the rest
