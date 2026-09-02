@@ -24,10 +24,12 @@ import importlib.util
 import itertools
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 import time
+import unicodedata
 from getpass import getuser
 
 CACHE = os.path.expanduser("~/.cache/claude-usage-5h.json")
@@ -35,6 +37,9 @@ BAR_W = 28  # bar cells
 WINDOW = 5 * 3600  # the 5h quota window, in seconds
 GREEN, AMBER, RED = (95, 191, 95), (214, 159, 44), (229, 83, 75)
 BLUE, TRACK = (74, 144, 226), (74, 82, 96)
+# Claude Code lays its own footer pills (/rc, mode labels) beside the status line
+# in a wrapping row; if our widest line leaves no room they wrap underneath.
+RESERVE = 16  # columns to leave free for those pills
 CACHE_TTL = 180  # seconds before the cached quota is considered stale
 SPAWN_TTL = 60  # min seconds between background refresh spawns
 USAGE_WATCH = os.path.expanduser("~/.claude/scripts/usage-watch.py")
@@ -72,6 +77,24 @@ def _git_branch(cwd: str) -> str:
         elif not line.startswith("#"):
             dirty = True
     return f"{branch}{'*' if dirty else ''}" if branch else ""
+
+
+def _vis_w(text: str) -> int:
+    """Terminal columns a rendered string occupies (ANSI stripped, wide glyphs = 2)."""
+    plain = re.sub(r"\033\[[0-9;]*m", "", text)
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in plain)
+
+
+def _fit(parts: list, drop_order: tuple, budget: int) -> str:
+    """Join (name, text) segments, dropping the least important until it fits budget."""
+    parts = list(parts)
+    line = _ansi("90", " │ ").join(t for _, t in parts)
+    for name in drop_order:
+        if _vis_w(line) <= budget:
+            break
+        parts = [(n, t) for n, t in parts if n != name]
+        line = _ansi("90", " │ ").join(t for _, t in parts)
+    return line
 
 
 def _human(n: int) -> str:
@@ -302,10 +325,10 @@ def main() -> None:
     if branch:
         line1.append(_ansi("35", f" {branch}"))
 
-    # line 2: model, context, skills
+    # line 2: model, context, skills — compact, and trimmed to leave room for the pills
     usage, skills = _scan_transcript(data.get("transcript_path", ""))
     usage = (data.get("context_window") or {}).get("current_usage") or usage
-    line2 = [_ansi("1;36", model_name)]
+    line2 = [("model", _ansi("1;36", model_name.replace(" context)", ")")))]
     if usage:
         ctx = (
             (usage.get("input_tokens") or 0)
@@ -317,16 +340,18 @@ def main() -> None:
         pct = (ctx / limit * 100) if limit else 0.0
         # color the context fraction by how full it is
         color = "32" if pct < 50 else ("33" if pct < 80 else "31")
-        line2.append(_ansi(color, f"ctx {_human(ctx)}/{_human(limit)} ({pct:.0f}%)"))
-        line2.append(_ansi("90", f"out {_human(out)}"))
+        line2.append(("ctx", _ansi(color, f"ctx {_human(ctx)}/{_human(limit)} ({pct:.0f}%)")))
+        line2.append(("out", _ansi("90", f"out {_human(out)}")))
     mode = _ponytail_mode()
     if mode:
-        line2.append(_ansi("33", f"pony:{mode}"))
+        line2.append(("pony", _ansi("33", f"pony:{mode}")))
     if skills:
-        line2.append(_ansi("36", "skills: " + ", ".join(skills[-4:])))
-    line2.append(_ansi("90", f"${total_cost:.4f}"))
+        line2.append(("skills", _ansi("36", "skills: " + ", ".join(skills[-4:]))))
+    line2.append(("cost", _ansi("90", f"${total_cost:.2f}")))
 
-    sys.stdout.write("\n".join([sep.join(line1), sep.join(line2)] + _quota_lines(data)))
+    budget = (int(os.environ.get("COLUMNS") or 0) or 80) - RESERVE
+    lines = [sep.join(line1), _fit(line2, ("out", "skills", "cost", "pony"), budget)]
+    sys.stdout.write("\n".join(lines + _quota_lines(data)))
 
 
 if __name__ == "__main__":
