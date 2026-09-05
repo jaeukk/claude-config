@@ -23,6 +23,8 @@ _requireBackupConfig() {
         echo "Configure ~/.bash_aliases.local from ~/.claude/shell/bash_aliases.local.example." >&2
         return 1
     fi
+    # A trailing slash defeats the "$mount_point"/* pattern in unmountBackup.
+    [ "$BACKUP_MOUNT_POINT" = "/" ] || BACKUP_MOUNT_POINT="${BACKUP_MOUNT_POINT%/}"
 }
 
 _backupVolumeDevice() {
@@ -42,10 +44,11 @@ _verifyBackupVolume() {
         return 1
     fi
     [ -r "$marker" ] && IFS= read -r seen < "$marker"
+    seen=${seen%$'\r'}   # the marker may have been saved from Windows
     if [ "$seen" != "$BACKUP_VOLUME_LABEL" ]; then
         echo "Refusing: $BACKUP_MOUNT_POINT is not the '$BACKUP_VOLUME_LABEL' volume." >&2
         echo "Expected $marker to contain '$BACKUP_VOLUME_LABEL'; found '${seen:-nothing}'." >&2
-        echo "If this really is the backup volume, run: mountBackupInit" >&2
+        echo "Run mountBackupInit only after confirming by eye that this is the backup volume." >&2
         return 1
     fi
 }
@@ -92,8 +95,12 @@ _mountBackupVolume() {
                 return 1
             fi
             sudo mkdir -p "$BACKUP_MOUNT_POINT" || return 1
-            sudo mount -t drvfs "$BACKUP_WINDOWS_DRIVE" "$BACKUP_MOUNT_POINT" \
-                -o "uid=$(id -u),gid=$(id -g),umask=022"
+            if sudo mount -t drvfs "$BACKUP_WINDOWS_DRIVE" "$BACKUP_MOUNT_POINT" \
+                -o "uid=$(id -u),gid=$(id -g),umask=022"; then
+                return 0
+            fi
+            sudo rmdir "$BACKUP_MOUNT_POINT" 2>/dev/null
+            return 1
             ;;
     esac
 }
@@ -122,7 +129,11 @@ mountBackup() {
         echo "Check where it landed: findmnt --source $(_backupVolumeDevice)" >&2
         return 1
     fi
-    _verifyBackupVolume || return 1
+    if ! _verifyBackupVolume; then
+        echo "Unmounting the unrecognised volume again." >&2
+        _unmountBackupVolume >/dev/null 2>&1
+        return 1
+    fi
     echo "Mounted $BACKUP_VOLUME_LABEL at $BACKUP_MOUNT_POINT"
 }
 
@@ -298,6 +309,11 @@ _rsyncRun() {
 _requireSyncConfig() {
     if ! declare -p SYNC_DIRS CODES_EXCLUDES >/dev/null 2>&1; then
         echo "SYNC_DIRS and CODES_EXCLUDES must be configured in ~/.bash_aliases.local." >&2
+        return 1
+    fi
+    if [ ! -f "${HOME}/.rsync-exclude" ]; then
+        echo "${HOME}/.rsync-exclude is missing or a dangling symlink." >&2
+        echo "Without it rsync runs with no exclusions. Run: bash ~/.claude/scripts/update-config.sh" >&2
         return 1
     fi
 }

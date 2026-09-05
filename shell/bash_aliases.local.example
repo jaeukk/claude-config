@@ -6,7 +6,7 @@ BACKUP_VOLUME_LABEL="Backup2"
 BACKUP_MOUNT_POINT="/mnt/backup2"
 # Optional. Only needed where the volume is not a block device, i.e. under WSL,
 # where it is reached as a Windows drive letter instead.
-BACKUP_WINDOWS_DRIVE="D:"
+# BACKUP_WINDOWS_DRIVE="D:"
 BACKUP_RETENTION_DAYS=30
 
 # Optional. The Google Drive workspace mirror is autodetected; set this only if
