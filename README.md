@@ -15,6 +15,7 @@ working tree of this repository, with secrets and machine-local runtime state gi
 | `commands/` | Custom slash commands. |
 | `hooks/` | Scripts wired into lifecycle events via `settings.json`. |
 | `shell/bash_aliases.sh` | Portable interactive Bash functions sourced through `~/.bash_aliases`. |
+| `shell/rsync-exclude` | Shared rsync exclude patterns, linked as `~/.rsync-exclude`. |
 | `roo-to-claude.md` | Cheatsheet mapping the old Roo Code setup to its Claude Code equivalents. |
 
 Everything else under `~/.claude` (credentials, `sessions/`, `projects/`, caches, and

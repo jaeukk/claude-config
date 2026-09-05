@@ -27,6 +27,7 @@
 shell/*
 !/shell/bash_aliases.sh
 !/shell/bash_aliases.local.example
+!/shell/rsync-exclude
 
 # Python bytecode from the tracked scripts
 scripts/__pycache__/

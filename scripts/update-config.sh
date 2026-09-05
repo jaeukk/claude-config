@@ -5,6 +5,8 @@ config_repo="${HOME}/.claude"
 fragment_rel="shell/bash_aliases.sh"
 fragment="${config_repo}/${fragment_rel}"
 aliases_link="${HOME}/.bash_aliases"
+exclude_fragment="${config_repo}/shell/rsync-exclude"
+exclude_link="${HOME}/.rsync-exclude"
 command_link="${HOME}/.local/bin/update-config"
 local_example="${config_repo}/shell/bash_aliases.local.example"
 remote_fragment=""
@@ -41,6 +43,19 @@ elif [ -e "$aliases_link" ]; then
 else
     ln -s "$fragment" "$aliases_link"
     echo "Created $aliases_link -> $fragment"
+fi
+
+if [ -L "$exclude_link" ]; then
+    if [ "$(readlink -f "$exclude_link")" != "$(readlink -f "$exclude_fragment")" ]; then
+        echo "ERROR: $exclude_link points elsewhere; refusing to replace it." >&2
+        exit 1
+    fi
+elif [ -e "$exclude_link" ]; then
+    echo "ERROR: $exclude_link already exists and is not the managed symlink." >&2
+    exit 1
+else
+    ln -s "$exclude_fragment" "$exclude_link"
+    echo "Created $exclude_link -> $exclude_fragment"
 fi
 
 mkdir -p "${HOME}/.local/bin"

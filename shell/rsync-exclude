@@ -1,0 +1,55 @@
+*:Zone.Identifier
+
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# General temp files
+*.tmp
+*.swp
+*.log
+.DS_Store
+Thumbs.db
+
+# LaTeX
+*.aux
+*.log
+*.toc
+*.out
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# BibTeX / Biber
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+
+# Beamer / misc
+*.nav
+*.snm
+*.vrb
+*.xdv
+*.dvi
+
+# latexmk
+*.latexmk
+*.latexmkrc
+
+# C++
+*.o
+
+EOF
+
