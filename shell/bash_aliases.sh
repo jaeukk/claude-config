@@ -6,11 +6,26 @@ if [ -r "${HOME}/.bash_aliases.local" ]; then
     . "${HOME}/.bash_aliases.local"
 fi
 
+_isWSL() {
+    [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null
+}
+
+# Device identity of the backup volume, for verifying an existing mount.
+_backupSourceDevice() {
+    if _isWSL; then
+        printf '%s\n' "$BACKUP_WINDOWS_DRIVE"
+    else
+        readlink -f "/dev/disk/by-label/${BACKUP_VOLUME_LABEL}"
+    fi
+}
+
 _requireBackupConfig() {
     local name
     local missing=()
+    local -a required=(BACKUP_VOLUME_LABEL BACKUP_MOUNT_POINT)
 
-    for name in BACKUP_WINDOWS_DRIVE BACKUP_VOLUME_LABEL BACKUP_MOUNT_POINT; do
+    _isWSL && required+=(BACKUP_WINDOWS_DRIVE)
+    for name in "${required[@]}"; do
         [ -n "${!name:-}" ] || missing+=("$name")
     done
     if [ "${#missing[@]}" -ne 0 ]; then
@@ -20,13 +35,10 @@ _requireBackupConfig() {
     fi
 }
 
-mountBackup() {
-    _requireBackupConfig || return 1
-
+# WSL: verify the Windows volume label, then mount the drive letter via drvfs.
+_mountBackupWSL() {
     local win_drive="$BACKUP_WINDOWS_DRIVE"
     local drive_letter="${win_drive%:}"
-    local expected_label="$BACKUP_VOLUME_LABEL"
-    local mount_point="$BACKUP_MOUNT_POINT"
     local actual_label
 
     if [[ ! "$win_drive" =~ ^[A-Za-z]:$ ]]; then
@@ -34,26 +46,71 @@ mountBackup() {
         return 1
     fi
     if ! command -v powershell.exe >/dev/null 2>&1; then
-        echo "mountBackup requires WSL with Windows interoperability enabled." >&2
+        echo "Windows interoperability is unavailable; cannot reach $win_drive." >&2
         return 1
-    fi
-    if mountpoint -q "$mount_point"; then
-        echo "$expected_label is already mounted at $mount_point"
-        return 0
     fi
 
     actual_label=$(powershell.exe -NoProfile -Command \
         "(Get-Volume -DriveLetter $drive_letter -ErrorAction SilentlyContinue).FileSystemLabel" \
         2>/dev/null | tr -d '\r\n')
-    if [ "$actual_label" != "$expected_label" ]; then
-        echo "Refusing to mount: Windows $win_drive label is '${actual_label:-unavailable}', not '$expected_label'."
+    if [ "$actual_label" != "$BACKUP_VOLUME_LABEL" ]; then
+        echo "Refusing to mount: Windows $win_drive label is '${actual_label:-unavailable}', not '$BACKUP_VOLUME_LABEL'." >&2
         return 1
     fi
 
-    sudo mkdir -p "$mount_point" || return 1
-    sudo mount -t drvfs "$win_drive" "$mount_point" \
-        -o "uid=$(id -u),gid=$(id -g),umask=022" || return 1
-    echo "Mounted $expected_label at $mount_point"
+    sudo mkdir -p "$BACKUP_MOUNT_POINT" || return 1
+    sudo mount -t drvfs "$win_drive" "$BACKUP_MOUNT_POINT" \
+        -o "uid=$(id -u),gid=$(id -g),umask=022"
+}
+
+# Native Linux: udisks mounts by label, no sudo and no fstab entry needed.
+# Looking the device up as /dev/disk/by-label/<label> IS the label check.
+_mountBackupUdisks() {
+    local dev="/dev/disk/by-label/${BACKUP_VOLUME_LABEL}"
+    local actual
+
+    if ! command -v udisksctl >/dev/null 2>&1; then
+        echo "udisksctl not found; install udisks2 or mount $BACKUP_VOLUME_LABEL manually." >&2
+        return 1
+    fi
+    if [ ! -b "$dev" ]; then
+        echo "No volume labelled '$BACKUP_VOLUME_LABEL' is attached." >&2
+        return 1
+    fi
+
+    actual=$(findmnt -n -o TARGET --source "$(readlink -f "$dev")" | head -1)
+    if [ -z "$actual" ]; then
+        udisksctl mount -b "$dev" >/dev/null || return 1
+        actual=$(findmnt -n -o TARGET --source "$(readlink -f "$dev")" | head -1)
+    fi
+    if [ "$actual" != "$BACKUP_MOUNT_POINT" ]; then
+        echo "'$BACKUP_VOLUME_LABEL' is mounted at ${actual:-nowhere}, not the configured $BACKUP_MOUNT_POINT." >&2
+        echo "Set BACKUP_MOUNT_POINT=\"$actual\" in ~/.bash_aliases.local." >&2
+        return 1
+    fi
+}
+
+mountBackup() {
+    _requireBackupConfig || return 1
+
+    if mountpoint -q "$BACKUP_MOUNT_POINT"; then
+        echo "$BACKUP_VOLUME_LABEL is already mounted at $BACKUP_MOUNT_POINT"
+        return 0
+    fi
+    if _isWSL; then
+        _mountBackupWSL || return 1
+    else
+        _mountBackupUdisks || return 1
+    fi
+    echo "Mounted $BACKUP_VOLUME_LABEL at $BACKUP_MOUNT_POINT"
+}
+
+_unmountBackupVolume() {
+    if _isWSL; then
+        sudo umount "$1"
+    else
+        udisksctl unmount -b "/dev/disk/by-label/${BACKUP_VOLUME_LABEL}" >/dev/null
+    fi
 }
 
 unmountBackup() {
@@ -70,8 +127,8 @@ unmountBackup() {
         "$mount_point"/*) cd "$HOME" || return 1 ;;
     esac
     sync
-    if sudo umount "$mount_point"; then
-        echo "Unmounted $BACKUP_VOLUME_LABEL. It can now be safely ejected from Windows."
+    if _unmountBackupVolume "$mount_point"; then
+        echo "Unmounted $BACKUP_VOLUME_LABEL. It can now be safely unplugged."
     else
         echo "Unmount failed; close users shown by: fuser -vm $mount_point"
         return 1
@@ -100,6 +157,7 @@ _resolveObsidianVault() {
         {
             compgen -G '/mnt/[a-z]/Users/*/My Drive/_WORKSPACE/20_Notes'
             compgen -G '/mnt/[a-z]/My Drive/_WORKSPACE/20_Notes'
+            compgen -G "${HOME}/G/_WORKSPACE/20_Notes"
         } | sort -u
     )
     if [ "${#candidates[@]}" -eq 1 ]; then
@@ -110,6 +168,7 @@ _resolveObsidianVault() {
         return 1
     fi
 
+    _isWSL || { echo "Obsidian vault not found; set OBSIDIAN_VAULT or update $override_file." >&2; return 1; }
     windows_user=$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')
     candidate="/mnt/c/Users/${windows_user}/My Drive/_WORKSPACE/20_Notes"
     if [ -n "$windows_user" ] && [ -d "$candidate" ]; then
@@ -149,12 +208,12 @@ backupVault() {
     if ! mountpoint -q "$mount_point"; then
         mountBackup || return 1
         mounted_here=1
-    elif [ "$(findmnt -n -o SOURCE --target "$mount_point")" != "$BACKUP_WINDOWS_DRIVE" ]; then
-        echo "Refusing backup: $mount_point is not mounted from Windows $BACKUP_WINDOWS_DRIVE."
+    elif [ "$(findmnt -n -o SOURCE --target "$mount_point")" != "$(_backupSourceDevice)" ]; then
+        echo "Refusing backup: $mount_point is not mounted from $(_backupSourceDevice)."
         return 1
     fi
 
-    if ! powershell.exe -NoProfile -Command \
+    if _isWSL && ! powershell.exe -NoProfile -Command \
         "if (Get-Process GoogleDriveFS -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" \
         >/dev/null 2>&1; then
         echo "Note: Google Drive for desktop is not running; backing up the local mirror as-is."

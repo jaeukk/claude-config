@@ -1,6 +1,10 @@
 # Copy to ~/.bash_aliases.local and adjust for this machine. Do not commit that local file.
+
+# BACKUP_WINDOWS_DRIVE is read on WSL only; native Linux finds the volume by label.
 BACKUP_WINDOWS_DRIVE="D:"
 BACKUP_VOLUME_LABEL="Backup2"
+# WSL: a drvfs mount point such as /mnt/backup2.
+# Native Linux: where udisks mounts it, i.e. /run/media/$USER/<label>.
 BACKUP_MOUNT_POINT="/mnt/backup2"
 BACKUP_RETENTION_DAYS=30
 
