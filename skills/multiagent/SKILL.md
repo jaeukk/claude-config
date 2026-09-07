@@ -194,11 +194,26 @@ independence rule while using Orca's terminals, launch through the adapter inste
 
 It runs `resolve_binding` (family independence, tier, pinned model, effort) and execs
 `worker-start` with exactly that; anything after `--` is passed through (`--name`, `--setup`,
-`--on`). `--required-family` selects the outage fallback. Orca still does not check the
-result — a `worker-start` typed by hand bypasses the policy silently — so treat the adapter as
-the only sanctioned way to start an Orca worker for a policy role. Remaining Orca facts apply:
-`--model/--effort` only on fresh terminals, never with `--terminal`; the conductor is the
-coordinator terminal and is not launched.
+`--on`). `--required-family` selects the outage fallback.
+
+Authorship is recorded per Orca run in `tasks/orca/<run_id>/observed-author.json` — the same
+sidecar the engine and hook use. A producing role (`implementer`, `bulk_worker`) writes it on a
+successful launch; a reviewer (`critic`, `verifier`) reads it and ignores what you type unless
+it agrees: no record and no `--author-family` → refused; a record that contradicts the flag →
+refused; a corrupt record → refused. The record is written at *launch*, like the hook's native
+path, so a producer that later fails still leaves its family there — the "failed native
+producer" rule above applies.
+
+That makes an audit loop two commands per cycle, with no script:
+
+    python3 engine/adapters/orca_worker_start.py --role critic --task <id>   # family from record
+    orca-ide orchestration check --wait --types worker_done,escalation,question --json
+    # fix (yourself, or an implementer launch, which re-records the author) → repeat until SHIP
+
+Orca still does not check any of this — a `worker-start` typed by hand bypasses the policy
+silently — so treat the adapter as the only sanctioned way to start an Orca worker for a policy
+role. Remaining Orca facts apply: `--model/--effort` only on fresh terminals, never with
+`--terminal`; the conductor is the coordinator terminal and is not launched.
 
 ### Conductor host support
 
