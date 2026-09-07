@@ -189,31 +189,96 @@ Orca's `/orchestration` launches workers as visible, persistent terminals but ch
 independence rule while using Orca's terminals, launch through the adapter instead of calling
 `worker-start` directly:
 
-    python3 engine/adapters/orca_worker_start.py --role critic --task <orca_task_id> \
-        --author-family claude            # resolves -> codex-ceiling, astra, medium
+    python3 engine/adapters/orca_worker_start.py --role critic --task <orca_task_id>
 
-It runs `resolve_binding` (family independence, tier, pinned model, effort) and execs
-`worker-start` with exactly that; anything after `--` is passed through (`--name`, `--setup`,
-`--on`). `--required-family` selects the outage fallback.
+Run that command from the multi-agent installation root, or use the adapter's absolute path.
+It attests the conductor from the current Orca terminal, rejects a contradictory
+`--conductor-host` assertion, runs `resolve_binding` (family independence, tier, pinned model,
+effort), and invokes `worker-start` with exactly that selection. Anything after `--` passes
+through (`--name`, `--setup`, `--on`) except the flags the policy or recovery flow owns.
+`--required-family` selects the outage fallback. The conductor role is session-only and is
+refused here.
 
-Authorship is recorded per Orca run in `tasks/orca/<run_id>/observed-author.json` — the same
-sidecar the engine and hook use. A producing role (`implementer`, `bulk_worker`) writes it on a
-successful launch; a reviewer (`critic`, `verifier`) reads it and ignores what you type unless
-it agrees: no record and no `--author-family` → refused; a record that contradicts the flag →
-refused; a corrupt record → refused. The record is written at *launch*, like the hook's native
-path, so a producer that later fails still leaves its family there — the "failed native
-producer" rule above applies.
+**What you lose crossing over — say it in every brief.** The engine's containment does not
+apply: Orca launches Codex under *your* `~/.codex/config.toml` sandbox (`workspace-write`) and
+Claude with *your* settings. A reviewer launched here can edit the thing it is reviewing. Tell
+it not to, snapshot the target diff or hashes before launch, and compare them when it finishes;
+`git status` alone cannot reliably detect edits to files that were already dirty.
 
-That makes an audit loop two commands per cycle, with no script:
+**Authorship is a separate state store.** `tasks/orca/<run_id>/observed-author.json` is not
+the engine contract's sidecar: nothing maps an Orca run to an engine task, so switching
+transports carries no authorship automatically. The adapter serializes transitions with a
+per-run lock and stores one bounded settled-author snapshot plus one active attempt:
 
-    python3 engine/adapters/orca_worker_start.py --role critic --task <id>   # family from record
-    orca-ide orchestration check --wait --types worker_done,escalation,question --json
-    # fix (yourself, or an implementer launch, which re-records the author) → repeat until SHIP
+- A producing or review launch reserves the run *before* `worker-start`, under a per-run
+  lock, so adapter-launched attempts cannot overlap: a second tracked launch is refused until
+  the exact task and dispatch are settled. The lock is per machine and covers only the
+  adapter; a hand-typed `worker-start` is outside it.
+- A successful producer is `--settle succeeded`. A failed producer that left changes is
+  `--settle retained-output`, because failure does not erase authorship. Use
+  `--settle no-output --confirm-no-output` only after verifying that no output remains.
+- A completed critic or verifier is `--settle reviewed`. If the conductor then edits, use
+  `--settle conductor-edited`; its family comes from Orca's attested terminal identity.
+- A start Orca definitively **rejects** (`ok: false`, no dispatch — a bad flag, say) created
+  nothing, so its reservation is released and the run is free again. A **lost or malformed**
+  response is different: a worker may be live, so the attempt stays `outcome_unknown` and the
+  run stays reserved. Inspect the saved request/dispatch; if the receipt preserved a request
+  ID, `--resume-start --task <id>` replays the same Orca request instead of launching a
+  duplicate; a *rejected* retry leaves the original attempt reserved, since its worker may
+  be live. Otherwise an `outcome_unknown` attempt follows the no-recorded-dispatch rule
+  below.
+- An attempt with **no recorded dispatch** — `starting` (Orca never answered) or
+  `outcome_unknown` (it answered unreadably) — is settled by the same rule either way. The
+  reservation records, under the run lock, which dispatch the task already had. Such an attempt
+  is settled only by the dispatch Orca reports as the task's *current* one — read under the
+  same lock — and only if that differs from the baseline: the lock admits one adapter attempt
+  at a time, so barring a hand-typed start or the residual below, nothing else could have
+  created it. Settle it with that `--dispatch-id`, any outcome. The baseline itself is an
+  earlier attempt's and is refused; so is any id that is not the current dispatch, however
+  it was obtained. If nothing new appears and the
+  reservation is over 600 s old, `--settle abandoned --task <id> --confirm-no-output` drops the
+  attempt and keeps the settled author. 600 s is the adapter's own cap on its `worker-start`
+  call, so an adapter-launched start older than that has returned or been killed; it is not a
+  claim about Orca's internals. Every Orca query the adapter makes is capped at 60 s, so a hung
+  Orca cannot hold the run lock. The residual none of this rules out: an Orca-side mutation
+  still completing after its client died — Orca gives no way to ask about a request whose id
+  was never received. Never delete the record by hand: that erases the
+  settled author, and the next critic is then chosen against the conductor's family instead
+  of the real producer's.
+- With no producer record, the attested conductor is the author. An `--author-family` claim
+  that disagrees with stored or attested evidence is refused.
 
-Orca still does not check any of this — a `worker-start` typed by hand bypasses the policy
-silently — so treat the adapter as the only sanctioned way to start an Orca worker for a policy
-role. Remaining Orca facts apply: `--model/--effort` only on fresh terminals, never with
-`--terminal`; the conductor is the coordinator terminal and is not launched.
+**Audit-cycle procedure.** A procedural template: capture IDs from JSON rather than copying
+placeholders. A Run must exist first (`run-create`, or the current terminal's bound Run); create a
+fresh task for each cycle, since a completed task is already settled.
+
+    <ORCA> orchestration task-create --spec <review-brief> --json
+    python3 engine/adapters/orca_worker_start.py --role critic --task <task_id>
+    # save <dispatch_id> from the start receipt (result.dispatchId), then loop:
+    <ORCA> orchestration check --wait \
+        --types worker_done,escalation,question --timeout-ms 900000 --json
+    #   for EVERY message in the batch: answer a `question` with `orchestration reply`,
+    #   handle an `escalation`. If a worker_done matches BOTH payload.taskId == <task_id>
+    #   AND payload.dispatchId == <dispatch_id>, settle and release it BEFORE the ack --
+    #   Orca's contract: decide each completed worker's fate before acknowledging, or a
+    #   conductor that dies after the ack leaves the worker live with nothing to prompt
+    #   its cleanup:
+    python3 engine/adapters/orca_worker_start.py --settle reviewed \
+        --task <task_id> --dispatch-id <dispatch_id>
+    <ORCA> orchestration worker-release --dispatch <dispatch_id> --json
+    #   then acknowledge the batch, matched or not -- an unacknowledged batch replays on
+    #   the next wait, so a loop that acks only after the match stalls on any question:
+    <ORCA> orchestration check --ack <delivery_id> --json
+    #   repeat the wait until the matching worker_done was seen; a timeout or an
+    #   unrelated batch is a checkpoint, not a failure.
+    # apply findings; if the conductor edits, record it before the next cycle:
+    python3 engine/adapters/orca_worker_start.py --settle conductor-edited --task <task_id>
+
+Use the one Orca executable selected for the session (`ORCA_CLI_COMMAND`, then `orca-dev` in a
+dev checkout, then `orca-ide` on Linux or `orca` elsewhere) everywhere `<ORCA>` appears. Orca
+still checks none of this—a hand-typed `worker-start` silently bypasses policy—so the adapter
+is the only sanctioned start path for a policy role. `--model/--effort` remain fresh-terminal
+options and cannot combine with `--terminal`; the conductor is never launched.
 
 ### Conductor host support
 
