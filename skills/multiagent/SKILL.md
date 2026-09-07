@@ -182,6 +182,24 @@ as `enforcement`:
 An allowlist is not a substitute for `--tools`: `--allowedTools` only grants permissions and
 leaves every other tool present. Never claim a Claude-hosted worker is sandboxed.
 
+### Orca as transport
+
+Orca's `/orchestration` launches workers as visible, persistent terminals but chooses
+`--agent/--model/--effort` by hand and applies no policy. To keep the tier map and the
+independence rule while using Orca's terminals, launch through the adapter instead of calling
+`worker-start` directly:
+
+    python3 engine/adapters/orca_worker_start.py --role critic --task <orca_task_id> \
+        --author-family claude            # resolves -> codex-ceiling, astra, medium
+
+It runs `resolve_binding` (family independence, tier, pinned model, effort) and execs
+`worker-start` with exactly that; anything after `--` is passed through (`--name`, `--setup`,
+`--on`). `--required-family` selects the outage fallback. Orca still does not check the
+result — a `worker-start` typed by hand bypasses the policy silently — so treat the adapter as
+the only sanctioned way to start an Orca worker for a policy role. Remaining Orca facts apply:
+`--model/--effort` only on fresh terminals, never with `--terminal`; the conductor is the
+coordinator terminal and is not launched.
+
 ### Conductor host support
 
 A host may conduct when three things hold, all machine-checked:
