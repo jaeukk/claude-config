@@ -31,7 +31,10 @@ schema changes no behaviour.
 4. Set `dispatch.current_role`, then call one approved backend. `dispatch-worker` refuses a
    role that disagrees with `current_role`, and refuses entirely without a live lease it can
    count the worker against.
-5. Store worker outputs separately and append events only as the lease owner.
+5. Store worker outputs separately and append events only as the lease owner. A CLI producer
+   that exits 0 records its family in `observed-author.json` beside the contract (a native
+   producer is recorded by the hook before it runs, success or not); reviewer dispatch is
+   checked against that record, not against `author_family` alone.
 6. Retry only transport, timeout, or rate-limit failures. Escalate deterministic errors;
    never silently drop a shard.
 7. Run independent critic and verifier passes, synthesize, clear the active pointer, and

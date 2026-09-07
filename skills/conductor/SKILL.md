@@ -1,12 +1,12 @@
 ---
-name: orchestration
-description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude and Codex backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /orchestration, when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
+name: conductor
+description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude and Codex backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /conductor (formerly /orchestration; that name now belongs to Orca's skill), when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
 ---
 
 # Orchestration
 
 Operate as the conductor on any host declared in the `conductor` binding — today Claude Code
-(`claude-frontier`, currently Opus 5) and Codex (`codex-conductor`). The invariant being
+(`claude-frontier`, currently Opus 5) and Codex (`codex-frontier`, currently Astra). The invariant being
 protected is not "Claude conducts": it is that **a host may conduct only if it can actually
 reach a different-family critic and verifier**. That is a property of the host's dispatch
 adapter, not of its vendor, and the engine checks it directly instead of trusting a hard-coded
@@ -47,6 +47,11 @@ installation (can each declared conductor reach an independent critic at all?); 
 checks your contract (is this host a declared conductor, can it dispatch every role you
 planned?). Do not reach step 3 and take a lease you cannot validly hold.
 
+One thing neither command checks: `claude-frontier`'s `model` pin must equal the model your
+session is actually running. The conductor binding is a session assertion — the pin
+*describes*, it does not select — so after `/model` changes the session, the contract asserts
+something false until the pin and the two session levers (D10) follow it.
+
 1. Decompose the request into the smallest useful role set: `implementer`, `critic`,
    `bulk_worker`, `verifier`, or `runner`.
 2. Create and validate a task contract with explicit `target_repo`, `write_scope`,
@@ -60,21 +65,45 @@ planned?). Do not reach step 3 and take a lease you cannot validly hold.
 7. Collect structured evidence, apply the retry classification, synthesize once, and
    release the lease.
 
-## Required bindings
+## Tiers and required bindings
 
-- `implementer`: Claude and Codex candidates both run at high effort.
-- `critic`: Codex high tier is first choice (currently Codex Sol); fall back to a
-  different-family Claude backend when Codex authored the artifact.
-- `bulk_worker`: use both Claude fast tier (currently Haiku) and Codex low tier for
-  independent shards, then fan in to the conductor. Claude and Codex must both stay present.
-- `verifier`: Codex standard tier is first choice; fall back to the Claude mid tier
-  (currently Sonnet 5) when Codex authored the artifact.
-- `runner`: Claude fast tier first, then Codex low tier.
+Backends are named `<family>-<tier>` for Claude and Codex, and each tier carries one role on
+both families — except `fast`, which carries both `bulk_worker` and `runner`.
+A tier is a capability rank, not an effort: `codex-frontier` runs at medium while `codex-core`
+runs at high, because Astra at medium still out-reasons Sol at high.
+
+| Tier | Role | Claude | Codex |
+|---|---|---|---|
+| ceiling | critic | Fable 5.1, high | Astra, medium |
+| frontier | conductor | Opus 5 (session assertion) | Astra, medium |
+| core | implementer | Opus 5, high | Sol, high |
+| mid | verifier | Sonnet 5, medium | Terra, medium |
+| fast | bulk_worker, runner | Haiku 4.5, low | Terra, low |
+
+- `implementer`: both candidates at high effort (the validator enforces this). Claude is rank 1
+  because a native Claude subagent can write under the hook; `codex-core` is reachable only as
+  a read-only worker and returns a patch — see "What cannot land" below.
+- `critic`: ceiling tier, different family from the author. Claude-authored work gets
+  `codex-ceiling`; Codex-authored work gets `claude-ceiling`.
+- `verifier`: mid tier, different family from the author. Mind the CLI asymmetry under "What
+  cannot execute".
+- `bulk_worker`: both fast tiers in one pool; the validator requires both families present.
+- `runner`: `codex-fast` first — on the recorded benchmark (`_shared/capability-profile.md`) it
+  matched Claude's accuracy at 26× fewer tokens (9× fewer than Gemini) — then `claude-fast`.
+
+"First, then" is an ordered preference, not failover. `resolve_binding` returns the first
+compatible candidate without probing health, and a worker that fails is reported, not retried
+on the next candidate. During a Codex outage, reach the Claude fallback explicitly with
+`--required-family claude`; retrying without it selects Codex again.
 
 Effort belongs to the binding, not the backend registry, and `dispatch-worker` transmits it on
 every CLI path: `-c model_reasoning_effort` for Codex, `--effort` for Claude. The one
 place it is *not* transmitted is a Claude worker spawned natively as a subagent, which takes
-effort from its agent frontmatter — keep that frontmatter in sync with the binding.
+effort from its agent frontmatter. Neither is the **model**: the hook checks only that a
+compatible same-family binding exists, so a native spawn runs whatever the agent frontmatter or
+session selects. Resolving `claude-ceiling` does not make a native subagent Fable 5.1 — only
+its frontmatter does. Keep both model and effort in the frontmatter in sync with the binding,
+and never report the resolved backend as the model that ran unless the frontmatter says so.
 
 ## Host adapter contract
 
@@ -158,7 +187,7 @@ leaves every other tool present. Never claim a Claude-hosted worker is sandboxed
 A host may conduct when three things hold, all machine-checked:
 
 1. Its backend is a declared candidate of the `conductor` binding (`claude-frontier`,
-   `codex-conductor`).
+   `codex-frontier`).
 2. Its host has a `conductor_adapters` entry in `routing.yaml`.
 3. That entry's `dispatch_hosts` reaches an independent `critic` and `verifier` for **every**
    author family — `validate_policy` rejects a conductor candidate that cannot, and
@@ -181,7 +210,7 @@ Two asymmetries remain real on Codex, and neither blocks conducting:
   a contract that was enforced. (Claude Code's gate is narrower than it sounds too: it sees
   tool calls, so a worker CLI launched from `Bash` bypasses the independence check. The hook
   denies what looks like one and redirects you to `dispatch-worker`, but that match is a
-  **heuristic** — a leading space or an absolute path defeats it. It catches the slip, not an
+  **heuristic** — an absolute path, a variable, or any interpreter defeats it. It catches the slip, not an
   adversary; do not grow the regex into something that looks authoritative.)
 - **Fan-out of three.** `max_active_children: 3` caps simultaneous workers; schedule larger
   `bulk_worker` jobs in waves.
@@ -210,6 +239,48 @@ restore the System A workers — plus the two preconditions `_agy_cli` records (
 actually established, a completion actually observed) and the argv-length work its docstring
 names. Do not re-add it halfway.
 
+## Two gaps the bindings do not tell you about
+
+**What cannot land.** Every CLI-dispatched implementer — either family — returns a patch.
+`git apply` is denied by the hook's shell-mutation rule, so the only route is the conductor
+applying it by hand with the file tools, and that is capped at two **code** files
+(`CODE_SUFFIXES`; docs and config do not count). A patch touching three or more code files has
+no route that honours the cap. On **Claude Code**, implementation that must write files goes to
+a natively-spawned Claude subagent under the hook; use `codex-core` only when a patch *is* the
+deliverable. On **Codex** there is no native Claude spawn, so such work is blocked: stop, say
+so, and request a conductor handoff (user approval; `approvals.yaml`). Do not close this by
+relaxing the hook or zeroing the counter; the fix is a
+narrow `apply-worker-patch` operation (recorded dispatch, patch digest, live lease, every path
+checked against `write_scope`), which does not exist yet.
+
+**What cannot execute.** A CLI-dispatched Claude worker has no `Bash`, on purpose — granting it
+would reopen the write path the tool restriction exists to close. So `claude-mid` as a verifier
+can read tests but not run them, and that is exactly the verifier Codex-authored work resolves
+to. When verification means running something: on Claude Code, spawn the verifier natively as a
+Claude subagent under the hook. On Codex that route does not exist — either arrange for Claude
+to be the author so the verifier is Codex (whose sandbox blocks writes but not commands), or
+stop, report verification as blocked, and request a conductor handoff (user approval;
+`approvals.yaml`). Never report a read-only review as executed verification.
+
+## Authorship is observed, not declared
+
+Independence is checked against `observed-author.json` beside the contract. `dispatch-worker`
+writes it for CLI producers **only after the worker exits 0**, so a failed CLI run cannot
+overwrite the real author's record. The hook writes it for native producers **before the call
+runs** — a PreToolUse hook cannot see the outcome — so a native producer that fails still
+overwrites the record with its intent. A reviewer dispatch is
+refused when the sidecar contradicts `author_family`, and also when the sidecar exists but is
+unreadable, malformed, or names an unknown family. A *missing* sidecar means no producing
+worker ran: the conductor authored the artifact and its own family is used. Fix the contract, not the
+sidecar — with one narrow exception. A *failed native* producer has already overwritten the
+record with its intent. Restore the previous author **only if** it retained nothing: compare
+against the state before the call with `git status` plus `git diff HEAD` (working tree *and*
+index; plain `git diff` misses staged and untracked files), and confirm no other producer ran
+in between. Keep the baseline in context or in an authorized file — redirection is denied. If the failed producer left *any* retained change, the record is
+correct as it stands — those changes are its — and the artifact is now mixed-family. Last
+recorded producer wins; a mixed-family artifact collapses to one, so say so in the review
+brief rather than pretending the earlier author is the only one.
+
 ## Approval and enforcement
 
 The conductor may approve bounded worker calls and transient retries inside the task
@@ -220,7 +291,11 @@ During an active task, use hook-visible file tools for writes. Do not mutate thr
 shell redirection or bulk shell commands. On a host without a PreToolUse adapter (Codex), the
 same rule holds without a hook to catch you: call `policy_engine.py authorize` with the write
 before making it, and keep every mutation inside `write_scope`. Keep direct conductor code edits to at most
-two small files and send them through independent critic review. Write authority is decided
+two small files and send them through independent critic review. The cap reads
+`direct_code_files` from the contract, and nothing increments it for you: bump it yourself
+after each new code file, or the cap never fires. It is a bare count, not a file list — once it
+reaches two, every further code-file edit is refused, including re-edits of a file already
+counted, so finish each file before bumping. Write authority is decided
 per selected backend and enforcement adapter, **not by product family**: a worker whose backend
 declares `writes_mediated: false` returns results or patches even when its host is capable of
 `workspace-write`. Direct writes need both an approved scope and an adapter that validates

@@ -4,8 +4,14 @@
     "claude-ceiling": {
       "host": "claude-code",
       "family": "claude",
-      "model": "claude-fable-5",
-      "capabilities": ["planning", "routing", "review", "verification", "structured_result"],
+      "model": "claude-fable-5-1",
+      "capabilities": [
+        "planning",
+        "routing",
+        "review",
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
@@ -15,7 +21,13 @@
       "host": "claude-code",
       "family": "claude",
       "model": "claude-opus-5",
-      "capabilities": ["planning", "routing", "review", "verification", "structured_result"],
+      "capabilities": [
+        "planning",
+        "routing",
+        "review",
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
@@ -25,7 +37,12 @@
       "host": "claude-code",
       "family": "claude",
       "model": "claude-opus-5",
-      "capabilities": ["implementation", "review", "verification", "structured_result"],
+      "capabilities": [
+        "implementation",
+        "review",
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
@@ -35,7 +52,10 @@
       "host": "claude-code",
       "family": "claude",
       "model": "claude-sonnet-5",
-      "capabilities": ["verification", "structured_result"],
+      "capabilities": [
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
@@ -45,57 +65,102 @@
       "host": "claude-code",
       "family": "claude",
       "model": "claude-haiku-4-5",
-      "capabilities": ["bulk", "mechanical", "verification", "structured_result"],
+      "capabilities": [
+        "bulk",
+        "mechanical",
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "host-permissions",
       "writes_mediated": false,
       "write_mode": "result-only",
       "supports_subagents": false
     },
-    "codex-conductor": {
+    "codex-ceiling": {
       "host": "codex",
       "family": "codex",
-      "model": "gpt-5.6-sol",
-      "capabilities": ["planning", "routing", "review", "verification", "structured_result"],
+      "model": "gpt-6-astra",
+      "capabilities": [
+        "planning",
+        "routing",
+        "review",
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "host-permissions",
       "writes_mediated": false,
       "write_mode": "host-approval",
       "supports_subagents": true
     },
-    "codex-high": {
+    "codex-frontier": {
+      "host": "codex",
+      "family": "codex",
+      "model": "gpt-6-astra",
+      "capabilities": [
+        "planning",
+        "routing",
+        "review",
+        "verification",
+        "structured_result"
+      ],
+      "sandbox": "host-permissions",
+      "writes_mediated": false,
+      "write_mode": "host-approval",
+      "supports_subagents": true,
+      "note": "Codex's newest model, and the one the user's own ~/.codex/config.toml selects. Verified working 2026-09-05 on this ChatGPT-account auth. NB: the id does not follow the gpt-5.6-* pattern of sol/terra -- guessing 'gpt-5.6-astra' from that pattern fails, and the API returns the SAME generic refusal for every unrecognised id, so that message must not be read as evidence the name was correct."
+    },
+    "codex-core": {
       "host": "codex",
       "family": "codex",
       "model": "gpt-5.6-sol",
-      "capabilities": ["review", "verification", "structured_result"],
+      "capabilities": [
+        "implementation",
+        "review",
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "read-only",
       "writes_mediated": false,
-      "write_mode": "result-only",
-      "supports_subagents": false
+      "supports_subagents": false,
+      "write_mode": "patch-return"
     },
-    "codex-standard": {
+    "codex-mid": {
       "host": "codex",
       "family": "codex",
       "model": "gpt-5.6-terra",
-      "capabilities": ["implementation", "review", "verification", "structured_result"],
+      "capabilities": [
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "read-only",
       "writes_mediated": false,
-      "write_mode": "patch-return",
-      "supports_subagents": false
+      "supports_subagents": false,
+      "write_mode": "result-only"
     },
-    "codex-low": {
+    "codex-fast": {
       "host": "codex",
       "family": "codex",
       "model": "gpt-5.6-terra",
-      "capabilities": ["bulk", "mechanical", "structured_result"],
+      "capabilities": [
+        "bulk",
+        "mechanical",
+        "structured_result"
+      ],
       "sandbox": "read-only",
       "writes_mediated": false,
-      "write_mode": "result-only",
-      "supports_subagents": false
+      "supports_subagents": false,
+      "write_mode": "result-only"
     },
     "agy-multimodal": {
       "host": "agy",
       "family": "gemini",
       "model": "gemini-3.1-pro-high",
-      "capabilities": ["multimodal", "review", "verification", "structured_result"],
+      "capabilities": [
+        "multimodal",
+        "review",
+        "verification",
+        "structured_result"
+      ],
       "sandbox": "containment-unverified",
       "writes_mediated": false,
       "write_mode": "result-only",
@@ -105,7 +170,11 @@
       "host": "agy",
       "family": "gemini",
       "model": "gemini-3.6-flash-low",
-      "capabilities": ["bulk", "mechanical", "structured_result"],
+      "capabilities": [
+        "bulk",
+        "mechanical",
+        "structured_result"
+      ],
       "sandbox": "containment-unverified",
       "writes_mediated": false,
       "write_mode": "result-only",

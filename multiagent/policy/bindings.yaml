@@ -4,43 +4,79 @@
     "conductor": {
       "mode": "session_assertion",
       "candidates": [
-        {"backend": "claude-frontier", "effort": "high"},
-        {"backend": "codex-conductor", "effort": "high"}
+        {
+          "backend": "claude-frontier",
+          "effort": "high"
+        },
+        {
+          "backend": "codex-frontier",
+          "effort": "medium"
+        }
       ]
     },
     "implementer": {
       "mode": "first_available",
       "candidates": [
-        {"backend": "claude-core", "effort": "high"},
-        {"backend": "codex-standard", "effort": "high"}
+        {
+          "backend": "claude-core",
+          "effort": "high"
+        },
+        {
+          "backend": "codex-core",
+          "effort": "high"
+        }
       ]
     },
     "critic": {
       "mode": "different_family_from_author",
       "candidates": [
-        {"backend": "codex-high", "effort": "high"},
-        {"backend": "claude-core", "effort": "high"}
+        {
+          "backend": "codex-ceiling",
+          "effort": "medium"
+        },
+        {
+          "backend": "claude-ceiling",
+          "effort": "high"
+        }
       ]
     },
     "bulk_worker": {
       "mode": "pool",
       "pool": [
-        {"backend": "claude-fast", "effort": "low"},
-        {"backend": "codex-low", "effort": "low"}
+        {
+          "backend": "claude-fast",
+          "effort": "low"
+        },
+        {
+          "backend": "codex-fast",
+          "effort": "low"
+        }
       ]
     },
     "verifier": {
       "mode": "different_family_from_author",
       "candidates": [
-        {"backend": "codex-standard", "effort": "medium"},
-        {"backend": "claude-mid", "effort": "medium"}
+        {
+          "backend": "codex-mid",
+          "effort": "medium"
+        },
+        {
+          "backend": "claude-mid",
+          "effort": "medium"
+        }
       ]
     },
     "runner": {
       "mode": "first_available",
       "candidates": [
-        {"backend": "claude-fast", "effort": "low"},
-        {"backend": "codex-low", "effort": "low"}
+        {
+          "backend": "codex-fast",
+          "effort": "low"
+        },
+        {
+          "backend": "claude-fast",
+          "effort": "low"
+        }
       ]
     }
   }

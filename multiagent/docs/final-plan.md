@@ -4,8 +4,9 @@
 
 Claude Code is the default application and Opus 5 is the asserted conductor. One task
 has one conductor and one lease. All delegated work uses model-independent roles;
-bindings select replaceable Claude or Codex backends. `/orchestration` and its policy
-are globally canonical under `~/.multiagent/`, with project-local task runtime state.
+bindings select replaceable Claude or Codex backends. `/conductor` and its policy are
+canonical in `~/.claude/multiagent/` and `~/.claude/skills/conductor/`; `~/.multiagent/` is
+a deployed consumer copy, with project-local task runtime state.
 
 Python 3.14 and WSL were treated as existing prerequisites, not installation work.
 Native Windows is the default execution path; Ubuntu 24.04 WSL is a validated second
@@ -40,7 +41,7 @@ host with the same policy and canonical skill.
 | Claude Code | `@anthropic-ai/claude-code` | Default conductor application |
 | Codex CLI | `@openai/codex` | Native worker runtime and MCP server |
 | Claude plugin | `multi-agent-starter@multi-agent-starter` | Upstream task/workspace scaffolding |
-| Shared skill | `orchestration` | Conductor lifecycle and policy routing |
+| Shared skill | `conductor` (was `orchestration`; that name is now Orca's) | Conductor lifecycle and policy routing |
 | Upstream agent | `claude-main` | Claude worker definition, high effort |
 | MCP worker host | `codex` | Codex worker and critic access from Claude |
 
@@ -61,15 +62,23 @@ their originals. The migration is reproducible with
 
 | Role | Binding |
 |---|---|
-| `conductor` | Claude frontier / Opus 5, high, session assertion |
-| `implementer` | Claude core high; Codex standard high alternative |
-| `critic` | Codex high / Sol high; different-family Claude fallback |
-| `bulk_worker` | Claude fast / Haiku low and Codex low in one shard pool |
-| `verifier` | Different family from the implementer; Codex standard, Claude mid / Sonnet 5 fallback |
-| `runner` | Claude fast or Codex low |
+Backends are named `<family>-<tier>`; one role per tier on both families (fast carries two).
 
-`claude-ceiling` (Fable 5) is registered but bound to no role. It records the escalation
-tier above `claude-frontier`; promoting it is a one-line `bindings.yaml` change.
+| Tier | Role | Claude | Codex |
+|---|---|---|---|
+| ceiling | `critic` (different family from author) | Fable 5.1, high | Astra, medium |
+| frontier | `conductor` (session assertion) | Opus 5, high | Astra, medium |
+| core | `implementer` (Claude first; both high) | Opus 5 | Sol |
+| mid | `verifier` (different family from author) | Sonnet 5, medium | Terra, medium |
+| fast | `bulk_worker` pool; `runner` (Codex first) | Haiku 4.5, low | Terra, low |
+
+`runner` prefers `codex-fast` on the recorded benchmark (`capability-profile.md`): equal
+accuracy at 26× fewer tokens than Claude fast (9× fewer than Gemini).
+
+The conductor pin is a session assertion: changing `claude-frontier`'s model is **not** a
+one-line change. `multiagent/.claude/settings.json`, `install_wsl_orchestration.js`
+(`CONDUCTOR_MODEL`), `_templates/task.yaml`, and the self-test fixture must move with it, or
+the contract asserts a model the session is not running.
 
 Codex direct writes remain disabled. Codex implementers return applicable patches in a
 read-only sandbox until a future mediated-write adapter is separately threat-modeled,

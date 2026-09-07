@@ -25,6 +25,14 @@ KNOWN_FAMILIES = {"claude", "codex", "gemini"}
 #: A real Gemini model id, e.g. ``gemini-3.6-flash-low``. Anchored so that a
 #: vendor name smuggled after the prefix (``gemini-claude-sonnet-4-6``) fails.
 GEMINI_MODEL = re.compile(r"gemini-\d[\w.]*(?:-[a-z]+)*")
+#: Roles whose dispatch produces the artifact a critic later reviews.
+PRODUCING_ROLES = frozenset({"implementer", "bulk_worker"})
+#: Sidecar recording which family actually produced the artifact. Both dispatch
+#: paths -- this engine and the PreToolUse hook -- write and read the same file,
+#: because independence is checked against what was observed producing the work,
+#: not against what the contract claims. It sits beside the contract, never beside
+#: the lease: those are the same directory by default but need not be.
+OBSERVED_AUTHOR_FILE = "observed-author.json"
 CODE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".jsx",
     ".kt", ".m", ".php", ".py", ".rb", ".rs", ".scala", ".sh", ".swift", ".ts", ".tsx",
@@ -768,7 +776,7 @@ class WorkerCommand:
     isolated_cwd: bool = False
 
 
-def _codex_cli(backend: dict[str, Any]) -> WorkerCommand:
+def _codex_cli(backend: dict[str, Any], role: str | None = None) -> WorkerCommand:
     """Build the Codex worker command, made read-only by its own OS sandbox."""
     return WorkerCommand(
         "codex",
@@ -781,7 +789,7 @@ def _codex_cli(backend: dict[str, Any]) -> WorkerCommand:
     )
 
 
-def _claude_cli(backend: dict[str, Any]) -> WorkerCommand:
+def _claude_cli(backend: dict[str, Any], role: str | None = None) -> WorkerCommand:
     """Build the Claude worker command.
 
     ``--tools`` restricts the tool surface itself; ``--allowedTools`` would only
@@ -790,6 +798,14 @@ def _claude_cli(backend: dict[str, Any]) -> WorkerCommand:
     drops the inherited MCP servers too. This still binds the agent rather than
     the process -- a settings-level hook could act outside it -- so it is not
     labelled as a sandbox.
+
+    No role gets ``Bash`` here, including ``verifier``. Granting it would buy test
+    execution at the price of an uncontained write path in the target repository,
+    which is the containment this command exists to provide. The consequence is
+    real and must not be papered over: a CLI-dispatched Claude verifier can read
+    and reason about tests but cannot run them. Route executable verification to
+    a Codex verifier, whose read-only sandbox blocks writes rather than commands,
+    or to a natively-spawned Claude subagent under the PreToolUse hook.
     """
     return WorkerCommand(
         "claude",
@@ -801,7 +817,7 @@ def _claude_cli(backend: dict[str, Any]) -> WorkerCommand:
     )
 
 
-def _agy_cli(backend: dict[str, Any]) -> WorkerCommand:
+def _agy_cli(backend: dict[str, Any], role: str | None = None) -> WorkerCommand:
     """Build the Gemini worker command.
 
     Headless ``agy`` takes its prompt as one argument, not on stdin, and times
@@ -838,19 +854,19 @@ def _agy_cli(backend: dict[str, Any]) -> WorkerCommand:
 WORKER_CLI = {"codex": _codex_cli, "claude-code": _claude_cli, "agy": _agy_cli}
 
 
-def worker_cli_args(backend: dict[str, Any]) -> WorkerCommand:
-    """Return the launch specification for a resolved backend."""
+def worker_cli_args(backend: dict[str, Any], role: str | None = None) -> WorkerCommand:
+    """Return the launch specification for a resolved backend and role."""
     builder = WORKER_CLI.get(backend["host"])
     if builder is None:
         raise ValueError(f"host {backend['host']!r} has no engine dispatcher")
-    return builder(backend)
+    return builder(backend, role)
 
 
 def build_worker_command(
-    backend: dict[str, Any], host_mode: str, target_repo: Path
+    backend: dict[str, Any], host_mode: str, target_repo: Path, role: str | None = None
 ) -> tuple[list[str], WorkerCommand]:
     """Resolve a worker launch specification into a native or WSL argv."""
-    spec = worker_cli_args(backend)
+    spec = worker_cli_args(backend, role)
     if host_mode == "native":
         executable = (
             shutil.which(f"{spec.program}.cmd") or shutil.which(spec.program)
@@ -883,6 +899,33 @@ def build_worker_command(
     raise ValueError(f"unsupported worker host mode: {host_mode}")
 
 
+class UnreadableAuthorRecord(Exception):
+    """The authorship sidecar exists but cannot be trusted."""
+
+
+def observed_author_family(contract_dir: Path) -> str | None:
+    """Return the family recorded as producing this task's artifact.
+
+    ``None`` means genuinely no record -- no producing worker ran. A record that
+    exists but is corrupt, unreadable, or names an unknown family raises instead:
+    collapsing that into ``None`` would make damaged evidence indistinguishable
+    from honest absence, and the caller would wave the review through.
+    """
+    sidecar = contract_dir / OBSERVED_AUTHOR_FILE
+    if not sidecar.exists():
+        return None
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise UnreadableAuthorRecord(f"{sidecar} cannot be read: {error}") from error
+    family = payload.get("family") if isinstance(payload, dict) else None
+    # isinstance first: an unhashable value (a list, a dict) would raise TypeError
+    # on the set lookup instead of reaching the structured denial.
+    if not isinstance(family, str) or family not in KNOWN_FAMILIES:
+        raise UnreadableAuthorRecord(f"{sidecar} records an unknown family: {family!r}")
+    return family
+
+
 def dispatch_worker(
     bundle: PolicyBundle,
     task: dict[str, Any],
@@ -892,6 +935,7 @@ def dispatch_worker(
     dry_run: bool,
     required_family: str | None = None,
     task_dir: Path | None = None,
+    contract_dir: Path | None = None,
 ) -> int:
     """Dispatch one bounded worker as a subprocess.
 
@@ -922,6 +966,33 @@ def dispatch_worker(
     if not authorization.allowed:
         print(json.dumps(authorization.as_dict(), indent=2), file=sys.stderr)
         return 2
+    # Independence is checked against what was observed producing the artifact,
+    # not against what the contract asserts. The hook already does this for
+    # natively-spawned reviewers; without it here, a stale author_family picks a
+    # reviewer of the same family that actually wrote the code.
+    if role in {"critic", "verifier"} and contract_dir is not None:
+        try:
+            seen = observed_author_family(contract_dir)
+        except UnreadableAuthorRecord as error:
+            print(json.dumps(Decision(
+                False, f"{role} blocked: {error}"
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
+        if seen is None:
+            # No producing worker ran, so the conductor authored the artifact and
+            # its family is the honest answer -- the same fallback the hook uses.
+            # Trusting the declaration here instead would let a conductor review
+            # its own work simply by declaring another family.
+            conductor_backend = bundle.backends.get(task["conductor"]["backend"])
+            seen = conductor_backend["family"] if conductor_backend else None
+        if seen is not None and seen != task.get("author_family"):
+            print(json.dumps(Decision(
+                False,
+                f"{role} blocked: contract declares author_family="
+                f"{task.get('author_family')!r} but {seen!r} was observed producing this "
+                "task's artifact; correct the contract before dispatching a reviewer",
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
     binding = resolve_binding(
         bundle,
         role,
@@ -934,7 +1005,7 @@ def dispatch_worker(
         return 2
     backend = binding.details
     target_repo = Path(task["target_repo"]).resolve()
-    command, spec = build_worker_command(backend, host_mode, target_repo)
+    command, spec = build_worker_command(backend, host_mode, target_repo, role)
     if dry_run:
         print(json.dumps(
             {
@@ -968,7 +1039,30 @@ def dispatch_worker(
     )
     heartbeat.start()
     try:
-        return _run_worker(command, spec, task, role, brief_path, target_repo)
+        status = _run_worker(command, spec, task, role, brief_path, target_repo)
+        if status == 0 and role in PRODUCING_ROLES and contract_dir is not None:
+            # The hook records authorship only for natively-spawned workers.
+            # Without this, an artifact produced here is later attributed to
+            # whichever family the conductor happens to be, and the independence
+            # check reviews the wrong author. Same filename and shape the hook
+            # reads, beside the contract the hook reads it from.
+            #
+            # Recorded only AFTER a successful run. Recording intent up front
+            # meant a worker that exited non-zero without producing anything
+            # still overwrote the real author's record -- and the denial that
+            # followed told the conductor to "correct" the declaration to match,
+            # handing the untouched artifact to a same-family reviewer.
+            #
+            # ponytail: last successful producer wins. Mixed-family artifacts
+            # collapse to one family; record a list if that ever matters.
+            (contract_dir / OBSERVED_AUTHOR_FILE).write_text(
+                json.dumps(
+                    {"family": backend["family"], "source": f"{role} via dispatch-worker"}, indent=2
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        return status
     finally:
         # A worker that crashed still freed its slot, and leaking one would
         # shrink the ceiling for the rest of the task. The release can still be
@@ -1080,7 +1174,7 @@ def self_test(root: Path) -> Decision:
         # The admission gate cannot depend on which roles were planned.
         unreachable_task = {
             "schema_version": 1, "task_id": "self-test-reach", "status": "active",
-            "conductor": {"host": "codex", "backend": "codex-conductor", "lease_owner": "o"},
+            "conductor": {"host": "codex", "backend": "codex-frontier", "lease_owner": "o"},
             "target_repo": str(root), "write_scope": [], "roles_plan": ["runner"],
             "approvals": {"user": []}, "dispatch": {"current_role": None, "active_workers": 0},
         }
@@ -1298,7 +1392,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "dispatch-worker":
         return dispatch_worker(
             bundle, load_document(args.task), args.role, args.brief, args.host, args.dry_run,
-            args.required_family, args.task_dir or args.task.parent,
+            args.required_family, args.task_dir or args.task.parent, args.task.parent,
         )
     if args.command == "self-test":
         return _print_decision(self_test(args.root))

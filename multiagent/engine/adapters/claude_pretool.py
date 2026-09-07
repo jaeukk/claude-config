@@ -12,7 +12,14 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "engine"))
 
-from policy_engine import authorize_action, load_document, load_policy, resolve_binding  # noqa: E402
+from policy_engine import (  # noqa: E402
+    OBSERVED_AUTHOR_FILE,
+    PRODUCING_ROLES,
+    authorize_action,
+    load_document,
+    load_policy,
+    resolve_binding,
+)
 
 
 MUTATING_SHELL = re.compile(
@@ -26,8 +33,8 @@ DANGEROUS_SHELL = re.compile(
 #: A worker CLI launched straight from the shell reaches no family-independence
 #: check, because those live on the Task/MCP branch below. This catches the
 #: absent-minded `codex exec ...` typed instead of `dispatch-worker`; it is a
-#: HEURISTIC, not a boundary. A leading space, an absolute path, a variable, or
-#: any interpreter defeats it, and no regex over free-form shell can be
+#: HEURISTIC, not a boundary. An absolute path, a variable, or any
+#: interpreter defeats it, and no regex over free-form shell can be
 #: complete. Do not grow it into something that looks authoritative.
 WORKER_CLI_SHELL = re.compile(r"(?:^|[;&|(]\s*)\s*(?:claude|codex|agy)(?:\.cmd)?\s", re.IGNORECASE)
 
@@ -59,14 +66,6 @@ def active_task_path() -> Path | None:
     return ROOT / "tasks" / task_id / "task.yaml"
 
 
-#: Roles whose dispatch produces the artifact a critic later reviews.
-PRODUCING_ROLES = frozenset({"implementer", "bulk_worker"})
-
-#: Hook-owned sidecar. Kept out of task.yaml on purpose: the contract belongs to
-#: the lease owner, while this is an observation the hook makes at dispatch time.
-OBSERVED_FILE = "observed-author.json"
-
-
 def record_observed_author(task_path: Path, family: str, source: str) -> None:
     """Record which family actually produced the artifact.
 
@@ -81,7 +80,7 @@ def record_observed_author(task_path: Path, family: str, source: str) -> None:
         Human-readable provenance, e.g. ``implementer via mcp__codex__codex``.
     """
     payload = {"family": family, "source": source}
-    (task_path.parent / OBSERVED_FILE).write_text(
+    (task_path.parent / OBSERVED_AUTHOR_FILE).write_text(
         json.dumps(payload, indent=2) + "\n", encoding="utf-8"
     )
 
@@ -92,7 +91,7 @@ def observed_author(task_path: Path, task: dict[str, Any], bundle: Any) -> str |
     A task where no producing worker was dispatched was authored by the
     conductor itself, so its backend family is the honest answer.
     """
-    sidecar = task_path.parent / OBSERVED_FILE
+    sidecar = task_path.parent / OBSERVED_AUTHOR_FILE
     if sidecar.exists():
         try:
             return str(json.loads(sidecar.read_text(encoding="utf-8")).get("family"))

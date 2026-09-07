@@ -3,7 +3,7 @@
 #
 #   deploy-multiagent.sh global
 #       Refresh the global fallback home (~/.multiagent on this machine):
-#       policy/ + skills/orchestration, plus a provenance stamp.
+#       policy/ + skills/conductor, plus a provenance stamp.
 #
 #   deploy-multiagent.sh project <dir>
 #       Install/refresh a project installation at <dir>/_multiagent:
@@ -20,7 +20,7 @@ SRC="$CLAUDE_DIR/multiagent"
 SOURCE_COMMIT=$(git -C "$CLAUDE_DIR" rev-parse HEAD) ||
   { echo "ERROR: $CLAUDE_DIR is not a Git worktree" >&2; exit 1; }
 SOURCE_STATUS=$(git -C "$CLAUDE_DIR" status --porcelain --untracked-files=all -- \
-  multiagent skills/orchestration scripts/deploy-multiagent.sh)
+  multiagent skills/conductor scripts/deploy-multiagent.sh)
 if [[ -n "$SOURCE_STATUS" && "${MULTIAGENT_ALLOW_DIRTY:-0}" != 1 ]]; then
   echo "ERROR: deployment sources are dirty; commit/stash them or set MULTIAGENT_ALLOW_DIRTY=1" >&2
   exit 1
@@ -46,9 +46,9 @@ case "$MODE" in
   global)
     DST="${2:-$HOME/.multiagent}"
     mkdir -p "$DST/skills"
-    rm -rf "$DST/policy" "$DST/skills/orchestration"
+    rm -rf "$DST/policy" "$DST/skills/conductor" "$DST/skills/orchestration"  # last: pre-rename copy
     cp -r "$SRC/policy" "$DST/policy"
-    cp -r "$CLAUDE_DIR/skills/orchestration" "$DST/skills/orchestration"
+    cp -r "$CLAUDE_DIR/skills/conductor" "$DST/skills/conductor"
     stamp "$DST"
     echo "global deployment refreshed: $DST"
     ;;
