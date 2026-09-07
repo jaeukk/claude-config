@@ -4,8 +4,8 @@
 
 Claude Code is the default application and Opus 5 is the asserted conductor. One task
 has one conductor and one lease. All delegated work uses model-independent roles;
-bindings select replaceable Claude or Codex backends. `/conductor` and its policy are
-canonical in `~/.claude/multiagent/` and `~/.claude/skills/conductor/`; `~/.multiagent/` is
+bindings select replaceable Claude or Codex backends. `/multiagent` and its policy are
+canonical in `~/.claude/multiagent/` and `~/.claude/skills/multiagent/`; `~/.multiagent/` is
 a deployed consumer copy, with project-local task runtime state.
 
 Python 3.14 and WSL were treated as existing prerequisites, not installation work.
@@ -41,7 +41,7 @@ host with the same policy and canonical skill.
 | Claude Code | `@anthropic-ai/claude-code` | Default conductor application |
 | Codex CLI | `@openai/codex` | Native worker runtime and MCP server |
 | Claude plugin | `multi-agent-starter@multi-agent-starter` | Upstream task/workspace scaffolding |
-| Shared skill | `conductor` (was `orchestration`; that name is now Orca's) | Conductor lifecycle and policy routing |
+| Shared skill | `multiagent` (was `orchestration`; that name is now Orca's) | Conductor lifecycle and policy routing |
 | Upstream agent | `claude-main` | Claude worker definition, high effort |
 | MCP worker host | `codex` | Codex worker and critic access from Claude |
 
@@ -60,8 +60,6 @@ their originals. The migration is reproducible with
 
 ## Role bindings
 
-| Role | Binding |
-|---|---|
 Backends are named `<family>-<tier>`; one role per tier on both families (fast carries two).
 
 | Tier | Role | Claude | Codex |

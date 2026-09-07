@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Conductor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+  :root {
+    --ground: #F2F4F8;
+    --panel: #FFFFFF;
+    --ink: #1A2230;
+    --ink-soft: #5A6474;
+    --rule: #C9D0DB;
+    --claude: #1E7F86;
+    --claude-soft: #D5EEF0;
+    --codex: #8A3F73;
+    --codex-soft: #F1DCEA;
+    --no: #C4432E;
+    --yes: #2E8B57;
+    --paper: #FBF8EF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #10151C;
+      --panel: #171E27;
+      --ink: #E8ECF2;
+      --ink-soft: #9AA5B5;
+      --rule: #2C3541;
+      --claude: #4FC1C8;
+      --claude-soft: #113C40;
+      --codex: #D77BB9;
+      --codex-soft: #3E1C33;
+      --no: #F0705A;
+      --yes: #5CC98A;
+      --paper: #1F2530;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #10151C;
+    --panel: #171E27;
+    --ink: #E8ECF2;
+    --ink-soft: #9AA5B5;
+    --rule: #2C3541;
+    --claude: #4FC1C8;
+    --claude-soft: #113C40;
+    --codex: #D77BB9;
+    --codex-soft: #3E1C33;
+    --no: #F0705A;
+    --yes: #5CC98A;
+    --paper: #1F2530;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Atkinson Hyperlegible", "Helvetica Neue", Arial, sans-serif;
+    font-size: 18px;
+    line-height: 1.5;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+    display: grid;
+    gap: 28px;
+  }
+  header { padding: 8px 0 12px; }
+  h1 {
+    font-family: "Bricolage Grotesque", "Arial Black", sans-serif;
+    font-weight: 800;
+    font-size: clamp(40px, 8vw, 64px);
+    line-height: 1;
+    margin: 0 0 12px;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  header p { margin: 0; color: var(--ink-soft); max-width: 34ch; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 22px 24px 20px;
+    display: grid;
+    gap: 14px;
+  }
+  .panel h2 {
+    font-family: "Bricolage Grotesque", "Arial Black", sans-serif;
+    font-weight: 700;
+    font-size: 26px;
+    line-height: 1.15;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .step {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 700;
+  }
+  figure { margin: 0; overflow-x: auto; }
+  svg { display: block; max-width: 100%; height: auto; color: var(--ink); }
+  svg text {
+    font-family: "Atkinson Hyperlegible", Arial, sans-serif;
+    fill: currentColor;
+  }
+  svg .label { font-size: 13px; }
+  svg .big { font-size: 17px; font-weight: 700; }
+  svg .tiny { font-size: 11px; fill: var(--ink-soft); }
+  svg .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  figcaption { color: var(--ink-soft); font-size: 16px; margin-top: 6px; max-width: 60ch; }
+  .claude { color: var(--claude); }
+  .codex { color: var(--codex); }
+  .key {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    font-size: 14px; color: var(--ink-soft);
+  }
+  .key span::before {
+    content: ""; display: inline-block; width: 12px; height: 12px;
+    border-radius: 50%; margin-right: 6px; vertical-align: -1px;
+  }
+  .key .c::before { background: var(--claude); }
+  .key .x::before { background: var(--codex); }
+  .end { text-align: center; color: var(--ink-soft); font-size: 15px; padding-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>The Conductor</h1>
+  <p>How one helper runs a team of AI helpers, in seven pictures.</p>
+  <div class="key" style="margin-top:14px"><span class="c">Claude</span><span class="x">Codex</span></div>
+</header>
+
+<!-- 1 -->
+<section class="panel">
+  <div class="step">1 · You ask</div>
+  <h2>One request goes to one conductor.</h2>
+  <figure>
+    <svg viewBox="0 0 640 150" role="img" aria-label="A person hands a request to the conductor, who is the AI you are talking to.">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <circle cx="80" cy="60" r="22" fill="none" stroke="currentColor" stroke-width="2.5"/>
+      <path d="M50 125 Q80 85 110 125" fill="none" stroke="currentColor" stroke-width="2.5"/>
+      <text x="80" y="145" class="label" text-anchor="middle">you</text>
+      <rect x="160" y="42" width="150" height="36" rx="4" fill="var(--paper)" stroke="currentColor" stroke-width="1.5"/>
+      <text x="235" y="65" class="label" text-anchor="middle">"fix this bug"</text>
+      <line x1="320" y1="60" x2="440" y2="60" stroke="currentColor" stroke-width="2.5" marker-end="url(#a1)"/>
+      <circle cx="530" cy="60" r="34" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3"/>
+      <path d="M516 68 l14 -22 l14 22" fill="none" stroke="var(--claude)" stroke-width="3" stroke-linecap="round"/>
+      <text x="530" y="120" class="big" text-anchor="middle">conductor</text>
+      <text x="530" y="140" class="tiny" text-anchor="middle">the AI you're talking to</text>
+    </svg>
+    <figcaption>The conductor is the session in front of you. It never does everything itself.</figcaption>
+  </figure>
+</section>
+
+<!-- 2 -->
+<section class="panel">
+  <div class="step">2 · Rules first</div>
+  <h2>Before any work, it writes a contract.</h2>
+  <figure>
+    <svg viewBox="0 0 640 210" role="img" aria-label="A contract card listing the job, where files may be written, which helpers are allowed, and your approval stamp.">
+      <rect x="150" y="14" width="340" height="182" rx="6" fill="var(--paper)" stroke="currentColor" stroke-width="2"/>
+      <text x="170" y="46" class="big">contract</text>
+      <line x1="170" y1="56" x2="470" y2="56" stroke="currentColor" stroke-width="1"/>
+      <text x="170" y="86" class="label">job</text>
+      <text x="290" y="86" class="mono">fix the login bug</text>
+      <text x="170" y="116" class="label">may write to</text>
+      <text x="290" y="116" class="mono">src/  tests/</text>
+      <text x="170" y="146" class="label">helpers allowed</text>
+      <text x="290" y="146" class="mono">builder · checker · tester</text>
+      <text x="170" y="176" class="label">who's in charge</text>
+      <text x="290" y="176" class="mono">this conductor</text>
+      <g transform="translate(440 130) rotate(-12)">
+        <rect x="-38" y="-16" width="76" height="32" rx="3" fill="none" stroke="var(--yes)" stroke-width="2.5"/>
+        <text x="0" y="5" class="label" text-anchor="middle" fill="var(--yes)" style="fill:var(--yes);font-weight:700">you: OK</text>
+      </g>
+    </svg>
+    <figcaption>Anything outside the contract — a new folder, a risky command — needs your OK first.</figcaption>
+  </figure>
+</section>
+
+<!-- 3 -->
+<section class="panel">
+  <div class="step">3 · One baton</div>
+  <h2>Only one conductor per job. Ever.</h2>
+  <figure>
+    <svg viewBox="0 0 640 160" role="img" aria-label="One conductor holds the baton for a job; a second conductor reaching for it is refused.">
+      <circle cx="140" cy="70" r="34" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3"/>
+      <path d="M126 78 l14 -22 l14 22" fill="none" stroke="var(--claude)" stroke-width="3" stroke-linecap="round"/>
+      <line x1="178" y1="62" x2="262" y2="30" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="264" cy="29" r="5" fill="currentColor"/>
+      <text x="220" y="125" class="label" text-anchor="middle">holds the baton</text>
+      <text x="220" y="143" class="tiny" text-anchor="middle">(the "lease")</text>
+      <circle cx="500" cy="70" r="34" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="6 5"/>
+      <path d="M486 78 l14 -22 l14 22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6 5"/>
+      <line x1="462" y1="60" x2="330" y2="40" stroke="currentColor" stroke-width="2" stroke-dasharray="6 5"/>
+      <g transform="translate(360 44)">
+        <line x1="-12" y1="-12" x2="12" y2="12" stroke="var(--no)" stroke-width="4" stroke-linecap="round"/>
+        <line x1="12" y1="-12" x2="-12" y2="12" stroke="var(--no)" stroke-width="4" stroke-linecap="round"/>
+      </g>
+      <text x="500" y="125" class="label" text-anchor="middle">second conductor</text>
+      <text x="500" y="143" class="tiny" text-anchor="middle">refused until the first lets go</text>
+    </svg>
+    <figcaption>Two conductors on one job would give two different orders. The baton prevents that.</figcaption>
+  </figure>
+</section>
+
+<!-- 4 -->
+<section class="panel">
+  <div class="step">4 · Hand out jobs</div>
+  <h2>Each helper gets one job. Only one.</h2>
+  <figure>
+    <svg viewBox="0 0 640 250" role="img" aria-label="The conductor sends four kinds of helpers out: builder, checker, tester, and runner, each with a single duty.">
+      <defs>
+        <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <circle cx="60" cy="125" r="30" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3"/>
+      <path d="M48 132 l12 -20 l12 20" fill="none" stroke="var(--claude)" stroke-width="3" stroke-linecap="round"/>
+      <line x1="96" y1="112" x2="196" y2="42" stroke="currentColor" stroke-width="2" marker-end="url(#a4)"/>
+      <line x1="98" y1="120" x2="196" y2="98" stroke="currentColor" stroke-width="2" marker-end="url(#a4)"/>
+      <line x1="98" y1="130" x2="196" y2="152" stroke="currentColor" stroke-width="2" marker-end="url(#a4)"/>
+      <line x1="96" y1="138" x2="196" y2="208" stroke="currentColor" stroke-width="2" marker-end="url(#a4)"/>
+      <g transform="translate(206 20)">
+        <rect width="420" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="16" y="28" class="big">builder</text>
+        <text x="130" y="28" class="label">writes the code</text>
+        <text x="410" y="28" class="tiny" text-anchor="end">implementer</text>
+      </g>
+      <g transform="translate(206 76)">
+        <rect width="420" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="16" y="28" class="big">checker</text>
+        <text x="130" y="28" class="label">hunts for mistakes</text>
+        <text x="410" y="28" class="tiny" text-anchor="end">critic</text>
+      </g>
+      <g transform="translate(206 132)">
+        <rect width="420" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="16" y="28" class="big">tester</text>
+        <text x="130" y="28" class="label">runs it, reports what happened</text>
+        <text x="410" y="28" class="tiny" text-anchor="end">verifier</text>
+      </g>
+      <g transform="translate(206 188)">
+        <rect width="420" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="16" y="28" class="big">runner</text>
+        <text x="130" y="28" class="label">small chores, many at once</text>
+        <text x="410" y="28" class="tiny" text-anchor="end">runner · bulk</text>
+      </g>
+    </svg>
+    <figcaption>Helpers can't hire helpers, can't change the job, and can't write the final answer. They hand results back.</figcaption>
+  </figure>
+</section>
+
+<!-- 5 -->
+<section class="panel">
+  <div class="step">5 · The big rule</div>
+  <h2>Nobody grades their own homework.</h2>
+  <figure>
+    <svg viewBox="0 0 640 230" role="img" aria-label="If Claude builds, Codex checks. If Codex builds, Claude checks. Claude checking Claude is crossed out.">
+      <defs>
+        <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <!-- row 1 -->
+      <rect x="40" y="20" width="180" height="48" rx="6" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3"/>
+      <text x="130" y="50" class="big" text-anchor="middle">Claude builds</text>
+      <line x1="230" y1="44" x2="400" y2="44" stroke="currentColor" stroke-width="2" marker-end="url(#a5)"/>
+      <text x="315" y="36" class="tiny" text-anchor="middle">checked by</text>
+      <rect x="410" y="20" width="190" height="48" rx="6" fill="var(--codex-soft)" stroke="var(--codex)" stroke-width="3"/>
+      <text x="505" y="50" class="big" text-anchor="middle">Codex checks</text>
+      <!-- row 2 -->
+      <rect x="40" y="92" width="180" height="48" rx="6" fill="var(--codex-soft)" stroke="var(--codex)" stroke-width="3"/>
+      <text x="130" y="122" class="big" text-anchor="middle">Codex builds</text>
+      <line x1="230" y1="116" x2="400" y2="116" stroke="currentColor" stroke-width="2" marker-end="url(#a5)"/>
+      <text x="315" y="108" class="tiny" text-anchor="middle">checked by</text>
+      <rect x="410" y="92" width="190" height="48" rx="6" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3"/>
+      <text x="505" y="122" class="big" text-anchor="middle">Claude checks</text>
+      <!-- row 3, forbidden -->
+      <rect x="40" y="164" width="180" height="48" rx="6" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3" opacity="0.55"/>
+      <text x="130" y="194" class="big" text-anchor="middle" opacity="0.55">Claude builds</text>
+      <line x1="230" y1="188" x2="400" y2="188" stroke="currentColor" stroke-width="2" stroke-dasharray="6 5" opacity="0.55"/>
+      <rect x="410" y="164" width="190" height="48" rx="6" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3" opacity="0.55"/>
+      <text x="505" y="194" class="big" text-anchor="middle" opacity="0.55">Claude checks</text>
+      <g transform="translate(315 188)">
+        <line x1="-16" y1="-16" x2="16" y2="16" stroke="var(--no)" stroke-width="5" stroke-linecap="round"/>
+        <line x1="16" y1="-16" x2="-16" y2="16" stroke="var(--no)" stroke-width="5" stroke-linecap="round"/>
+      </g>
+    </svg>
+    <figcaption>The checker and the tester must come from the other company. The engine refuses the same-company pairing.</figcaption>
+  </figure>
+</section>
+
+<!-- 6 -->
+<section class="panel">
+  <div class="step">6 · Brains by size</div>
+  <h2>Bigger job, bigger brain.</h2>
+  <figure>
+    <svg viewBox="0 0 640 300" role="img" aria-label="Five tiers from ceiling down to fast. Ceiling is the checker, frontier the conductor, core the builder, mid the tester, fast the runner. Each tier names its Claude and Codex model.">
+      <g transform="translate(0 0)">
+        <rect x="20" y="10" width="600" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="36" y="39" class="big">ceiling</text>
+        <text x="170" y="39" class="label">checker</text>
+        <text x="330" y="39" class="mono" style="fill:var(--claude)">Fable 5.1</text>
+        <text x="480" y="39" class="mono" style="fill:var(--codex)">Astra</text>
+      </g>
+      <g transform="translate(0 58)">
+        <rect x="36" y="10" width="584" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="52" y="39" class="big">frontier</text>
+        <text x="170" y="39" class="label">conductor</text>
+        <text x="330" y="39" class="mono" style="fill:var(--claude)">Opus 5</text>
+        <text x="480" y="39" class="mono" style="fill:var(--codex)">Astra</text>
+      </g>
+      <g transform="translate(0 116)">
+        <rect x="52" y="10" width="568" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="68" y="39" class="big">core</text>
+        <text x="170" y="39" class="label">builder</text>
+        <text x="330" y="39" class="mono" style="fill:var(--claude)">Opus 5</text>
+        <text x="480" y="39" class="mono" style="fill:var(--codex)">Sol</text>
+      </g>
+      <g transform="translate(0 174)">
+        <rect x="68" y="10" width="552" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="84" y="39" class="big">mid</text>
+        <text x="170" y="39" class="label">tester</text>
+        <text x="330" y="39" class="mono" style="fill:var(--claude)">Sonnet 5</text>
+        <text x="480" y="39" class="mono" style="fill:var(--codex)">Terra</text>
+      </g>
+      <g transform="translate(0 232)">
+        <rect x="84" y="10" width="536" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="100" y="39" class="big">fast</text>
+        <text x="170" y="39" class="label">runner</text>
+        <text x="330" y="39" class="mono" style="fill:var(--claude)">Haiku 4.5</text>
+        <text x="480" y="39" class="mono" style="fill:var(--codex)">Terra</text>
+      </g>
+    </svg>
+    <figcaption>The checker gets the biggest brain — finding mistakes is the hardest job. Chores get the cheapest.</figcaption>
+  </figure>
+</section>
+
+<!-- 7 -->
+<section class="panel">
+  <div class="step">7 · Back to you</div>
+  <h2>The conductor stitches it together and answers.</h2>
+  <figure>
+    <svg viewBox="0 0 640 150" role="img" aria-label="Results from the helpers flow back into the conductor, which hands one answer to you and puts the baton down.">
+      <defs>
+        <marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <rect x="20" y="22" width="110" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="75" y="42" class="label" text-anchor="middle">code</text>
+      <rect x="20" y="62" width="110" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="75" y="82" class="label" text-anchor="middle">review</text>
+      <rect x="20" y="102" width="110" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="75" y="122" class="label" text-anchor="middle">test results</text>
+      <line x1="140" y1="37" x2="250" y2="70" stroke="currentColor" stroke-width="2" marker-end="url(#a7)"/>
+      <line x1="140" y1="77" x2="250" y2="77" stroke="currentColor" stroke-width="2" marker-end="url(#a7)"/>
+      <line x1="140" y1="117" x2="250" y2="84" stroke="currentColor" stroke-width="2" marker-end="url(#a7)"/>
+      <circle cx="300" cy="77" r="34" fill="var(--claude-soft)" stroke="var(--claude)" stroke-width="3"/>
+      <path d="M286 85 l14 -22 l14 22" fill="none" stroke="var(--claude)" stroke-width="3" stroke-linecap="round"/>
+      <line x1="344" y1="77" x2="450" y2="77" stroke="currentColor" stroke-width="2.5" marker-end="url(#a7)"/>
+      <text x="397" y="68" class="tiny" text-anchor="middle">one answer</text>
+      <circle cx="530" cy="60" r="22" fill="none" stroke="currentColor" stroke-width="2.5"/>
+      <path d="M500 125 Q530 85 560 125" fill="none" stroke="currentColor" stroke-width="2.5"/>
+      <text x="530" y="145" class="label" text-anchor="middle">you</text>
+      <line x1="300" y1="118" x2="300" y2="138" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      <text x="300" y="150" class="tiny" text-anchor="middle" style="font-size:10px">baton down</text>
+    </svg>
+    <figcaption>Then it puts the baton down, so the next conductor can pick it up.</figcaption>
+  </figure>
+</section>
+
+<p class="end">That's the whole thing: one conductor, a contract, one baton, helpers with one job each, and nobody checks their own work.</p>
+</main>
+</body>
+</html>

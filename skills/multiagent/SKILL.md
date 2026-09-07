@@ -1,6 +1,6 @@
 ---
-name: conductor
-description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude and Codex backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /conductor (formerly /orchestration; that name now belongs to Orca's skill), when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
+name: multiagent
+description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude and Codex backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /multiagent (formerly /orchestration, a name that now belongs to Orca's skill), when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
 ---
 
 # Orchestration
@@ -310,3 +310,9 @@ without that protection, so the conductor, not the engine, is the thing keeping 
 
 When no policy installation or enforcement adapter is available, apply the same rules
 as advice and choose the more restrictive action.
+
+## Picture book
+
+`references/picture-book.html` — the whole procedure in seven pictures for someone who has
+never seen it: request, contract, baton, four helpers, no self-review, tiers by brain size,
+synthesis. Open it in a browser. For humans, not for you.

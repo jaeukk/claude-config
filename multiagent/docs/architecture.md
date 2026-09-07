@@ -73,7 +73,7 @@ nothing currently registers a reachable agy backend.
 
 ## Global policy home
 
-The canonical policy and `conductor` skill (formerly `orchestration`) live in this repo,
+The canonical policy and `multiagent` skill (formerly `orchestration`) live in this repo,
 `~/.claude/multiagent/`. The host-global `~/.multiagent/` directory and a project's
 `_multiagent/policy` path are generated consumers, refreshed from the canonical repo by
 `scripts/deploy-multiagent.sh` and never edited in place; task contracts, leases, and
