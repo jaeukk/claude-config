@@ -15,7 +15,7 @@
 | INV5 | **(유지보수자 전용)** 외부 매뉴얼 메인 섹션 개수 == manual-repo `CLAUDE.md`의 메인 섹션 목록 개수 | 매뉴얼↔manual-repo 빌드 스펙 불일치 (현재 R3 미해소 시 의도적 FAIL) |
 | INV6 | 매뉴얼 `workers_approved` 예시 스키마가 approval-policy.md와 일치 (`worker:`/date-only/`purpose:`/`approved_by:`, `HH:MM` 없음) | B1/B6 재발 |
 | INV7 | 권위 우선순위 문구가 매뉴얼 §3과 design-basis.md §2에서 동일 (CLAUDE.md > routing/approval/orchestrator-rules > 매뉴얼) | Clash 해소 규칙 붕괴 |
-| INV8 | 인터랙티브 전용 + worktree/백그라운드 세션 금지 규칙이 orchestrator-rules.md와 매뉴얼에 모두 존재 | D5 위반 |
+| INV8 | D5 and orchestrator-rules require interactive execution, permit Orca-managed worktree terminals, forbid background/headless conductors, and preserve one conductor and one explicit persistent task directory | D5 violation |
 | INV9 | **폐기 (D14, 2026-08-26)** — gemini/agy 백엔드는 비활성이다. `_shared/backends.json`에 `gemini`·`gemini-reader` 워커가 **없어야** 한다 | 비활성화한 백엔드가 되살아나 승인 없이 호출됨 |
 | INV10 | 폐기 브리지 **`mcp__gemini__gemini_*`(CLI 래퍼) 및 `mcp__gemini-pro__*`(프록시)** 가 routing.md·task-folder.md·CLAUDE.md에 **활성 호출**로 없음. 잔여 언급은 **폐기 안내 문맥에서만** | C2 재발 — 폐기 브리지 잔존 호출이 즉시 실패 (D4 위반) |
 | INV11 | 재진입 프로토콜이 orchestrator-rules.md §3 **와** CLAUDE.md Task Lifecycle 포인터에 **둘 다** 존재. routing.md 토폴로지표에 4패턴(Pipeline/Fan-out·in/Expert Pool/Producer-Reviewer) 모두 존재하고, Supervisor·Hierarchical은 "배제" 줄에만 등장(채택표 행으로 등장 금지) | D6 위반 — 재진입/패턴 규정 유실 또는 배제 패턴 부활 |
@@ -52,8 +52,21 @@ grep -n 'approved_at: <YYYY-MM-DD HH:MM>' "$ROOT/_shared/approval-policy.md"
 echo "INV7 권위 우선순위 문구 (design-basis 에 존재해야)"
 grep -liE '권위 우선순위|CLAUDE.md가 가장 높|문서가 충돌' "$ROOT/_shared/design-basis.md"
 
-echo "INV8 인터랙티브/worktree 금지 (orchestrator-rules 에 존재해야)"
-grep -lin 'worktree\|배경\|백그라운드\|background session' "$ROOT/_shared/orchestrator-rules.md"
+echo "INV8 interactive conductor, permitted Orca worktrees, persistent task directory"
+python3 -B - "$ROOT" <<'PY_INV8'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+required = ['Interactive sessions only.', 'Orca-managed terminals in git worktrees are permitted.', 'Background or headless conductor sessions are forbidden.', 'Exactly one conductor terminal owns each task.', 'All participants use the same explicit task directory for persistent task records.']
+for name in ("design-basis.md", "orchestrator-rules.md"):
+    text = (root / "_shared" / name).read_text()
+    for sentence in required:
+        assert sentence in text, (name, sentence)
+print("INV8 PASS")
+PY_INV8
+[ "$?" -eq 0 ] || { echo "INV8 FAIL"; exit 1; }
+test -f "$ROOT/AGENTS.md" && test ! -L "$ROOT/AGENTS.md" && cmp "$ROOT/CLAUDE.md" "$ROOT/AGENTS.md" || { echo "AGENTS drift FAIL"; exit 1; }
+echo "AGENTS drift PASS"
 
 echo "INV9 gemini 비활성 (backends.json에 agy/gemini 워커가 없어야; 출력 없어야 PASS)"
 grep -n '"command": "agy"' "$ROOT/_shared/backends.json"

@@ -155,3 +155,25 @@ Codex가 Orca에서 만든 산출물을 엔진 경로로 검토하려니 conduct
 커밋 `406a662`.
 **worker**: orchestrator(구현·검증·라이브 프로브), codex-ceiling=gpt-6-astra medium(7라운드 감사),
 claude-ceiling=fable-5-1 high(Codex 산출물 1라운드 감사), Orca 워커 runner/verifier(라이브 검증)
+
+
+> Historical import, preserved verbatim from /home/jaeukk/_shared/learnings.md; snapshot: A.tgz.
+
+## [2026-07-22] [priorart-stipple-002-codex-cli-fallback]
+**교훈**: 세션에 `mcp__codex__*` MCP 도구가 아예 안 잡혀 있어도 codex-critic/verifier를 포기하지 말 것 — `codex` CLI 바이너리(`~/.local/bin/codex`)가 있으면 `codex exec -s read-only -C <target_repo> -m <model> -` (stdin으로 brief 전달)로 직접 호출 가능하며, backends.json의 fallback 항목이 이미 이 경로를 정의해 두었다. 다만 `~/.codex/config.toml`의 기본 모델(`gpt-5.1-codex-max`)은 ChatGPT-계정 인증에서 `400 invalid_request_error`로 거부될 수 있고, 그럴 때 다른 모델명을 추측해서 계속 호출 시도하는 것(실제로 5개 추측 모두 실패)은 실제 과금 API에 낭비 호출을 쌓는 짓이다 → 1-2회 추측 실패 시 즉시 멈추고 사용자에게 정확한 모델 문자열을 물을 것. 이번엔 사용자가 `gpt-5.6-sol`/`gpt-5.6-terra`를 제공, 스모크테스트 후 정상 작동 확인.
+**근거**: `codex doctor`가 `auth mode: chatgpt`를 보여줬고, config.toml 기본값과 5개 추측 모델 전부 동일한 400 에러. 사용자 제공 모델 2종은 즉시 성공(토큰 사용량 몇 천 수준의 저비용 smoke test로 먼저 확인 후 실제 브리핑 투입).
+**worker**: orchestrator(환경 진단·CLI 폴백 발견·과호출 방지 판단)
+
+
+> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
+
+
+> Historical import, preserved verbatim from /home/jaeukk/_shared/learnings.md; snapshot: A.tgz.
+
+## [2026-07-31] [agy-integration]
+**교훈**: 백엔드 레지스트리에서 **host는 family를 결정하지 않는다**. agy 한 바이너리가 Gemini·Claude·gpt-oss 3개 벤더를 서빙하므로, `host: agy`를 보고 `family: gemini`를 추론하면 `model: claude-sonnet-4-6`을 등재해도 아무 에러 없이 통과하고 critic/verifier의 `different_family_from_author`가 **조용히** 무력화된다 — 시스템이 "독립 검증 완료"라고 기록하는 바로 그 지점에서 속성이 소실되는 유형이라 다운스트림 어디에서도 감지되지 않는다. 방어는 반드시 `validate_policy` 층이어야 하고(문서 규약은 검사되지 않는다), 접두사 검사만으로는 부족하다: `gemini-claude-sonnet-4-6`이 `startswith("gemini-")`를 통과한다 → family 일치 **AND** `gemini-\d…` 완전일치로 이중 검사할 것. 두 번째 교훈: **"3rd family = 벤더 장애 failover"는 과장이었다.** `resolve_binding`은 가용성을 탐지하지 않고 첫 적격 후보를 반환하므로 3순위 후보는 정상 경로에서 결코 선택되지 않는다 — 얻는 것은 "장애 시 갈 곳이 존재한다"는 구조적 여지이지 자동 전환이 아니다. 아키텍처 근거를 쓸 때 이 둘을 구분하지 않으면, 정작 그 장애가 났을 때 처음으로 들통난다.
+**근거**: codex-critic이 음성 테스트로 3가지 우회(family 위조·family 오기·접두사 위장)를 모두 PASS시켜 실증했고, resolver 실측으로 `agy-multimodal`이 어떤 정상 author 조합에서도 선택되지 않음을 보였다. 수정 후 4종 음성 테스트 전수 REJECTED·기준선 validate-policy/self-test 유지 확인. 교차 벤더 리뷰가 자기 설계의 과장을 잡아낸 사례 — 같은 family였으면 놓쳤을 가능성이 높다(이 페이지 자체가 그 논거다).
+**부수 교훈(운영)**: 외부 CLI를 `subprocess`로 부르는 코드의 **실패 경로**를 단위 테스트할 땐 반드시 `PATH`를 격리하고 돌릴 것. "실행파일 부재" 분기를 시험하려다 PATH를 그대로 둔 채 호출해 미승인 워커(agy)를 3회 실기동시키고 쿼터를 소모했다(승인 게이트 위반, log.md 09:23 자진 신고).
+**worker**: orchestrator(설계·구현·정정), codex-critic(독립 검증 — Blocking 7건 중 6건 인정)
+
+> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
