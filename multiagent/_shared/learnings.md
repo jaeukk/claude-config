@@ -116,3 +116,42 @@
 **근거**: codex-critic(Sol, high) 3라운드 감사 — 9건 → 7건 → 6건, 전부 수용. Claude worker의 도구면은
 실측 확인(도구 나열 요청에 "Glob, Grep, Read"만 응답 = Bash·MCP 제거됨). agy 경로는 쿼터 소진으로 미검증.
 **worker**: orchestrator(설계·구현·검증), codex-critic=codex-high(3라운드 독립 감사)
+
+## [2026-09-08] [orca-adapter-authorship]
+**교훈 1 — 같은 결함이 라운드마다 다시 나오면, 인터리빙을 또 막지 말고 술어를 다시 유도하라.**
+4·5·6라운드는 한 버그를 세 번 잡은 것이다: 잠금 밖 스냅샷(TOCTOU) → `starting`만 막고
+`outcome_unknown`은 안 막음 → 결국 "baseline과 **다르면** 이 attempt의 것"이라는 술어 자체가
+틀렸음(baseline보다 **오래된** dispatch도 다르다). 앞의 두 수정은 기계적(잠금 안으로 옮기기,
+상태 하나 추가)이라 각각 사례 하나만 닫았고, 마지막 수정만 **의미적**이었다 — "Orca가 지금
+current라고 보고하는 dispatch(같은 잠금 아래에서 읽음)이면서 baseline과 다른 것"만 이 attempt의
+것. 그제서야 클래스가 닫혔다. 검토자는 7라운드에서 Orca 번들 소스의 SQL(`ORDER BY rowid DESC
+LIMIT 1`)까지 열어 "current"의 의미를 확정하고 SHIP을 냈다. → 리뷰 루프가 수렴하지 않으면
+타이밍이 아니라 **불변식의 정의**를 의심하라.
+
+**교훈 2 — 수정을 쓴 쪽이 저자다. 자기 발견을 자기가 고치면 미검토 산출물이 된다.**
+Codex가 2라운드 감사(11건)를 내고 스스로 전부 구현했다(150→627줄). 그 결과물은 아무도 보지
+않은 상태였고, 독립성 규칙대로 Claude ceiling(fable-5-1 high)에 보내자 9건이 나왔다 — 그중
+"성공 경로가 한 번도 실행된 적 없다"(receipt 키 이름·dispatch-show 형태·terminal 상태가 전부
+추측)와 "거부된 launch가 run을 영구 잠금"(P1)이 포함. 저자 family는 **마지막으로 파일을 쓴
+손**이며(last producer wins), 그게 검토자를 결정한다. 이번 세션에서 이 규칙을 엔진(sidecar)과
+Orca 어댑터(run별 record) 양쪽에 코드로 박았다.
+
+**교훈 3 — 추측 하나당 실측 하나. 한 번의 라이브 프로브가 한 라운드의 논쟁보다 싸다.**
+실측으로 확정한 것: worker-start receipt는 `result.dispatchId`/`requestId`(최상위); 거부
+envelope는 `ok:false` + `error:{code,message,data}`; dispatch 없는 task의 dispatch-show는
+`ok:true, dispatch:null`; receipt `timeoutMs=60000`. 각각 검토자의 가정 하나를 대체했고, 그
+전까지는 "동작할 것"이었지 "동작한다"가 아니었다. 모델 활동도 마찬가지 — Codex의 자기보고("아마
+gpt-6-astra")가 아니라 Orca receipt의 `requested==effective`가 근거다.
+
+**교훈 4 — 전송층을 바꾸면 저자 증거는 따라오지 않는다.**
+엔진 계약(task.yaml 옆 sidecar)과 Orca run(`tasks/orca/<run_id>/`)은 **별도 저장소**다.
+Codex가 Orca에서 만든 산출물을 엔진 경로로 검토하려니 conductor-family fallback이 "Claude가
+썼다"고 판정해 거부했다 — 정확한 동작이지만 진실은 아니었고, sidecar를 손으로 적어 다리를 놓아야
+했다(출처를 source 문자열에 남김). SKILL.md에 "separate store, 자동 이월 없음"으로 명문화.
+
+**비용**: codex-ceiling(astra medium) 7라운드 ≈ 43만 토큰 + Claude ceiling 1라운드 + 라이브 워커
+5개(runner·verifier). 삭제 리스트 적용으로 664→578줄; 최종 SHIP.
+**근거**: `multiagent/tasks/orca-adapter-audit/round{1..6}-findings.md`, `result7.md`(git 미추적);
+커밋 `406a662`.
+**worker**: orchestrator(구현·검증·라이브 프로브), codex-ceiling=gpt-6-astra medium(7라운드 감사),
+claude-ceiling=fable-5-1 high(Codex 산출물 1라운드 감사), Orca 워커 runner/verifier(라이브 검증)
