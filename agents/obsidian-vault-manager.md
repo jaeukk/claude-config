@@ -291,7 +291,7 @@ claim. Prefer fewer high-confidence findings over a long speculative list.
 These run **outside** the agent (OS cron on this WSL machine), not during a
 read-only audit. You don't execute them; you are their system-of-record —
 explain them, surface failures from their logs, and propose config changes
-(e.g. adding a new active project), but never silently change behaviour.
+(e.g. adding a new active project), but never silently change behavior.
 
 ## Weekly: 01_NotConfirmed → PDF, then confirm
 

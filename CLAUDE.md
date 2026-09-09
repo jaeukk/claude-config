@@ -1,7 +1,7 @@
 # User & Identity
 
 - **Name:** Jaeuk Kim, PhD — Physics postdoc.
-- **Language:** Respond in English (American spelling) by default. Use Korean only when explicitly asked.
+- **Language:** English with **American spelling** by default — this covers everything you write, not just chat replies: code comments, docstrings, commit messages, Obsidian notes, and worker briefs. Use Korean only when explicitly asked.
 
 # Physics Coding Standards
 

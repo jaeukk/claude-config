@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "backends": {
+    "claude-ceiling": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-fable-5",
+      "capabilities": ["planning", "routing", "review", "verification", "structured_result"],
+      "sandbox": "host-permissions",
+      "writes_mediated": true,
+      "write_mode": "hook-gated",
+      "supports_subagents": true
+    },
+    "claude-frontier": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-opus-5",
+      "capabilities": ["planning", "routing", "review", "verification", "structured_result"],
+      "sandbox": "host-permissions",
+      "writes_mediated": true,
+      "write_mode": "hook-gated",
+      "supports_subagents": true
+    },
+    "claude-core": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-opus-5",
+      "capabilities": ["implementation", "review", "verification", "structured_result"],
+      "sandbox": "host-permissions",
+      "writes_mediated": true,
+      "write_mode": "hook-gated",
+      "supports_subagents": false
+    },
+    "claude-mid": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-sonnet-5",
+      "capabilities": ["verification", "structured_result"],
+      "sandbox": "host-permissions",
+      "writes_mediated": true,
+      "write_mode": "hook-gated",
+      "supports_subagents": false
+    },
+    "claude-fast": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-haiku-4-5",
+      "capabilities": ["bulk", "mechanical", "verification", "structured_result"],
+      "sandbox": "host-permissions",
+      "writes_mediated": false,
+      "write_mode": "result-only",
+      "supports_subagents": false
+    },
+    "codex-conductor": {
+      "host": "codex",
+      "family": "codex",
+      "model": "gpt-5.6-sol",
+      "capabilities": ["planning", "routing", "review", "verification", "structured_result"],
+      "sandbox": "host-permissions",
+      "writes_mediated": false,
+      "write_mode": "host-approval",
+      "supports_subagents": true
+    },
+    "codex-high": {
+      "host": "codex",
+      "family": "codex",
+      "model": "gpt-5.6-sol",
+      "capabilities": ["review", "verification", "structured_result"],
+      "sandbox": "read-only",
+      "writes_mediated": false,
+      "write_mode": "result-only",
+      "supports_subagents": false
+    },
+    "codex-standard": {
+      "host": "codex",
+      "family": "codex",
+      "model": "gpt-5.6-terra",
+      "capabilities": ["implementation", "review", "verification", "structured_result"],
+      "sandbox": "read-only",
+      "writes_mediated": false,
+      "write_mode": "patch-return",
+      "supports_subagents": false
+    },
+    "codex-low": {
+      "host": "codex",
+      "family": "codex",
+      "model": "gpt-5.6-terra",
+      "capabilities": ["bulk", "mechanical", "structured_result"],
+      "sandbox": "read-only",
+      "writes_mediated": false,
+      "write_mode": "result-only",
+      "supports_subagents": false
+    },
+    "agy-multimodal": {
+      "host": "agy",
+      "family": "gemini",
+      "model": "gemini-3.1-pro-high",
+      "capabilities": ["multimodal", "review", "verification", "structured_result"],
+      "sandbox": "containment-unverified",
+      "writes_mediated": false,
+      "write_mode": "result-only",
+      "supports_subagents": false
+    },
+    "agy-fast": {
+      "host": "agy",
+      "family": "gemini",
+      "model": "gemini-3.6-flash-low",
+      "capabilities": ["bulk", "mechanical", "structured_result"],
+      "sandbox": "containment-unverified",
+      "writes_mediated": false,
+      "write_mode": "result-only",
+      "supports_subagents": false
+    }
+  }
+}

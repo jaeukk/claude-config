@@ -1,5 +1,5 @@
 ---
-name: paper-reviewer
+name: paper-reviewer-r1base
 description: Reads a paper from the user's local Zotero library and writes a structured summary of its algorithm, methods, and/or results into a designated Markdown file. Use when the user wants to summarize, review, or extract the method/results of a specific paper already in Zotero into an md file.
 tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, WebFetch, mcp__zotero__zotero_search_items, mcp__zotero__zotero_item_metadata
 model: sonnet
@@ -222,30 +222,6 @@ where the file is written.
    What counts as one number is the contract's to say (§2); do not re-derive it here. What is
    yours is the reconciliation: check the roster against the **finished note** before reporting it,
    not against your intention while writing it.
-
-   **Reconcile three things, not one.** A complete roster over corrupted content passes a count
-   and fails the reader. Re-open the source for each check; do not check the note against memory
-   of the source.
-
-   1. **Tag ↔ expression.** For each `\tag{}`, confirm the expression carrying it is the
-      expression the source prints under that number. A tag present but bound to the neighbouring
-      equation is invisible to any count and is worse than a missing tag, because it reads as
-      verified. Check every multiline equality end to end — a dropped continuation line, a lost
-      contraction, a flipped phase sign, a missing normalization factor.
-   2. **Prose ↔ what it summarizes.** Every sentence you wrote that condenses an equation, a
-      table row, or a numerical claim gets checked against the thing it condenses. Limits and
-      regimes carry their governing assumptions with them; a limiting form separated from its
-      condition is a false statement, not a compressed one. A `respectively` mapping is a claim
-      about order and must be verified as one.
-   3. **Claim ↔ owner.** For each substantive result, confirm the note says *whose* it is. This
-      binds hardest on a review or survey, where most results belong to cited third parties: keep
-      the crediting reference number or group name on the claim itself, and keep the authors'
-      own prior work distinct from the work they are surveying. Dropping every citation is not
-      neutral condensation — a reader cannot recover attribution the note never carried, and
-      absent credit defaults to the paper's authors.
-
-   Report what these checks changed. If they changed nothing, say that; if you did not run them,
-   write `RECONCILED: not run` and why.
 
 ## Output template
 
