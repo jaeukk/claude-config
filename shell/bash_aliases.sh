@@ -1,5 +1,8 @@
 # Portable interactive Bash helpers tracked by the claude-config repository.
 # Machine-specific values belong in ~/.bash_aliases.local, which is not tracked.
+#
+# Every helper below probes for a capability rather than testing which machine
+# it is on, so one code path serves WSL and native Linux alike.
 
 if [ -r "${HOME}/.bash_aliases.local" ]; then
     # shellcheck source=/dev/null
@@ -10,7 +13,9 @@ _requireBackupConfig() {
     local name
     local missing=()
 
-    for name in BACKUP_WINDOWS_DRIVE BACKUP_VOLUME_LABEL BACKUP_MOUNT_POINT; do
+    # BACKUP_WINDOWS_DRIVE is optional: it is the fallback used when the volume
+    # is not visible as a block device, which is the case under WSL.
+    for name in BACKUP_VOLUME_LABEL BACKUP_MOUNT_POINT; do
         [ -n "${!name:-}" ] || missing+=("$name")
     done
     if [ "${#missing[@]}" -ne 0 ]; then
@@ -18,42 +23,118 @@ _requireBackupConfig() {
         echo "Configure ~/.bash_aliases.local from ~/.claude/shell/bash_aliases.local.example." >&2
         return 1
     fi
+    # A trailing slash defeats the "$mount_point"/* pattern in unmountBackup.
+    [ "$BACKUP_MOUNT_POINT" = "/" ] || BACKUP_MOUNT_POINT="${BACKUP_MOUNT_POINT%/}"
+}
+
+_backupVolumeDevice() {
+    printf '%s\n' "/dev/disk/by-label/${BACKUP_VOLUME_LABEL}"
+}
+
+# Confirm the mounted filesystem really is the backup volume, by reading a marker
+# file written on the volume itself. This replaces the Windows-only volume-label
+# query: a file on the filesystem reads the same way everywhere, and it survives
+# both relabelling and shifting drive letters.
+_verifyBackupVolume() {
+    local marker="${BACKUP_MOUNT_POINT}/.backup-volume"
+    local seen=""
+
+    if ! mountpoint -q "$BACKUP_MOUNT_POINT"; then
+        echo "Nothing is mounted at $BACKUP_MOUNT_POINT." >&2
+        return 1
+    fi
+    [ -r "$marker" ] && IFS= read -r seen < "$marker"
+    seen=${seen%$'\r'}   # the marker may have been saved from Windows
+    if [ "$seen" != "$BACKUP_VOLUME_LABEL" ]; then
+        echo "Refusing: $BACKUP_MOUNT_POINT is not the '$BACKUP_VOLUME_LABEL' volume." >&2
+        echo "Expected $marker to contain '$BACKUP_VOLUME_LABEL'; found '${seen:-nothing}'." >&2
+        echo "Run mountBackupInit only after confirming by eye that this is the backup volume." >&2
+        return 1
+    fi
+}
+
+# Write the marker once, on a volume that is already mounted and confirmed by eye.
+mountBackupInit() {
+    _requireBackupConfig || return 1
+    if ! mountpoint -q "$BACKUP_MOUNT_POINT"; then
+        echo "Mount $BACKUP_VOLUME_LABEL at $BACKUP_MOUNT_POINT first." >&2
+        return 1
+    fi
+    printf '%s\n' "$BACKUP_VOLUME_LABEL" > "${BACKUP_MOUNT_POINT}/.backup-volume" || return 1
+    echo "Marked $BACKUP_MOUNT_POINT as the '$BACKUP_VOLUME_LABEL' backup volume."
+}
+
+# Pick the mount mechanism from what this machine offers, the way
+# notify-sound.sh picks an audio backend. A block device by label is the
+# native-Linux route; a Windows drive letter through drvfs is the WSL route.
+# The choice is made once: a failure of the chosen mechanism is a real failure,
+# never a reason to try the other one and prompt for sudo.
+_backupMechanism() {
+    if command -v udisksctl >/dev/null 2>&1 && [ -b "$(_backupVolumeDevice)" ]; then
+        echo udisks
+    elif [ -n "${BACKUP_WINDOWS_DRIVE:-}" ]; then
+        echo drvfs
+    else
+        echo "Cannot reach '$BACKUP_VOLUME_LABEL': no block device at $(_backupVolumeDevice)," >&2
+        echo "and BACKUP_WINDOWS_DRIVE is unset. Is the volume plugged in?" >&2
+        return 1
+    fi
+}
+
+_mountBackupVolume() {
+    local mechanism
+    mechanism=$(_backupMechanism) || return 1
+
+    case "$mechanism" in
+        udisks)
+            udisksctl mount -b "$(_backupVolumeDevice)" >/dev/null
+            ;;
+        drvfs)
+            if [[ ! "$BACKUP_WINDOWS_DRIVE" =~ ^[A-Za-z]:$ ]]; then
+                echo "Invalid BACKUP_WINDOWS_DRIVE: $BACKUP_WINDOWS_DRIVE" >&2
+                return 1
+            fi
+            sudo mkdir -p "$BACKUP_MOUNT_POINT" || return 1
+            if sudo mount -t drvfs "$BACKUP_WINDOWS_DRIVE" "$BACKUP_MOUNT_POINT" \
+                -o "uid=$(id -u),gid=$(id -g),umask=022"; then
+                return 0
+            fi
+            sudo rmdir "$BACKUP_MOUNT_POINT" 2>/dev/null
+            return 1
+            ;;
+    esac
+}
+
+_unmountBackupVolume() {
+    local mechanism
+    mechanism=$(_backupMechanism) || return 1
+
+    case "$mechanism" in
+        udisks) udisksctl unmount -b "$(_backupVolumeDevice)" >/dev/null ;;
+        drvfs)  sudo umount "$BACKUP_MOUNT_POINT" ;;
+    esac
 }
 
 mountBackup() {
     _requireBackupConfig || return 1
 
-    local win_drive="$BACKUP_WINDOWS_DRIVE"
-    local drive_letter="${win_drive%:}"
-    local expected_label="$BACKUP_VOLUME_LABEL"
-    local mount_point="$BACKUP_MOUNT_POINT"
-    local actual_label
-
-    if [[ ! "$win_drive" =~ ^[A-Za-z]:$ ]]; then
-        echo "Invalid BACKUP_WINDOWS_DRIVE: $win_drive" >&2
-        return 1
-    fi
-    if ! command -v powershell.exe >/dev/null 2>&1; then
-        echo "mountBackup requires WSL with Windows interoperability enabled." >&2
-        return 1
-    fi
-    if mountpoint -q "$mount_point"; then
-        echo "$expected_label is already mounted at $mount_point"
+    if mountpoint -q "$BACKUP_MOUNT_POINT"; then
+        _verifyBackupVolume || return 1
+        echo "$BACKUP_VOLUME_LABEL is already mounted at $BACKUP_MOUNT_POINT"
         return 0
     fi
-
-    actual_label=$(powershell.exe -NoProfile -Command \
-        "(Get-Volume -DriveLetter $drive_letter -ErrorAction SilentlyContinue).FileSystemLabel" \
-        2>/dev/null | tr -d '\r\n')
-    if [ "$actual_label" != "$expected_label" ]; then
-        echo "Refusing to mount: Windows $win_drive label is '${actual_label:-unavailable}', not '$expected_label'."
+    _mountBackupVolume || return 1
+    if ! mountpoint -q "$BACKUP_MOUNT_POINT"; then
+        echo "Mount reported success but nothing appeared at $BACKUP_MOUNT_POINT." >&2
+        echo "Check where it landed: findmnt --source $(_backupVolumeDevice)" >&2
         return 1
     fi
-
-    sudo mkdir -p "$mount_point" || return 1
-    sudo mount -t drvfs "$win_drive" "$mount_point" \
-        -o "uid=$(id -u),gid=$(id -g),umask=022" || return 1
-    echo "Mounted $expected_label at $mount_point"
+    if ! _verifyBackupVolume; then
+        echo "Unmounting the unrecognised volume again." >&2
+        _unmountBackupVolume >/dev/null 2>&1
+        return 1
+    fi
+    echo "Mounted $BACKUP_VOLUME_LABEL at $BACKUP_MOUNT_POINT"
 }
 
 unmountBackup() {
@@ -70,19 +151,50 @@ unmountBackup() {
         "$mount_point"/*) cd "$HOME" || return 1 ;;
     esac
     sync
-    if sudo umount "$mount_point"; then
-        echo "Unmounted $BACKUP_VOLUME_LABEL. It can now be safely ejected from Windows."
+    if _unmountBackupVolume; then
+        echo "Unmounted $BACKUP_VOLUME_LABEL. It can now be safely unplugged."
     else
         echo "Unmount failed; close users shown by: fuser -vm $mount_point"
         return 1
     fi
 }
 
+# The Google Drive workspace mirror. Under WSL it sits on a Windows drive; on
+# native Linux it is an rclone mirror under $HOME. Both are found by the same
+# candidate sweep, so no machine test is needed.
+_resolveWorkspaceRoot() {
+    local candidate=""
+    local -a candidates=()
+
+    if [ -n "${WORKSPACE_ROOT:-}" ] && [ -d "$WORKSPACE_ROOT" ]; then
+        printf '%s\n' "$WORKSPACE_ROOT"
+        return 0
+    fi
+
+    while IFS= read -r candidate; do
+        [ -n "$candidate" ] && candidates+=("$candidate")
+    done < <(
+        {
+            compgen -G '/mnt/[a-z]/Users/*/My Drive/_WORKSPACE'
+            compgen -G '/mnt/[a-z]/My Drive/_WORKSPACE'
+            compgen -G "${HOME}/G/_WORKSPACE"
+        } | sort -u
+    )
+    if [ "${#candidates[@]}" -eq 1 ]; then
+        printf '%s\n' "${candidates[0]}"
+        return 0
+    elif [ "${#candidates[@]}" -gt 1 ]; then
+        echo "Multiple workspaces found; set WORKSPACE_ROOT explicitly." >&2
+        return 1
+    fi
+    echo "Workspace not found; set WORKSPACE_ROOT in ~/.bash_aliases.local." >&2
+    return 1
+}
+
 _resolveObsidianVault() {
     local override_file="${HOME}/.claude/zotero-obsidian.local"
     local candidate=""
-    local windows_user=""
-    local -a candidates=()
+    local root=""
 
     if [ -n "${OBSIDIAN_VAULT:-}" ]; then
         candidate="$OBSIDIAN_VAULT"
@@ -94,30 +206,12 @@ _resolveObsidianVault() {
         return 0
     fi
 
-    while IFS= read -r candidate; do
-        [ -n "$candidate" ] && candidates+=("$candidate")
-    done < <(
-        {
-            compgen -G '/mnt/[a-z]/Users/*/My Drive/_WORKSPACE/20_Notes'
-            compgen -G '/mnt/[a-z]/My Drive/_WORKSPACE/20_Notes'
-        } | sort -u
-    )
-    if [ "${#candidates[@]}" -eq 1 ]; then
-        printf '%s\n' "${candidates[0]}"
-        return 0
-    elif [ "${#candidates[@]}" -gt 1 ]; then
-        echo "Multiple Obsidian vaults found; set OBSIDIAN_VAULT explicitly." >&2
-        return 1
-    fi
-
-    windows_user=$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')
-    candidate="/mnt/c/Users/${windows_user}/My Drive/_WORKSPACE/20_Notes"
-    if [ -n "$windows_user" ] && [ -d "$candidate" ]; then
-        printf '%s\n' "$candidate"
+    root=$(_resolveWorkspaceRoot) || return 1
+    if [ -d "${root}/20_Notes" ]; then
+        printf '%s\n' "${root}/20_Notes"
         return 0
     fi
-
-    echo "Obsidian vault not found; set OBSIDIAN_VAULT or update $override_file." >&2
+    echo "No 20_Notes under $root; set OBSIDIAN_VAULT or update $override_file." >&2
     return 1
 }
 
@@ -149,20 +243,17 @@ backupVault() {
     if ! mountpoint -q "$mount_point"; then
         mountBackup || return 1
         mounted_here=1
-    elif [ "$(findmnt -n -o SOURCE --target "$mount_point")" != "$BACKUP_WINDOWS_DRIVE" ]; then
-        echo "Refusing backup: $mount_point is not mounted from Windows $BACKUP_WINDOWS_DRIVE."
-        return 1
     fi
-
-    if ! powershell.exe -NoProfile -Command \
-        "if (Get-Process GoogleDriveFS -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" \
-        >/dev/null 2>&1; then
-        echo "Note: Google Drive for desktop is not running; backing up the local mirror as-is."
-    fi
+    # Same identity check on every machine, whoever did the mounting.
+    _verifyBackupVolume || return 1
 
     mkdir -p "$current_copy" "$history_dir" || return 1
     verify_log=$(mktemp /tmp/backupVault.verify.XXXXXX) || return 1
 
+    # The copy-then-compare loop is what makes an external syncer safe to ignore:
+    # if Google Drive or rclone rewrote the vault mid-pass, the compare is
+    # non-empty and the pass repeats. That is portable, so no per-machine probe
+    # of the syncing process is needed.
     for attempt in 1 2; do
         echo "-- Vault backup pass $attempt: $vault_source -> $current_copy --"
         if ! rsync "${copy_opts[@]}" "$vault_source/" "$current_copy/"; then
@@ -190,7 +281,7 @@ backupVault() {
         echo "Vault did not stabilize. Remaining differences:"
         sed -n '1,20p' "$verify_log"
         rm -f "$verify_log"
-        echo "$BACKUP_VOLUME_LABEL remains mounted; close Obsidian/Drive activity and rerun backupVault."
+        echo "$BACKUP_VOLUME_LABEL remains mounted; stop Obsidian and the Drive/rclone sync, then rerun backupVault."
         return 1
     fi
     rm -f "$verify_log"
@@ -215,22 +306,27 @@ _rsyncRun() {
     rsync "${opts[@]}" "$@"
 }
 
-sync2L() {
-    _requireBackupConfig || return 1
+_requireSyncConfig() {
     if ! declare -p SYNC_DIRS CODES_EXCLUDES >/dev/null 2>&1; then
         echo "SYNC_DIRS and CODES_EXCLUDES must be configured in ~/.bash_aliases.local." >&2
         return 1
     fi
+    if [ ! -f "${HOME}/.rsync-exclude" ]; then
+        echo "${HOME}/.rsync-exclude is missing or a dangling symlink." >&2
+        echo "Without it rsync runs with no exclusions. Run: bash ~/.claude/scripts/update-config.sh" >&2
+        return 1
+    fi
+}
+
+sync2L() {
+    _requireBackupConfig || return 1
+    _requireSyncConfig || return 1
 
     local src="$BACKUP_MOUNT_POINT"
     local rsync_dst="${RSYNC_DST:-$HOME}"
     local dir
 
-    if ! mountpoint -q "$src"; then
-        echo "$BACKUP_VOLUME_LABEL is not mounted at $src; run mountBackup first."
-        return 1
-    fi
-    _rsyncRun "${src}/.rsync-exclude" "${HOME}/.rsync-exclude" || return 1
+    _verifyBackupVolume || return 1
     for dir in "${SYNC_DIRS[@]}"; do
         echo "-- Syncing $dir --"
         mkdir -p "${rsync_dst}/${dir}" || return 1
@@ -244,32 +340,37 @@ sync2L() {
 
 sync2E() {
     _requireBackupConfig || return 1
-    if ! declare -p SYNC_DIRS CODES_EXCLUDES >/dev/null 2>&1; then
-        echo "SYNC_DIRS and CODES_EXCLUDES must be configured in ~/.bash_aliases.local." >&2
-        return 1
-    fi
+    _requireSyncConfig || return 1
 
     local dst="$BACKUP_MOUNT_POINT"
+    local src="${RSYNC_DST:-$HOME}"
     local retention_days="${BACKUP_RETENTION_DAYS:-30}"
     local backup_root="${dst}/.backup"
     local backup_dir="${backup_root}/$(date +%Y-%m-%d)"
     local dir
 
-    if ! mountpoint -q "$dst"; then
-        echo "$BACKUP_VOLUME_LABEL is not mounted at $dst; run mountBackup first."
-        return 1
-    fi
-    _rsyncRun "${HOME}/.rsync-exclude" "${dst}/.rsync-exclude" || return 1
+    _verifyBackupVolume || return 1
+    # --delete makes an absent or empty source destructive: it would clear the
+    # drive's copy. On a freshly imaged machine that is the normal state, so
+    # refuse rather than trust the operator to notice.
+    for dir in "${SYNC_DIRS[@]}" 30_Codes; do
+        if [ ! -d "${src}/${dir}" ] || [ -z "$(ls -A "${src}/${dir}" 2>/dev/null)" ]; then
+            echo "Refusing: ${src}/${dir} is missing or empty; --delete would clear the backup." >&2
+            echo "Run sync2L first, or fix RSYNC_DST/SYNC_DIRS in ~/.bash_aliases.local." >&2
+            return 1
+        fi
+    done
+
     for dir in "${SYNC_DIRS[@]}"; do
         echo "-- Backing up $dir to $BACKUP_VOLUME_LABEL --"
         mkdir -p "${dst}/${dir}" "${backup_dir}/${dir}" || return 1
         _rsyncRun --delete --backup --backup-dir="${backup_dir}/${dir}" \
-            "${HOME}/${dir}/" "${dst}/${dir}/" || return 1
+            "${src}/${dir}/" "${dst}/${dir}/" || return 1
     done
     echo "-- Backing up 30_Codes (selective) to $BACKUP_VOLUME_LABEL --"
     mkdir -p "${dst}/30_Codes" "${backup_dir}/30_Codes" || return 1
     _rsyncRun "${CODES_EXCLUDES[@]}" --delete --backup \
-        --backup-dir="${backup_dir}/30_Codes" "${HOME}/30_Codes/" "${dst}/30_Codes/" || return 1
+        --backup-dir="${backup_dir}/30_Codes" "${src}/30_Codes/" "${dst}/30_Codes/" || return 1
     echo "-- Purging dated backups older than $retention_days days --"
     find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name '????-??-??' \
         -mtime "+$retention_days" -exec rm -rf -- {} +
@@ -281,5 +382,11 @@ usage() {
 }
 
 canvas() {
-    "${HOME}/30_Codes/claude_tools/build_concept_canvas.py" "$@"
+    local script="${RSYNC_DST:-$HOME}/30_Codes/claude_tools/build_concept_canvas.py"
+
+    if [ ! -f "$script" ]; then
+        echo "$script not found; run sync2L to pull 30_Codes onto this machine." >&2
+        return 1
+    fi
+    python3 "$script" "$@"
 }

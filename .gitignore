@@ -14,6 +14,7 @@
 !/settings.base.json
 !/settings.machine.wsl.json
 !/settings.machine.windows.json
+!/settings.machine.linux.json
 !/scripts
 !/.gitattributes
 !/roo-to-claude.md
@@ -34,3 +35,8 @@ scripts/__pycache__/
 
 
 # Note: settings.local.json is intentionally NOT tracked — it's for machine-local overrides.
+
+# Orca-managed skill symlinks into ~/.agents (machine-local)
+skills/find-skills
+skills/orca-cli
+skills/orchestration-orca

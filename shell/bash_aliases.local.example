@@ -1,14 +1,24 @@
 # Copy to ~/.bash_aliases.local and adjust for this machine. Do not commit that local file.
-BACKUP_WINDOWS_DRIVE="D:"
+
 BACKUP_VOLUME_LABEL="Backup2"
+# Where the volume ends up. WSL: a drvfs mount point such as /mnt/backup2.
+# Native Linux with udisks: /run/media/$USER/<label>.
 BACKUP_MOUNT_POINT="/mnt/backup2"
+# Optional. Only needed where the volume is not a block device, i.e. under WSL,
+# where it is reached as a Windows drive letter instead.
+# BACKUP_WINDOWS_DRIVE="D:"
 BACKUP_RETENTION_DAYS=30
 
+# Optional. The Google Drive workspace mirror is autodetected; set this only if
+# the sweep finds none or finds several.
+# WORKSPACE_ROOT="${HOME}/G/_WORKSPACE"
+
+# Root of the local project and code trees that sync2L fills and sync2E pushes.
+RSYNC_DST="${HOME}"
 SYNC_DIRS=(
     "10_Projects/10_Active/Plasmon"
     "10_Projects/10_Active/multi-stealthy"
 )
-RSYNC_DST="${HOME}"
 CODES_EXCLUDES=(
     --exclude=Julia/
     --exclude=99_installs/
