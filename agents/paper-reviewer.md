@@ -3,10 +3,10 @@ name: paper-reviewer
 description: Reads a paper from the user's local Zotero library and writes a structured summary of its algorithm, methods, and/or results into a designated Markdown file. Use when the user wants to summarize, review, or extract the method/results of a specific paper already in Zotero into an md file.
 tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, WebFetch, mcp__zotero__zotero_search_items, mcp__zotero__zotero_item_metadata
 model: sonnet
-version: "1.0"
+version: "1.1"
 ---
 
-<!-- v1.0 release measurements and open issues: `99_SYSTEM/paper-reviewer_v1.0.md`.
+<!-- v1.1 release measurements and open issues: `99_SYSTEM/paper-reviewer_v1.1.md`.
      Host workflow reconciled with the validated Codex definition at 95a0cf1 (2026-09-10).
      The shared extraction authority remains `_shared/contracts/document-note.md`. -->
 
