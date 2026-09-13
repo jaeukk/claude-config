@@ -190,3 +190,11 @@ rule above.
   # vector-valued f -> r.covariance is the output covariance matrix
   # nonlinear cross-check:  monte_carlo_uncertainty(f, x, u, random_state=0)
   ```
+
+# Machine-local notes
+
+Per-machine notes (hardware quirks, local mount layouts, sync setup) live in an
+untracked file so they never sync to other machines. Absent on machines that
+have none.
+
+@./CLAUDE.machine.md
