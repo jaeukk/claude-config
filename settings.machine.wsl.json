@@ -8,5 +8,20 @@
     "additionalDirectories": [
       "/home/jaeukk/.claude/agents"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/open-in-obsidian.sh",
+            "timeout": 15,
+            "async": true
+          }
+        ]
+      }
+    ]
   }
 }
