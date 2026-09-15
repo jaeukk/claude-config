@@ -16,9 +16,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/hooks/open-in-obsidian.sh",
-            "timeout": 15,
-            "async": true
+            "command": "bash $HOME/.claude/hooks/obsidian-link.sh",
+            "timeout": 15
           }
         ]
       }
