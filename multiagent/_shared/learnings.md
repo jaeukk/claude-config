@@ -177,3 +177,10 @@ claude-ceiling=fable-5-1 high(Codex 산출물 1라운드 감사), Orca 워커 ru
 **worker**: orchestrator(설계·구현·정정), codex-critic(독립 검증 — Blocking 7건 중 6건 인정)
 
 > Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
+
+## 2026-09-16 codex exec under the Claude Code Bash tool needs `</dev/null`
+
+**증상**: `codex exec "<prompt>"` hung 9 min then timed out (exit 124), log showed "Reading additional input from stdin...".
+**원인**: the Bash tool gives the child a piped stdin; codex appends stdin to the prompt and waits for EOF.
+**교훈**: always run `codex exec … < /dev/null` from an orchestrator. Also: when the codex MCP server fails to connect, `codex exec -m <model> -c model_reasoning_effort=<e> -s read-only --skip-git-repo-check -o <file>` is a working CLI fallback for a critic call.
+**worker**: codex-ceiling (task orca-two-accounts-plan)
