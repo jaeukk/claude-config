@@ -597,6 +597,7 @@ def main(argv: list[str] | None = None) -> int:
                 decision = resolve_binding(
                     bundle, args.role, author_family=author,
                     required_family=args.required_family, conductor_host=host,
+                    exclude_account_bound=True,  # Orca launches under its own account selection
                 )
                 if not decision.allowed or decision.details is None:
                     print(json.dumps(decision.as_dict(), indent=2), file=sys.stderr)
@@ -617,6 +618,7 @@ def main(argv: list[str] | None = None) -> int:
                     "family": backend["family"], "model": backend["model"],
                     "effort": backend["effort"], "author_family": author,
                     "conductor_host": host, "run": run_id,
+                    "account_bound_excluded": True,
                 }
                 # Before the dry-run return, so the preview refuses exactly where a launch would.
                 if args.role in TRACKED_ROLES and record and record.get("active"):

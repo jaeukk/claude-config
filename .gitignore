@@ -14,6 +14,7 @@
 !/settings.base.json
 !/settings.machine.wsl.json
 !/settings.machine.windows.json
+!/settings.team.json
 !/scripts
 !/.gitattributes
 !/roo-to-claude.md
@@ -34,3 +35,6 @@ scripts/__pycache__/
 
 
 # Note: settings.local.json is intentionally NOT tracked — it's for machine-local overrides.
+
+# Python bytecode anywhere in re-included trees
+__pycache__/

@@ -189,7 +189,7 @@ def main() -> int:
             decision = authorize_action(
                 bundle,
                 task,
-                {"kind": "spawn_worker", "actor_role": actor, "role": role},
+                {"kind": "spawn_worker", "actor_role": actor, "role": role, "native": True},
                 task_dir=task_path.parent,
             )
             if not decision.allowed:
@@ -201,6 +201,7 @@ def main() -> int:
                 task.get("author_family"),
                 required_family=family,
                 conductor_host=task.get("conductor", {}).get("host"),
+                exclude_account_bound=True,  # a Task-tool child runs under the session login
             )
             if not binding.allowed:
                 deny(f"current role {role} has no compatible {family} backend")

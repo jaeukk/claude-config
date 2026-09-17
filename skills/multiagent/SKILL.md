@@ -59,8 +59,9 @@ something false until the pin and the two session levers (D10) follow it.
 3. Acquire the task lease. Never run two conductors for one task.
 4. Resolve each role through `bindings.yaml`; do not encode model names in a role or
    routing rule.
-5. Set `dispatch.current_role` before each worker call. Workers must not spawn workers,
-   widen scope, or synthesize the final answer.
+5. Set `dispatch.current_role` before each worker call, and choose how the result comes back:
+   stdout for the conductor to use, or `--out <path>` for the engine to publish it (see
+   "Accounts"). Workers must not spawn workers, widen scope, or synthesize the final answer.
 6. Require critic and verifier families to differ from the artifact author.
 7. Collect structured evidence, apply the retry classification, synthesize once, and
    release the lease.
@@ -72,24 +73,35 @@ both families — except `fast`, which carries both `bulk_worker` and `runner`.
 A tier is a capability rank, not an effort: `codex-frontier` runs at medium while `codex-core`
 runs at high, because Astra at medium still out-reasons Sol at high.
 
-| Tier | Role | Claude | Codex |
-|---|---|---|---|
-| ceiling | critic | Fable 5.1, high | Astra, medium |
-| frontier | conductor | Opus 5 (session assertion) | Astra, medium |
-| core | implementer | Opus 5, high | Sol, high |
-| mid | verifier | Sonnet 5, medium | Terra, medium |
-| fast | bulk_worker, runner | Haiku 4.5, low | Terra, low |
+| Tier | Role | Claude | Codex | Team backend |
+|---|---|---|---|---|
+| ceiling | critic | Fable 5.1, high | Astra, medium | — |
+| frontier | conductor | Opus 5 (session assertion) | Astra, medium | — |
+| core | implementer | Opus 5, high | Sol, high | `claude-core-team` |
+| mid | verifier | Sonnet 5, medium | Terra, medium | `claude-mid-team` |
+| fast | bulk_worker, runner | Haiku 4.5, low | Terra, low | `claude-fast-team` |
 
-- `implementer`: both candidates at high effort (the validator enforces this). Claude is rank 1
-  because a native Claude subagent can write under the hook; `codex-core` is reachable only as
-  a read-only worker and returns a patch — see "What cannot land" below.
+The team column is a *separate registry entry*, not a variant of the private one: nothing links
+`claude-core` and `claude-core-team` but the naming convention, so a model change edits both.
+`account` is orthogonal to tier — the tier is still the capability rank.
+
+- `implementer`: every candidate at high effort (the validator enforces this). `claude-core-team`
+  is rank 1 and a native spawn *cannot select it* — account-bound candidates are skipped for
+  native spawns — so the ranking splits the two cases by construction: a native subagent gets
+  `claude-core` and writes code under the hook, while a CLI dispatch gets Opus on the team
+  account. That costs nothing, because a CLI-dispatched implementer was already text-only:
+  `codex-core` and `claude-core-team` alike are read-only workers that return a patch nobody can
+  land — see "What cannot land" below. Dispatch document production as `implementer`, not
+  `bulk_worker`, when the writing quality matters.
 - `critic`: ceiling tier, different family from the author. Claude-authored work gets
   `codex-ceiling`; Codex-authored work gets `claude-ceiling`.
 - `verifier`: mid tier, different family from the author. Mind the CLI asymmetry under "What
   cannot execute".
 - `bulk_worker`: both fast tiers in one pool; the validator requires both families present.
+  `claude-fast-team` leads it — see "Accounts".
 - `runner`: `codex-fast` first — on the recorded benchmark (`_shared/capability-profile.md`) it
-  matched Claude's accuracy at 26× fewer tokens (9× fewer than Gemini) — then `claude-fast`.
+  matched Claude's accuracy at 26× fewer tokens (9× fewer than Gemini) — then `claude-fast-team`,
+  then `claude-fast`.
 
 "First, then" is an ordered preference, not failover. `resolve_binding` returns the first
 compatible candidate without probing health, and a worker that fails is reported, not retried
@@ -104,6 +116,84 @@ compatible same-family binding exists, so a native spawn runs whatever the agent
 session selects. Resolving `claude-ceiling` does not make a native subagent Fable 5.1 — only
 its frontmatter does. Keep both model and effort in the frontmatter in sync with the binding,
 and never report the resolved backend as the model that ran unless the frontmatter says so.
+
+## Accounts
+
+Two Claude logins exist here: **private** (`~/.claude`, the account this session runs on, the only
+one with Fable) and **team** (`~/.claude-team`). The account is fixed per process, so:
+
+- **A natively-spawned subagent always bills the session's own login.** There is no per-subagent
+  account selector, and the hook's binding check does not change that. A native spawn is never
+  team, whatever the binding resolves.
+- **`dispatch-worker` is the only route to the team account.** It sets `CLAUDE_CONFIG_DIR` on the
+  worker process. `claude-core-team`, `claude-mid-team` and `claude-fast-team` are the team-bound backends;
+  `config_dir` in `backends.yaml` is what binds them. A backend in no binding is unreachable:
+  `--required-family` filters a role's candidate list, it cannot summon a backend from outside it.
+- **Prefer dispatch for `bulk_worker` and `runner`.** Spawn them natively only when a shard needs
+  Bash inside its own loop; record why in the contract and say plainly that it billed the session
+  account. Writing *code* is still private-only, since only a native subagent can write under the
+  hook and a native spawn is never team (see "What cannot land").
+- **Quota routing is not a health check.** Before selecting a team backend the engine probes that
+  account: `available` routes there, `exhausted` (a window at or past 95%) falls to the private
+  backend, and `unknown` — an unreadable probe, a rate-limited usage endpoint — **routes to team
+  anyway**, because absence of evidence is not exhaustion and the real run reports the truth. One
+  private retry follows a team run that comes back rate-limited; nothing else is retried.
+
+### Publishing a worker's text: `--out`
+
+A dispatched worker is read-only and always will be on this path. When its result is the
+deliverable — a note, a summary, a review write-up — `dispatch-worker --out <path>` has the
+**engine** write it, so the conductor never re-emits a long document through its own Write tool:
+
+    policy_engine.py dispatch-worker --task … --role bulk_worker --brief … --out notes/paper-x.md
+
+It refuses before launching anything (so a bad destination costs no tokens) when the suffix is
+code, when the destination is reserved — engine state of any task, any `.git*` component,
+`.claude`/`.codex`/`.vscode`, `.mcp.json` — when `authorize_action` denies it, or when the dispatch would be a
+workspace dispatch — a role that may write, resolving to a Claude backend that is not
+`result-only`. An account-bound backend is always `result-only` (the validator requires it), so
+`implementer` on `claude-core-team` publishes normally while `implementer` on `claude-core`
+is refused. On success it writes an immutable snapshot beside the
+record, then the destination, then `outputs/<dispatch_id>.json` carrying account, backend, model,
+attempt, sha256 and lease generation. A failed attempt records `status: failed` with a named reason
+and writes nothing. Code never goes through `--out`; it needs a reviewed patch, which does not
+exist yet.
+
+A clean exit is not evidence of a usable document: a worker that declines a brief in one word
+exits 0 with a well-formed envelope, and publishing that would overwrite a real note. So a
+result under 200 bytes of non-whitespace is recorded as `below_min_bytes` and not published;
+the text is still on stdout. Pass `--min-bytes` when the expected output is genuinely short
+(`0` disables the floor).
+
+### Landing a worker's files: `--write`
+
+When the deliverable is files rather than one document, `dispatch-worker --write <path>` gives the
+worker a real write path to **one** destination — a file, or an existing directory — inside
+`target_repo` and inside the contract's `write_scope`:
+
+    policy_engine.py dispatch-worker --task … --role implementer --brief … --write src/parser.py
+
+Only a role with `may_write` may use it (today `implementer`), it cannot be combined with `--out`,
+and it is native-host only. The worker runs `--restricted` with the file tools added and a
+generated permission file naming that one destination: an unmatched path has no rule to approve it
+and no handler to ask, so it is refused. Every generated rule is an `Edit` rule — measured
+2026-09-18, a `Write(...)` rule authorizes nothing, so emitting one would read like a guard while
+enforcing nothing. That is the boundary — not the prompt, and not the
+conductor's trust. A malformed pattern would fail *open*, so destinations containing `*?[]{}!` are
+refused rather than escaped.
+
+Before launch the engine copies the destination into `writes/<dispatch_id>.before` and verifies the
+copy, so `restore-write --dispatch-id <id>` can put it back; a destination that changed after the
+run was recorded refuses to restore rather than overwriting whoever changed it. Afterwards
+`outputs/<dispatch_id>.json` carries the change set and one of `succeeded`, `succeeded_no_change`,
+`partial` (the worker failed but files changed), `failed`, or `unknown` (the destination could not
+be inspected — never reported as success). A rate-limited write attempt is **not** retried: the
+retry rule assumes a repeat duplicates computation and never side effects, which stops being true
+once files exist. Authorship is recorded whenever the change set is non-empty, including after a
+failure — a failed attempt that changed files still authored those changes.
+
+`--out` changes nothing about the worker: same `--tools Read,Grep,Glob --strict-mcp-config`, same
+prompt, and the worker is never told the destination.
 
 ## Host adapter contract
 
@@ -339,7 +429,9 @@ names. Do not re-add it halfway.
 
 ## Two gaps the bindings do not tell you about
 
-**What cannot land.** Every CLI-dispatched implementer — either family — returns a patch.
+**What cannot land.** Still true for a *patch*; text lands through `--out` and files land through `--write`, since `--out` publishes a
+worker's returned text through the engine (see "Accounts"). Every CLI-dispatched implementer —
+either family — returns a patch.
 `git apply` is denied by the hook's shell-mutation rule, so the only route is the conductor
 applying it by hand with the file tools, and that is capped at two **code** files
 (`CODE_SUFFIXES`; docs and config do not count). A patch touching three or more code files has
@@ -364,7 +456,12 @@ stop, report verification as blocked, and request a conductor handoff (user appr
 
 Independence is checked against `observed-author.json` beside the contract. `dispatch-worker`
 writes it for CLI producers **only after the worker exits 0**, so a failed CLI run cannot
-overwrite the real author's record. The hook writes it for native producers **before the call
+overwrite the real author's record. That write is guarded like every other engine state write —
+lease generation and contract ownership rechecked under the lock, destination resolved so a
+symlink cannot stand where the sidecar belongs — and it is skipped with a warning rather than
+forced if the lease moved mid-run. A `--out` publication additionally records its own producer in
+`outputs/<dispatch_id>.json`, so an artifact's author is known without widening the task-wide
+sidecar; that is what attributes a `runner` or `bulk_worker` publication. The hook writes it for native producers **before the call
 runs** — a PreToolUse hook cannot see the outcome — so a native producer that fails still
 overwrites the record with its intent. A reviewer dispatch is
 refused when the sidecar contradicts `author_family`, and also when the sidecar exists but is
@@ -384,6 +481,12 @@ brief rather than pretending the earlier author is the only one.
 The conductor may approve bounded worker calls and transient retries inside the task
 contract. Obtain explicit user approval for conductor handoff, scope expansion,
 destructive actions, external side effects, credentials, or policy overrides.
+
+Two things the hook does not cover, so do not lean on it for them. It is wired in
+`multiagent/.claude/settings.json`, which means it gates a session **launched from the
+installation root** and nothing else — not a session in another project, and not any worker
+process. And engine-mediated writes (`--out`, the state records) never reach it: they are
+authorized inside the engine against the reloaded contract and recorded there.
 
 During an active task, use hook-visible file tools for writes. Do not mutate through
 shell redirection or bulk shell commands. On a host without a PreToolUse adapter (Codex), the

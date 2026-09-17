@@ -13,6 +13,25 @@ Claude Code를 오케스트레이터로 두고 Claude·Codex·Gemini를 워커�
   슬롯→워커 배정의 정본은 `_shared/capability-profile.md`(가변층) — 신모델 출시 시 프로필만 갱신.
 - **Memory = filesystem.** 런타임 상태 없음. 모든 결정·승인·검증이 파일로 남는다.
 
+## Accounts — team first, private fallback (2026-09-16)
+
+Two Claude logins: private (`~/.claude`, Max, Fable; the conductor, unrestricted) and team
+(`~/.claude-team`, KAIST, no Fable). A Claude backend may carry `account` (`private`|`team`) and
+`config_dir`. A team backend leads wherever nothing argues against it: `claude-fast-team`
+heads `bulk_worker`, and `claude-mid-team` precedes `claude-mid` in `verifier`. `runner`
+keeps `codex-fast` first (recorded benchmark: equal accuracy at 26x fewer tokens, and a
+Claude CLI worker cannot run commands); team is its Claude-side second choice.
+`implementer` (claude-core, Opus) and `critic` (claude-ceiling, Fable) stay private — Fable
+does not exist on the team plan, and the Opus implementer tier was left private for now.
+`dispatch-worker` probes the team quota once per dispatch (`engine/accounts.py`, usage API,
+cutoff `CLAUDE_TEAM_MAX_PERCENT`=95, 60 s cache), skips team candidates when exhausted or
+unreadable, launches the CLI worker with `CLAUDE_CONFIG_DIR`, and retries exactly once on
+private after a positively classified rate limit (HTTP 429). Every attempt is an
+`events.ndjson` record (`type: worker_attempt`, account, model, reason, exit). Native Task-tool
+children and Orca launches never use team (they run under the session login). Manual use:
+`claude-worker -p "$(cat brief.md)"` (team first, private backup) or `claude-team` (forced).
+`bindings.yaml` is JSON-parsed, so this rule lives here, not as a comment there.
+
 ## 폴더 구조
 
 ```

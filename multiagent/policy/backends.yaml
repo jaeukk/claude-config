@@ -15,7 +15,9 @@
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
-      "supports_subagents": true
+      "supports_subagents": true,
+      "account": "private",
+      "config_dir": "~/.claude"
     },
     "claude-frontier": {
       "host": "claude-code",
@@ -31,7 +33,9 @@
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
-      "supports_subagents": true
+      "supports_subagents": true,
+      "account": "private",
+      "config_dir": "~/.claude"
     },
     "claude-core": {
       "host": "claude-code",
@@ -46,7 +50,26 @@
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
-      "supports_subagents": false
+      "supports_subagents": false,
+      "account": "private",
+      "config_dir": "~/.claude"
+    },
+    "claude-core-team": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-opus-5",
+      "capabilities": [
+        "implementation",
+        "review",
+        "verification",
+        "structured_result"
+      ],
+      "sandbox": "host-permissions",
+      "writes_mediated": true,
+      "write_mode": "result-only",
+      "supports_subagents": false,
+      "account": "team",
+      "config_dir": "~/.claude-team"
     },
     "claude-mid": {
       "host": "claude-code",
@@ -59,7 +82,9 @@
       "sandbox": "host-permissions",
       "writes_mediated": true,
       "write_mode": "hook-gated",
-      "supports_subagents": false
+      "supports_subagents": false,
+      "account": "private",
+      "config_dir": "~/.claude"
     },
     "claude-fast": {
       "host": "claude-code",
@@ -74,7 +99,9 @@
       "sandbox": "host-permissions",
       "writes_mediated": false,
       "write_mode": "result-only",
-      "supports_subagents": false
+      "supports_subagents": false,
+      "account": "private",
+      "config_dir": "~/.claude"
     },
     "codex-ceiling": {
       "host": "codex",
@@ -179,6 +206,38 @@
       "writes_mediated": false,
       "write_mode": "result-only",
       "supports_subagents": false
+    },
+    "claude-mid-team": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-sonnet-5",
+      "capabilities": [
+        "verification",
+        "structured_result"
+      ],
+      "sandbox": "host-permissions",
+      "writes_mediated": true,
+      "write_mode": "result-only",
+      "supports_subagents": false,
+      "account": "team",
+      "config_dir": "~/.claude-team"
+    },
+    "claude-fast-team": {
+      "host": "claude-code",
+      "family": "claude",
+      "model": "claude-haiku-4-5",
+      "capabilities": [
+        "bulk",
+        "mechanical",
+        "verification",
+        "structured_result"
+      ],
+      "sandbox": "host-permissions",
+      "writes_mediated": false,
+      "write_mode": "result-only",
+      "supports_subagents": false,
+      "account": "team",
+      "config_dir": "~/.claude-team"
     }
   }
 }

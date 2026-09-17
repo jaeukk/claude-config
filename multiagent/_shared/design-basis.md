@@ -125,6 +125,29 @@
   `_agy_cli` docstring의 두 전제(격리 입증·완료 관측)와 argv 길이 한계(Windows 32,767자)를 처리할 것.
   절반만 되살리면 D13 이전처럼 "등록됐지만 도달 불가한 죽은 설정"이 된다. (2026-08-26)
 
+- **D15 team account reaches core tier through the implementer binding** = `claude-core-team`
+  (Opus 5, high, `~/.claude-team`) is rank 1 on `implementer`, ahead of `claude-core`. This is
+  not a preference for team over private on the same work: `resolve_binding` skips
+  account-bound candidates when the spawn is native (`policy_engine.py` ~line 379), so the
+  ranking splits the two cases by construction — a native subagent can only reach
+  `claude-core` and writes code under the hook, while a CLI dispatch reaches Opus on the team
+  account and can only return text. Nothing is given up, because a CLI-dispatched implementer
+  of either family was already text-only: its patch has no landing path (A1).
+  **Why it was needed**: the 2026-09-17 test run showed team-first routing working
+  mechanically (usage 2% → 7%) while every document of substance still fell back to private
+  Opus, because the only producing team backend was Haiku 4.5 and its output was rejected by
+  the critic. `bulk_worker` deliberately stays Haiku-first so mechanical shards do not become
+  Opus calls; document production is dispatched as `implementer` instead. **Cost**: team and
+  private tiers are separate registry entries with nothing linking them, so a model change
+  edits both. **Follow-on fix, same day**: the first live dispatch refused `--out` — the
+  workspace guard keyed on `role.may_write` plus a Claude host alone, and `implementer` may
+  write. The guard now also requires the resolved backend not be `result-only`, and
+  `validate_policy` requires every account-bound backend to be `result-only`. That is not a
+  loophole: a team backend is reachable by CLI dispatch only, and a CLI-dispatched Claude
+  worker runs `--tools Read,Grep,Glob`, so it never gets a workspace for the flag to conflict
+  with. Verified end to end: team session quota 0% → 8%, private unchanged, snapshot
+  byte-identical to the published file. (2026-09-17)
+
 ## 4. 불변식
 
 구체 항목·검증 명령은 `_shared/system-invariants.md`. 시스템 수정 후 그 자가점검을 돌린다.

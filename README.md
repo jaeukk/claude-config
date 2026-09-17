@@ -10,6 +10,7 @@ working tree of this repository, with secrets and machine-local runtime state gi
 |---|---|
 | `CLAUDE.md` | Always-on global instructions (identity, language, physics coding standards). |
 | `settings.json` | Global settings + the `SessionStart` update-check hook. |
+| `settings.team.json` | Team-account overlay (`model: opus`); `compose-settings.py` writes `~/.claude-team/settings.json` = composed settings + this layer, as a real file. |
 | `skills/` | Skills auto-selected per task, or forced with `/<name>`. |
 | `agents/` | Subagents — delegated, persistent-role helpers ("use the X subagent"). |
 | `commands/` | Custom slash commands. |

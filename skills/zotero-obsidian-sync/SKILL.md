@@ -57,10 +57,11 @@ Send the **whole** tags array — PATCH replaces the field, it does not merge �
 `type:1` on automatic tags. Writes hit the synced cloud library, so keep Zotero desktop Sync on
 for them to show up locally.
 
-**API key.** A write-enabled key lives in `~/.claude.json` under
-`mcpServers.zotero.env.ZOTERO_API_KEY`. That file is Claude-specific and won't exist on a
-Codex-only host — there, read the key from the **`ZOTERO_API_KEY` environment variable**
-(check the env var first if `~/.claude.json` is absent).
+**API key.** The write-enabled key lives in `~/.config/zotero/api_key` (chmod 600, may end in a
+newline — strip it). Read it from that file inside the script that makes the call; never put it in
+`~/.claude.json`, settings files, shell exports, notes, or command output. This location works for
+Claude and Codex hosts alike. (Until 2026-09-17 a key sat in `~/.claude.json` under
+`mcpServers.zotero.env`; it was revoked and removed.)
 
 **Dead ends — do not retry** (all on the local app, unrelated to the web API):
 - `PATCH`/`PUT localhost:23119/api/users/5872032/items/<KEY>` → `501 Method not implemented`

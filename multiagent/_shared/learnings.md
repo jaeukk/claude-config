@@ -184,3 +184,24 @@ claude-ceiling=fable-5-1 high(Codex 산출물 1라운드 감사), Orca 워커 ru
 **원인**: the Bash tool gives the child a piped stdin; codex appends stdin to the prompt and waits for EOF.
 **교훈**: always run `codex exec … < /dev/null` from an orchestrator. Also: when the codex MCP server fails to connect, `codex exec -m <model> -c model_reasoning_effort=<e> -s read-only --skip-git-repo-check -o <file>` is a working CLI fallback for a critic call.
 **worker**: codex-ceiling (task orca-two-accounts-plan)
+
+## 2026-09-17 what one team 5-h window actually buys
+
+**Measurement**: five Opus raw-build notes (26-46 KB each, literature notes from staged PDFs),
+dispatched as `implementer` -> `claude-core-team --out`, took the team 5-h session window from 8%
+to **100%**. Summed worker usage: 459 k output, 1.20 M cache write, 8.13 M cache read. The same
+batch moved private only 19% -> 26%, i.e. roughly 73% of Claude output tokens left the private
+account. Codex critics (five, cross-family) cost 500 k tokens on their own vendor.
+**교훈**: budget **about five Opus documents per team 5-h window**, and plan larger batches as
+waves across windows. Past 95% the probe reports `exhausted` and routing falls back to the
+private backend — recorded in each attempt event with its reason, so it is traceable, but it is
+*not* announced and nobody is asked. A batch that overruns the window quietly finishes on private
+quota, which is the opposite of what team-first routing is for. Check the window before dispatching
+a batch, not after.
+**부수 교훈**: a team worker is read-only and confined to `target_repo`, so every team-built
+document still needs a private or Codex pass afterwards for anything requiring Bash (verifier
+scripts, page renders, reference generation, edits). Team routing shifts *authoring* cost, not the
+whole pipeline. Separately, a long-lived conductor session dominated private cost through cache
+reads (46.9 M over 67 turns) — more than any routing change would save, so start a fresh conductor
+per batch.
+**worker**: implementer x5 (claude-core-team), critic x5 (codex-ceiling), fixer/ingest (native Opus)

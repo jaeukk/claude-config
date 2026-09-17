@@ -18,6 +18,10 @@
       "mode": "first_available",
       "candidates": [
         {
+          "backend": "claude-core-team",
+          "effort": "high"
+        },
+        {
           "backend": "claude-core",
           "effort": "high"
         },
@@ -44,6 +48,10 @@
       "mode": "pool",
       "pool": [
         {
+          "backend": "claude-fast-team",
+          "effort": "low"
+        },
+        {
           "backend": "claude-fast",
           "effort": "low"
         },
@@ -61,6 +69,10 @@
           "effort": "medium"
         },
         {
+          "backend": "claude-mid-team",
+          "effort": "medium"
+        },
+        {
           "backend": "claude-mid",
           "effort": "medium"
         }
@@ -71,6 +83,10 @@
       "candidates": [
         {
           "backend": "codex-fast",
+          "effort": "low"
+        },
+        {
+          "backend": "claude-fast-team",
           "effort": "low"
         },
         {

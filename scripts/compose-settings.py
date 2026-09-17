@@ -51,6 +51,23 @@ def main() -> int:
             print(f"ERROR: missing {p}", file=sys.stderr)
             return 1
 
+    # Team account dir: the same layers plus settings.team.json (model override), written
+    # as a real file. A symlink would let a /model save inside a team session land in the
+    # shared settings.json and change the private default too.
+    team_dir = Path.home() / ".claude-team"
+    if team_dir.exists():
+        team_layer = CLAUDE / "settings.team.json"
+        team = composed
+        if team_layer.exists():
+            team = deep_merge(composed, json.loads(team_layer.read_text(encoding="utf-8")))
+        team_target = team_dir / "settings.json"
+        team_text = json.dumps(team, indent=2, ensure_ascii=False) + "\n"
+        if team_target.is_symlink():
+            team_target.unlink()
+        if not team_target.exists() or team_target.read_text(encoding="utf-8") != team_text:
+            team_target.write_text(team_text, encoding="utf-8")
+            print(f"composed {team_target} (team layer: {team_layer.exists()})")
+
     target = CLAUDE / "settings.json"
     new_text = json.dumps(composed, indent=2, ensure_ascii=False) + "\n"
     if target.exists():
