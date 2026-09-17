@@ -1043,6 +1043,10 @@ class WorkerProfileTest(unittest.TestCase):
         prompt = args[args.index("--append-system-prompt") + 1]
         self.assertIn("American spelling", prompt)
         self.assertIn("one-shot worker", prompt)
+        # The research-code rules govern a returned patch as much as a direct write, so
+        # dropping them with the rest of the inherited profile would have been a real loss.
+        self.assertIn("generated outputs never do", prompt)
+        self.assertIn("docstrings", prompt)
 
     def test_the_write_branch_does_not_double_the_flag(self):
         backend = {"backend": "claude-core", "host": "claude-code", "family": "claude",
@@ -1088,12 +1092,158 @@ class ContributingFamiliesTest(unittest.TestCase):
         with self.assertRaises(pe.UnreadableAuthorRecord):
             pe.observed_author_families(self.dir)
 
+    def test_damage_keeps_the_families_that_were_still_legible(self):
+        (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text(
+            json.dumps({"families": ["codex"], "damaged": "earlier corruption"}),
+            encoding="utf-8",
+        )
+        pe.record_contributing_family(self.dir, "claude", "implementer --write")
+        record = json.loads((self.dir / pe.OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(record["families"], ["claude", "codex"])
+        self.assertIn("damaged", record)
+        with self.assertRaises(pe.UnreadableAuthorRecord):
+            pe.observed_author_families(self.dir)
+
     def test_an_unknown_family_in_the_list_raises(self):
         (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text(
             json.dumps({"families": ["claude", "acme"]}), encoding="utf-8"
         )
         with self.assertRaises(pe.UnreadableAuthorRecord):
             pe.observed_author_families(self.dir)
+
+
+class RestoreSafetyTest(unittest.TestCase):
+    """Restore's failure paths, which are the ones that can destroy data."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.task_dir = self.root / "task"
+        self.task_dir.mkdir()
+        self.dispatch = "c" * 32
+        self.addCleanup(self.tmp.cleanup)
+
+    def record(self, destination, baseline, status="succeeded", after=None):
+        pe._state_path(self.task_dir, "outputs", self.dispatch, ".json").write_text(
+            json.dumps({"dispatch_id": self.dispatch, "status": status, "mode": "write",
+                        "destination": str(destination), "baseline": baseline,
+                        "after": after if after is not None else {}}),
+            encoding="utf-8",
+        )
+
+    def test_an_unowned_sibling_is_not_deleted(self):
+        target = self.root / "note.md"
+        target.write_text("before", encoding="utf-8")
+        captured = pe.capture_write_baseline(self.task_dir, self.dispatch, target, "file")
+        target.write_text("after", encoding="utf-8")
+        self.record(target, captured.details,
+                    after={"": {"sha256": pe.hashlib.sha256(b"after").hexdigest(), "bytes": 5}})
+        # A file sitting where a predictable staging path would go must survive.
+        decoy = self.root / "note.md.restoring"
+        decoy.write_text("somebody else's file", encoding="utf-8")
+        decision = pe.restore_write(self.task_dir, self.dispatch)
+        self.assertTrue(decision.allowed, decision.reason)
+        self.assertEqual(target.read_text(encoding="utf-8"), "before")
+        self.assertEqual(decoy.read_text(encoding="utf-8"), "somebody else's file")
+
+    def test_a_live_dispatch_blocks_restore(self):
+        target = self.root / "live.md"
+        target.write_text("before", encoding="utf-8")
+        captured = pe.capture_write_baseline(self.task_dir, self.dispatch, target, "file")
+        self.record(target, captured.details)
+        pe._state_path(self.task_dir, "outputs", "d" * 32, ".json").write_text(
+            json.dumps({"dispatch_id": "d" * 32, "status": "in_flight",
+                        "destination": str(target)}),
+            encoding="utf-8",
+        )
+        decision = pe.restore_write(self.task_dir, self.dispatch)
+        self.assertFalse(decision.allowed)
+        self.assertIn("writing", decision.reason)
+
+    def test_a_target_that_did_not_exist_is_removed(self):
+        target = self.root / "created.md"
+        captured = pe.capture_write_baseline(self.task_dir, self.dispatch, target, "file")
+        target.write_text("the worker made this", encoding="utf-8")
+        self.record(target, captured.details,
+                    after={"": {"sha256": pe.hashlib.sha256(b"the worker made this").hexdigest(),
+                                "bytes": 20}})
+        decision = pe.restore_write(self.task_dir, self.dispatch)
+        self.assertTrue(decision.allowed, decision.reason)
+        self.assertFalse(target.exists())
+
+
+class InterruptedWriteTest(unittest.TestCase):
+    """A dispatcher killed mid-write must leave a state someone can get out of."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.task_dir = self.root / "task"
+        self.task_dir.mkdir()
+        self.dispatch = "e" * 32
+        self.target = self.root / "note.md"
+        self.target.write_text("before", encoding="utf-8")
+        self.addCleanup(self.tmp.cleanup)
+        captured = pe.capture_write_baseline(self.task_dir, self.dispatch, self.target, "file")
+        pe._state_path(self.task_dir, "outputs", self.dispatch, ".json").write_text(
+            json.dumps({"dispatch_id": self.dispatch, "status": "in_flight", "mode": "write",
+                        "destination": str(self.target), "baseline": captured.details}),
+            encoding="utf-8",
+        )
+        self.target.write_text("half-written by a worker that died", encoding="utf-8")
+
+    def test_it_refuses_without_an_explicit_assertion(self):
+        decision = pe.restore_write(self.task_dir, self.dispatch)
+        self.assertFalse(decision.allowed)
+        self.assertIn("--assume-stopped", decision.reason)
+        self.assertEqual(self.target.read_text(encoding="utf-8"),
+                         "half-written by a worker that died")
+
+    def test_assume_stopped_restores_from_the_baseline(self):
+        decision = pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True)
+        self.assertTrue(decision.allowed, decision.reason)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "before")
+
+    def test_a_successful_recovery_retires_its_reservation(self):
+        # Otherwise the recovered record blocks every later restore of this destination, and
+        # this forced restore could be repeated over whatever was written since.
+        self.assertTrue(pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True).allowed)
+        record = json.loads(
+            pe._state_path(self.task_dir, "outputs", self.dispatch, ".json")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(record["status"], "recovered")
+        self.assertTrue(record["after"])
+
+        # A later dispatch's restore is no longer blocked by it.
+        later = "1" * 32
+        other = self.root / "other.md"
+        other.write_text("x", encoding="utf-8")
+        captured = pe.capture_write_baseline(self.task_dir, later, other, "file")
+        pe._state_path(self.task_dir, "outputs", later, ".json").write_text(
+            json.dumps({"dispatch_id": later, "status": "succeeded", "mode": "write",
+                        "destination": str(other), "baseline": captured.details,
+                        "after": captured.details["files"]}),
+            encoding="utf-8",
+        )
+        self.assertTrue(pe.restore_write(self.task_dir, later).allowed)
+
+    def test_repeating_a_recovery_after_later_edits_is_refused(self):
+        self.assertTrue(pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True).allowed)
+        self.target.write_text("somebody's later work", encoding="utf-8")
+        again = pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True)
+        self.assertFalse(again.allowed)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "somebody's later work")
+
+    def test_an_unreadable_neighbouring_record_stops_the_restore(self):
+        # It may be a half-written reservation for this very destination; stepping past it is
+        # how a live worker's changes disappear.
+        pe._state_path(self.task_dir, "outputs", "f" * 32, ".json").write_text(
+            "{ truncated", encoding="utf-8"
+        )
+        decision = pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True)
+        self.assertFalse(decision.allowed)
+        self.assertIn("cannot be read", decision.reason)
 
 
 class ReadScopeTest(unittest.TestCase):
@@ -1147,11 +1297,16 @@ class ReadScopeTest(unittest.TestCase):
             backend, "native", Path("/repo"), "implementer", read_roots=["/srv/papers"]
         )
         self.assertEqual(spec.args[:2], ["--add-dir", "/srv/papers"])
+        # A Codex reviewer of a contract that declares a read scope must stay dispatchable:
+        # its sandbox already reaches those paths, so there is nothing to add and nothing to
+        # refuse. Raising here would break the ordinary Claude-author, Codex-review sequence.
         codex = {"backend": "codex-core", "host": "codex", "family": "codex",
                  "model": "m", "effort": "high"}
-        with self.assertRaises(NotImplementedError):
-            pe.build_worker_command(codex, "native", Path("/repo"), "implementer",
-                                    read_roots=["/srv/papers"])
+        _, codex_spec = pe.build_worker_command(
+            codex, "native", Path("/repo"), "implementer", read_roots=["/srv/papers"]
+        )
+        self.assertNotIn("--add-dir", codex_spec.args)
+        self.assertIn("read_scope", codex_spec.enforcement)
 
 
 class ManagedSettingsGateTest(unittest.TestCase):

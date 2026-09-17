@@ -20,6 +20,24 @@ controlled revision" is superseded by this file.
 | A9 | Team-account routing (2026-09-16) covers CLI dispatch only: the WSL launcher (`--host wsl`) refuses account-bound backends (no env forwarding), Orca `worker-start` and native Task-tool children always run under the session login (`exclude_account_bound`). | Team quota is spent only by `dispatch-worker --host native` from inside WSL and by `claude-worker`. | `_claude_cli`, `orca_worker_start.py`, `claude_pretool.py` | `wsl.exe … --exec env CLAUDE_CONFIG_DIR=<linux path> claude …`; Orca has no per-worker account flag. |
 | A10 | The rate-limit classifier keys on `api_error_status == 429` plus text patterns; no captured fixture of a real team rate-limit envelope exists yet. | A misclassified failure either skips the private retry or retries a non-limit error once. | `engine/accounts.py` `classify` | Capture one real 429 envelope per CLI version into `engine/tests` fixtures. |
 
+## A-write. Known limitations of `--write`, recorded rather than fixed
+
+Named by the 2026-09-18 audit (three rounds, `codex-ceiling`) as limitations rather than blockers.
+Reviews in `tasks/2026-09-18-post-audit/workers/critic/`.
+
+- **`--assume-stopped` is a human judgment.** The reservation carries no worker PID and the
+  worker runs under `subprocess.run`, so the engine has no evidence a particular worker or an
+  orphaned child has stopped. Lease expiry does not establish it. Closing this means real process
+  identity tracking, which is a bigger thing than this patch.
+- **An interrupted *directory* replacement recovers by hand.** The workspace holding the
+  post-dispatch contents and the staged baseline is preserved and named in the refusal; putting it
+  back is manual.
+- **Nothing under `~/.claude` can be a `--write` destination.** The CLI gates those paths as
+  sensitive and asks a human, so a worker cannot edit this installation. Protective, but it means
+  the engine cannot be maintained through its own write path.
+- **`--add-dir` grants write as well as read**, so a `read_scope` root is writable by a worker
+  that also holds `--write`. The two scopes are not independent.
+
 ## B. Missing regression test for the Orca adapter
 
 Seven review rounds hardened `engine/adapters/orca_worker_start.py`; every case was verified

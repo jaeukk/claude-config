@@ -1407,18 +1407,19 @@ def build_worker_command(
     default-deny -- an unmatched path has nothing to approve it and no handler to ask.
     """
     spec = worker_cli_args(backend, role, capture_result)
-    if read_roots:
-        if spec.program != "claude":
-            # Codex's read-only sandbox already reads the whole filesystem (measured), so a
-            # read root is a Claude concept. Silently accepting it elsewhere would suggest the
-            # engine had narrowed something it never touched.
-            raise NotImplementedError(
-                f"read_scope has no meaning for {spec.program}: its sandbox governs reads"
-            )
+    if read_roots and spec.program == "claude":
         added: list[str] = []
         for root in read_roots:
             added += ["--add-dir", root]
         spec = dataclasses.replace(spec, args=[*added, *spec.args])
+    elif read_roots:
+        # Not an error, and not silently narrowed either: a Codex worker's read-only sandbox
+        # already reaches these paths, so there is nothing to add. Raising here instead would
+        # make a contract with a read scope undispatchable to a Codex reviewer -- which is the
+        # ordinary Claude-author, Codex-review sequence.
+        spec = dataclasses.replace(
+            spec, enforcement=f"{spec.enforcement} (read_scope already covered by the sandbox)"
+        )
     if write_settings is not None:
         if spec.program != "claude":
             raise NotImplementedError(
@@ -1505,6 +1506,13 @@ def observed_author_families(contract_dir: Path) -> list[str]:
         raise UnreadableAuthorRecord(f"{sidecar} cannot be read: {error}") from error
     if not isinstance(payload, dict):
         raise UnreadableAuthorRecord(f"{sidecar} is not an object")
+    if payload.get("damaged"):
+        # Parseable, but its history was already lost once. Reviewer independence cannot be
+        # established from it, and silence here is what would clear the wrong reviewer.
+        raise UnreadableAuthorRecord(
+            f"{sidecar} was rewritten over damaged history ({payload['damaged']}); "
+            "reconcile authorship by hand before dispatching a reviewer"
+        )
     recorded = payload.get("families")
     if recorded is None:
         single = payload.get("family")
@@ -1520,22 +1528,52 @@ def observed_author_families(contract_dir: Path) -> list[str]:
 def record_contributing_family(contract_dir: Path, family: str, source: str) -> None:
     """Add one family to the authorship record, keeping whoever was already there.
 
-    Read-modify-write, because the point is accumulation: overwriting is what loses the
-    earlier contributor. Callers hold the task lock, which is what makes this safe.
+    Read-modify-write under the task lock, because the point is accumulation: overwriting is
+    what loses the earlier contributor, and two producers that each read the same history
+    before writing would lose one of them. The lock is taken here rather than assumed of
+    callers -- the PreToolUse hook is one of them and holds nothing.
     """
-    existing: list[str] = []
-    try:
-        existing = observed_author_families(contract_dir)
-    except UnreadableAuthorRecord:
-        # A damaged record is not a reason to drop the new fact; the reader still refuses to
-        # wave a review through, because the result here is a record it can parse but whose
-        # history it cannot vouch for.
-        existing = []
-    families = sorted(set(existing) | {family})
-    _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
-        json.dumps({"family": family, "families": families, "source": source}, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    with _lease_lock(contract_dir):
+        # The whole read-modify-write, not just the write. Two producers that each read the
+        # same history and then wrote would drop one family, and the dropped one is exactly
+        # the family a reviewer would then be cleared against. No caller holds this lock
+        # already -- `_lease_check` takes and releases it internally.
+        existing: list[str] = []
+        damaged: str | None = None
+        try:
+            existing = observed_author_families(contract_dir)
+        except UnreadableAuthorRecord as error:
+            # Salvage whatever families are still legible before falling back. Dropping them
+            # keeps review blocked either way, but it throws away the evidence whoever
+            # reconciles this by hand would start from.
+            try:
+                salvage = json.loads(
+                    (contract_dir / OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8")
+                )
+                if isinstance(salvage, dict):
+                    legible = salvage.get("families")
+                    if isinstance(legible, list):
+                        existing = [
+                            name for name in legible
+                            if isinstance(name, str) and name in KNOWN_FAMILIES
+                        ]
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                existing = []
+            # The new fact is still recorded, but the damage is recorded with it. Writing a
+            # clean single-family record here would turn unreadable history into confident
+            # history, and the next reviewer would be cleared against a family the record can
+            # no longer prove was absent.
+            damaged = str(error)
+        payload: dict[str, Any] = {
+            "family": family,
+            "families": sorted(set(existing) | {family}),
+            "source": source,
+        }
+        if damaged is not None:
+            payload["damaged"] = damaged
+        _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 def observed_author_family(contract_dir: Path) -> str | None:
@@ -1821,7 +1859,12 @@ WORKER_BASELINE_PROMPT = (
     "You are working for Jaeuk Kim, PhD, a physics postdoc. Write in English with American "
     "spelling, in everything you produce. You are a one-shot worker with no channel to ask "
     "questions: state your assumptions explicitly and surface any uncertainty, conflict, or "
-    "missing input in your result rather than guessing silently."
+    "missing input in your result rather than guessing silently.\n"
+    "If you produce or review code: reusable code belongs under version control and generated "
+    "outputs never do; resolve paths relative to the file rather than hardcoding them; import "
+    "through an editable install, never by manipulating sys.path; and document what you write "
+    "-- Doxygen comments for C++ functions, NumPy-style docstrings for Python. These apply to a "
+    "patch you hand back exactly as they would to a file you wrote."
 )
 
 MANAGED_SETTINGS_PATHS = (
@@ -1978,7 +2021,7 @@ def changed_anything(change_set: dict[str, Any]) -> bool:
     return bool(change_set["created"] or change_set["modified"] or change_set["removed"])
 
 
-def restore_write(task_dir: Path, dispatch_id: str) -> Decision:
+def restore_write(task_dir: Path, dispatch_id: str, assume_stopped: bool = False) -> Decision:
     """Put a ``--write`` destination back to its recorded baseline.
 
     Refuses when the destination no longer matches what was recorded *after* the run: something
@@ -1992,21 +2035,55 @@ def restore_write(task_dir: Path, dispatch_id: str) -> Decision:
     "nobody else can touch the file".
     """
     with _lease_lock(task_dir):
-        return _restore_write_locked(task_dir, dispatch_id)
+        return _restore_write_locked(task_dir, dispatch_id, assume_stopped)
 
 
-def _restore_write_locked(task_dir: Path, dispatch_id: str) -> Decision:
+def _restore_write_locked(
+    task_dir: Path, dispatch_id: str, assume_stopped: bool = False
+) -> Decision:
     """The body of :func:`restore_write`, run with the task lock held."""
     record_path = _state_path(task_dir, "outputs", dispatch_id, ".json")
     if not record_path.exists():
         return Decision(False, f"no dispatch record at {record_path}")
     record = json.loads(record_path.read_text(encoding="utf-8"))
     baseline = record.get("baseline")
+    destination_now = record.get("destination")
+    for other in sorted(record_path.parent.glob("*.json")):
+        if other == record_path:
+            # This dispatch's own record. If it is still `in_flight` its dispatcher was
+            # killed, which is handled below -- self-blocking here would make the interrupted
+            # case permanently unrecoverable, which is the state restore exists to undo.
+            continue
+        try:
+            neighbor = json.loads(other.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            # Not skipped: an unreadable record may be a half-written reservation for this
+            # very destination, and stepping past it is how a live worker's changes vanish.
+            return Decision(False, f"{other} cannot be read ({error}); not restoring blind")
+        if neighbor.get("status") == "in_flight" \
+                and neighbor.get("destination") == destination_now:
+            return Decision(
+                False,
+                f"dispatch {neighbor.get('dispatch_id')} is writing {destination_now} right "
+                "now; restoring would discard whatever it has written",
+            )
+    if record.get("status") == "in_flight" and not assume_stopped:
+        return Decision(
+            False,
+            f"dispatch {dispatch_id} never recorded an outcome, so its worker may still be "
+            "running and what it wrote is unknown. Confirm the worker has stopped and pass "
+            "--assume-stopped; the destination is then restored from the baseline without "
+            "comparing against a post-run state that was never recorded.",
+        )
     if not baseline:
         return Decision(False, "this dispatch recorded no write baseline")
     destination = Path(record["destination"])
     kind = baseline["kind"]
     current = write_change_set({"files": record.get("after", {})}, destination, kind)
+    if record.get("status") == "in_flight" and assume_stopped:
+        # No after-state was ever recorded, so there is nothing to compare against. The
+        # caller has asserted the worker is gone; the baseline is the only defensible target.
+        current = {"created": [], "modified": [], "removed": [], "unchanged": []}
     if changed_anything(current):
         return Decision(False, f"{destination} changed after the run was recorded; not restoring")
     for parent in destination.parents:
@@ -2018,6 +2095,7 @@ def _restore_write_locked(task_dir: Path, dispatch_id: str) -> Decision:
             # the link rather than on what was recorded.
             return Decision(False, f"{parent} is now a symlink; not restoring through it")
     stored = Path(baseline["baseline"])
+    workspace: Path | None = None
     if baseline.get("existed"):
         # Verify the copy before destroying anything. A corrupt baseline discovered *after*
         # the destination is gone leaves nothing at all.
@@ -2026,16 +2104,71 @@ def _restore_write_locked(task_dir: Path, dispatch_id: str) -> Decision:
             return Decision(False, f"baseline unreadable: {recorded.reason}")
         if (recorded.details or {}).get("files") != baseline.get("files"):
             return Decision(False, "baseline no longer matches what was recorded; not restoring")
-        # Staged beside the destination, not beside the baseline: a rename across filesystems
-        # fails with EXDEV, and it would fail *after* the destination was already removed.
-        staged = destination.with_name(destination.name + ".restoring")
-        if staged.exists():
-            shutil.rmtree(staged) if staged.is_dir() else staged.unlink()
+        # Staged beside the destination, so the final move is a rename on one filesystem: a
+        # cross-device rename fails with EXDEV, and it would fail *after* the destination was
+        # already gone. The staging directory is created exclusively rather than named
+        # predictably -- a guessable `<name>.restoring` sibling means deleting whatever is
+        # sitting there, which may be somebody's file, or a dangling symlink that `copy2`
+        # would happily follow to write somewhere else entirely.
+        workspace = Path(tempfile.mkdtemp(prefix=".restore-", dir=destination.parent))
+        staged = workspace / destination.name
         shutil.copytree(stored, staged) if kind == "directory" else shutil.copy2(stored, staged)
-    if destination.exists():
-        shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
-    if baseline.get("existed"):
+    try:
+        outcome = _restore_apply(destination, staged if workspace is not None else None,
+                                 workspace, kind, bool(baseline.get("existed")))
+    except Exception as error:  # noqa: BLE001 - the workspace is the recovery evidence
+        preserved = (
+            f"The destination's previous contents and the staged baseline are preserved in "
+            f"{workspace}."
+            if workspace is not None
+            # No workspace exists on the remove-a-created-file path, so there is nothing
+            # staged and no claim to make about what survived.
+            else "No baseline was staged for this destination; inspect it directly."
+        )
+        return Decision(False, f"restore failed: {error}. {preserved}")
+    if workspace is not None:
+        shutil.rmtree(workspace, ignore_errors=True)
+    if outcome.allowed:
+        # Retire the reservation. Leaving it `in_flight` would block every later restore of
+        # this destination -- including one for a dispatch that ran *after* this recovery --
+        # and would let this same forced restore be repeated later, erasing whatever had been
+        # written since. Recording the restored state as the new `after` also means a repeat
+        # is judged against it by the ordinary comparison, with no override left.
+        restored = _write_manifest(destination, kind)
+        record["status"] = "recovered"
+        record["recovered_at"] = utc_now()
+        record["after"] = (restored.details or {}).get("files", {}) if restored.allowed else {}
+        staging = record_path.with_suffix(".json.partial")
+        staging.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        staging.replace(record_path)
+    return outcome
+
+
+def _restore_apply(
+    destination: Path, staged: Path | None, workspace: Path | None, kind: str, existed: bool
+) -> Decision:
+    """Put the staged baseline in place, in the order that survives an interruption.
+
+    Raises on failure rather than reporting it, so the caller keeps the workspace: on a failed
+    directory replacement that workspace holds the only copy of the post-dispatch contents.
+    """
+    if not existed:
+        if destination.exists():
+            shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
+        return Decision(True, f"removed {destination}; it did not exist before the dispatch")
+    if staged is None or workspace is None:  # pragma: no cover - guarded by the caller
+        raise RuntimeError("a baseline that existed must have been staged")
+    if kind == "file":
+        # One atomic step: the destination is either the old bytes or the restored ones, never
+        # absent, so an interruption here leaves a state a retry can still read.
         staged.replace(destination)
+        return Decision(True, f"restored {destination} to its pre-dispatch baseline")
+    # A directory cannot be replaced atomically. The old one moves aside *inside the
+    # workspace* first, so an interruption leaves it recoverable there rather than deleted.
+    discarded = workspace / "discarded"
+    if destination.exists():
+        destination.replace(discarded)
+    staged.replace(destination)
     return Decision(True, f"restored {destination} to its pre-dispatch baseline")
 
 
@@ -2357,6 +2490,29 @@ def dispatch_worker(
                 json.dumps(write_permission_settings(write_target, write_kind), indent=2),
                 encoding="utf-8",
             )
+            # Written *before* the worker starts, for two reasons. A dispatcher killed
+            # mid-run would otherwise leave changed files and a baseline copy that no
+            # recovery command would accept, because the record naming them is only written
+            # afterwards. And while this record says `in_flight`, a restore of the same
+            # destination refuses: a worker may be writing it right now, and restore's
+            # compare-then-replace would quietly discard whatever it wrote.
+            reservation = _state_path(task_dir, "outputs", dispatch_id, ".json")
+            with _lease_lock(task_dir):
+                # Published under the lock restore reads these records with, and written to a
+                # temporary file first: an unlocked or half-written reservation is one a
+                # restore can enumerate past, and it would then replace a destination this
+                # worker is about to change.
+                staging = reservation.with_suffix(".json.partial")
+                staging.write_text(
+                    json.dumps({
+                        "dispatch_id": dispatch_id, "at": utc_now(), "mode": "write",
+                        "status": "in_flight", "destination": str(write_target),
+                        "role": role, "backend": backend["backend"],
+                        "account": backend.get("account", "private"), "baseline": baseline,
+                    }, indent=2),
+                    encoding="utf-8",
+                )
+                staging.replace(reservation)
             command, spec = build_worker_command(
                 backend, host_mode, target_repo, role, capture_result=False,
                 write_settings=write_settings_path, read_roots=read_roots,
@@ -2865,6 +3021,10 @@ def main(argv: list[str] | None = None) -> int:
     restore_parser = subparsers.add_parser("restore-write")
     restore_parser.add_argument("--task-dir", type=Path, required=True)
     restore_parser.add_argument("--dispatch-id", required=True)
+    restore_parser.add_argument(
+        "--assume-stopped", action="store_true",
+        help="restore a dispatch that never recorded an outcome; assert its worker has stopped",
+    )
     event_parser = subparsers.add_parser("append-event")
     event_parser.add_argument("--task-dir", type=Path, required=True)
     event_parser.add_argument("--owner", required=True)
@@ -2920,7 +3080,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "release-lease":
         return _print_decision(release_lease(args.task_dir, args.owner))
     if args.command == "restore-write":
-        return _print_decision(restore_write(args.task_dir, args.dispatch_id))
+        return _print_decision(
+            restore_write(args.task_dir, args.dispatch_id, args.assume_stopped)
+        )
     if args.command == "append-event":
         return _print_decision(append_event(args.task_dir, args.owner, json.loads(args.event)))
     if args.command == "dispatch-worker":
