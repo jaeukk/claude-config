@@ -1016,6 +1016,100 @@ class WritePermissionSettingsTest(unittest.TestCase):
                 )
 
 
+class ReadScopeTest(unittest.TestCase):
+    """Additional read roots: authorization, not containment."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "sources").mkdir()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_an_existing_directory_is_authorized_and_canonical(self):
+        decision = pe.resolve_read_scope([str(self.root / "sources")])
+        self.assertTrue(decision.allowed, decision.reason)
+        self.assertEqual(decision.details["roots"], [str((self.root / "sources").resolve())])
+
+    def test_a_trailing_glob_is_accepted(self):
+        decision = pe.resolve_read_scope([str(self.root / "sources") + "/**"])
+        self.assertTrue(decision.allowed, decision.reason)
+        self.assertEqual(decision.details["roots"], [str((self.root / "sources").resolve())])
+
+    def test_absent_scope_is_empty_not_an_error(self):
+        self.assertEqual(pe.resolve_read_scope(None).details["roots"], [])
+
+    def test_refusals(self):
+        cases = {
+            "sources": "must be absolute",
+            str(self.root / "missing"): "not an existing directory",
+            str(self.root / "sources") + "/../etc": "may not contain",
+            str(Path.home()): "too broad",
+            # `/` is caught by the empty-segment rule before the breadth rule reaches it.
+            # Refused either way; this pins which message actually comes back.
+            "/": "may not contain",
+            str(Path.home() / ".ssh"): "credentials or agent configuration",
+            str(Path.home() / ".claude" / "multiagent"): "credentials or agent configuration",
+            str(Path.home()) + "/.codex/skills": "credentials or agent configuration",
+        }
+        for entry, expected in cases.items():
+            with self.subTest(entry):
+                decision = pe.resolve_read_scope([entry])
+                self.assertFalse(decision.allowed, entry)
+                self.assertIn(expected, decision.reason)
+
+    def test_a_non_list_is_refused(self):
+        self.assertFalse(pe.resolve_read_scope("sources").allowed)
+
+    def test_roots_become_add_dir_arguments_for_claude_only(self):
+        backend = {"backend": "claude-core", "host": "claude-code", "family": "claude",
+                   "model": "m", "effort": "high"}
+        command, spec = pe.build_worker_command(
+            backend, "native", Path("/repo"), "implementer", read_roots=["/srv/papers"]
+        )
+        self.assertEqual(spec.args[:2], ["--add-dir", "/srv/papers"])
+        codex = {"backend": "codex-core", "host": "codex", "family": "codex",
+                 "model": "m", "effort": "high"}
+        with self.assertRaises(NotImplementedError):
+            pe.build_worker_command(codex, "native", Path("/repo"), "implementer",
+                                    read_roots=["/srv/papers"])
+
+
+class ManagedSettingsGateTest(unittest.TestCase):
+    """`--write` trusts its generated allowlist only while nothing else can add to it."""
+
+    def test_no_managed_settings_on_this_host(self):
+        # Records the premise rather than asserting a wish: if one appears, this fails and the
+        # gate below is what stops `--write` from claiming a boundary it no longer has.
+        self.assertIsNone(pe.managed_settings_present())
+
+    def test_a_managed_file_refuses_the_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            managed = Path(tmp) / "managed-settings.json"
+            managed.write_text("{}", encoding="utf-8")
+            with mock.patch.object(pe, "MANAGED_SETTINGS_PATHS", (managed,)):
+                self.assertEqual(pe.managed_settings_present(), managed)
+
+
+class RestoreLockTest(unittest.TestCase):
+    """Restore compares, deletes and replaces; all three belong inside one lock."""
+
+    def test_restore_holds_the_task_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            held = []
+            real_lock = pe._lease_lock
+
+            def watched(directory, timeout=10.0):
+                held.append(directory)
+                return real_lock(directory, timeout)
+
+            with mock.patch.object(pe, "_lease_lock", watched):
+                decision = pe.restore_write(task_dir, "b" * 32)
+            self.assertEqual(held, [task_dir])
+            self.assertFalse(decision.allowed)  # no record for this dispatch
+            self.assertIn("no dispatch record", decision.reason)
+
+
 class WriteBaselineTest(unittest.TestCase):
     """The baseline is what makes a direct write reversible."""
 

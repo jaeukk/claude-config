@@ -141,8 +141,10 @@
   private tiers are separate registry entries with nothing linking them, so a model change
   edits both. **Follow-on fix, same day**: the first live dispatch refused `--out` — the
   workspace guard keyed on `role.may_write` plus a Claude host alone, and `implementer` may
-  write. The guard now also requires the resolved backend not be `result-only`, and
-  `validate_policy` requires every account-bound backend to be `result-only`. That is not a
+  write. The guard was first narrowed to require the resolved backend not be `result-only`, with
+  `validate_policy` enforcing that for account-bound backends. **Both were deleted on
+  2026-09-18** when `--write` replaced the workspace idea they described: the only real
+  conflict is `--write` with `--out`, checked directly. `write_mode` is documentation again. That is not a
   loophole: a team backend is reachable by CLI dispatch only, and a CLI-dispatched Claude
   worker runs `--tools Read,Grep,Glob`, so it never gets a workspace for the flag to conflict
   with. Verified end to end: team session quota 0% → 8%, private unchanged, snapshot

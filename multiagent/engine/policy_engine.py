@@ -467,6 +467,10 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
     target = Path(str(task.get("target_repo", "")))
     if not target.is_absolute():
         errors.append("target_repo must be absolute")
+    if "read_scope" in task:
+        readable = resolve_read_scope(task["read_scope"])
+        if not readable.allowed:
+            errors.append(f"read_scope: {readable.reason}")
     if not isinstance(task.get("write_scope"), list):
         errors.append("write_scope must be a list")
     else:
@@ -1387,6 +1391,7 @@ def worker_cli_args(
 def build_worker_command(
     backend: dict[str, Any], host_mode: str, target_repo: Path, role: str | None = None,
     capture_result: bool = False, write_settings: Path | None = None,
+    read_roots: list[str] | None = None,
 ) -> tuple[list[str], WorkerCommand]:
     """Resolve a worker launch specification into a native or WSL argv.
 
@@ -1396,6 +1401,18 @@ def build_worker_command(
     default-deny -- an unmatched path has nothing to approve it and no handler to ask.
     """
     spec = worker_cli_args(backend, role, capture_result)
+    if read_roots:
+        if spec.program != "claude":
+            # Codex's read-only sandbox already reads the whole filesystem (measured), so a
+            # read root is a Claude concept. Silently accepting it elsewhere would suggest the
+            # engine had narrowed something it never touched.
+            raise NotImplementedError(
+                f"read_scope has no meaning for {spec.program}: its sandbox governs reads"
+            )
+        added: list[str] = []
+        for root in read_roots:
+            added += ["--add-dir", root]
+        spec = dataclasses.replace(spec, args=[*added, *spec.args])
     if write_settings is not None:
         if spec.program != "claude":
             raise NotImplementedError(
@@ -1582,6 +1599,55 @@ def _out_prelaunch_check(
     return resolved
 
 
+def resolve_read_scope(entries: Any) -> Decision:
+    """Resolve a contract's ``read_scope`` into canonical directories a worker may read.
+
+    This is the first mechanism by which a worker reads outside ``target_repo``, and it has no
+    enclosing boundary the way ``write_scope`` does -- ``_is_in_scope`` can reject a write path
+    for leaving the repository, while a read root's whole purpose is to be elsewhere. So the
+    rules are its own, and they authorize rather than contain: what stops a worker reading
+    through a symlink out of an approved root is the CLI resolving each path at read time
+    (measured), not anything here.
+
+    Returns
+    -------
+    Decision
+        ``details["roots"]`` is the canonical directory list, in contract order.
+    """
+    if entries is None:
+        return Decision(True, "no read_scope declared", {"roots": []})
+    if not isinstance(entries, list):
+        return Decision(False, "read_scope must be a list")
+    protected = [Path(location).expanduser() for location in PROTECTED_READ_LOCATIONS]
+    roots: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str) or not entry.strip():
+            return Decision(False, f"read_scope entry must be a non-empty string: {entry!r}")
+        segments = entry.replace("\\", "/").split("/")
+        for segment in segments[1:] if segments[:1] == [""] else segments:
+            if segment in {"", ".", ".."}:
+                return Decision(False, f"read_scope entry may not contain {segment!r}: {entry}")
+        candidate = Path(_scope_root(entry)).expanduser()
+        if not candidate.is_absolute():
+            return Decision(False, f"read_scope entry must be absolute: {entry}")
+        resolved = candidate.resolve()
+        if not resolved.is_dir():
+            return Decision(False, f"read_scope entry is not an existing directory: {entry}")
+        if resolved == Path(resolved.anchor) or resolved == Path.home():
+            return Decision(False, f"read_scope entry is too broad: {resolved}")
+        for location in protected:
+            reference = location.resolve() if location.exists() else location
+            if resolved == reference or reference in resolved.parents \
+                    or resolved in reference.parents:
+                return Decision(
+                    False,
+                    f"read_scope entry {resolved} is, contains, or sits inside {reference}, "
+                    "which holds credentials or agent configuration",
+                )
+        roots.append(str(resolved))
+    return Decision(True, f"{len(roots)} read root(s) authorized", {"roots": roots})
+
+
 def resolve_write_target(
     target_repo: str | Path, path: str, task: dict[str, Any], task_dir: Path | None = None
 ) -> Decision:
@@ -1670,6 +1736,36 @@ def resolve_write_target(
                 "parent must already be there",
             )
     return Decision(True, f"write target accepted ({kind})", {"path": str(destination), "kind": kind})
+
+
+#: Managed settings merge into a worker's permissions even under ``--restricted``, which is the
+#: one documented way the generated allowlist stops being the whole authority. Measured
+#: 2026-09-18: user- and project-scope grants are both ignored under ``--restricted`` (a control
+#: without the flag applied the same grant), so these paths are the only remaining source.
+#: An additional read root may not stand in any relation -- equal, ancestor, or descendant -- to
+#: one of these. It is a guard against an obviously wrong entry, not a secret boundary: an
+#: ordinary project directory can hold credentials of its own and nothing here detects that.
+PROTECTED_READ_LOCATIONS = (
+    "~/.claude", "~/.claude-team", "~/.codex", "~/.gemini", "~/.copilot", "~/.orca",
+    "~/.agents", "~/.ssh", "~/.gnupg", "~/.config", "~/.aws", "~/.mcp.json", "~/.npmrc",
+)
+
+MANAGED_SETTINGS_PATHS = (
+    Path("/etc/claude-code/managed-settings.json"),
+    Path("/usr/local/etc/claude-code/managed-settings.json"),
+    Path("/Library/Application Support/ClaudeCode/managed-settings.json"),
+)
+
+
+def managed_settings_present() -> Path | None:
+    """Return a managed-settings file if one exists, else ``None``."""
+    for candidate in MANAGED_SETTINGS_PATHS:
+        try:
+            if candidate.exists():
+                return candidate
+        except OSError:  # pragma: no cover - unreadable mount
+            continue
+    return None
 
 
 def write_permission_settings(destination: str | Path, kind: str) -> dict[str, Any]:
@@ -1813,8 +1909,20 @@ def restore_write(task_dir: Path, dispatch_id: str) -> Decision:
 
     Refuses when the destination no longer matches what was recorded *after* the run: something
     else has touched it since, and replacing it blindly would destroy that work rather than the
-    worker's.
+    worker's. The comparison and the replacement run under the task's lock, because a check
+    followed by an unlocked delete is exactly the window in which a concurrent writer's work
+    disappears between the two.
+
+    The lock binds cooperating engine operations on this task. It does not stop an editor or a
+    hand-run command, so the guarantee is "no other dispatch or restore interleaves", not
+    "nobody else can touch the file".
     """
+    with _lease_lock(task_dir):
+        return _restore_write_locked(task_dir, dispatch_id)
+
+
+def _restore_write_locked(task_dir: Path, dispatch_id: str) -> Decision:
+    """The body of :func:`restore_write`, run with the task lock held."""
     record_path = _state_path(task_dir, "outputs", dispatch_id, ".json")
     if not record_path.exists():
         return Decision(False, f"no dispatch record at {record_path}")
@@ -1992,6 +2100,17 @@ def dispatch_worker(
             False, "dispatch needs the contract path so every state write can recheck it"
         ).as_dict(), indent=2), file=sys.stderr)
         return 2
+    read_scope = resolve_read_scope(task.get("read_scope"))
+    if not read_scope.allowed:
+        print(json.dumps(read_scope.as_dict(), indent=2), file=sys.stderr)
+        return 2
+    read_roots: list[str] = (read_scope.details or {})["roots"]
+    if read_roots and host_mode != "native":
+        print(json.dumps(Decision(
+            False, f"read_scope is not implemented for --host {host_mode}: the launcher "
+                   "translates only target_repo, so these paths would not resolve"
+        ).as_dict(), indent=2), file=sys.stderr)
+        return 2
     destination: Path | None = None
     write_target: Path | None = None
     write_kind: str | None = None
@@ -2012,6 +2131,17 @@ def dispatch_worker(
         if not bundle.roles.get(role, {}).get("may_write"):
             print(json.dumps(Decision(
                 False, f"role {role} may not write; --write is refused"
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
+        managed = managed_settings_present()
+        if managed is not None:
+            # The generated allowlist is the boundary only while it is the whole authority.
+            # A managed file merges into it, so the engine refuses rather than enforcing
+            # something it cannot describe.
+            print(json.dumps(Decision(
+                False,
+                f"--write refused: managed settings at {managed} merge into the worker's "
+                "permissions, so the generated allowlist would not be the whole authority",
             ).as_dict(), indent=2), file=sys.stderr)
             return 2
         resolved_write = resolve_write_target(task["target_repo"], write_path, task, task_dir)
@@ -2076,7 +2206,7 @@ def dispatch_worker(
     baseline: dict[str, Any] | None = None
     command, spec = build_worker_command(
         backend, host_mode, target_repo, role, capture_result=out_path is not None,
-        write_settings=write_settings_path,
+        write_settings=write_settings_path, read_roots=read_roots,
     )
     if dry_run:
         print(json.dumps(
@@ -2090,6 +2220,7 @@ def dispatch_worker(
                 "config_dir": spec.env.get("CLAUDE_CONFIG_DIR"),
                 "probe": probe_reason,
                 "out": None if destination is None else str(destination),
+                "read_roots": read_roots,
                 # Named in the preview because the real command differs: write mode adds
                 # `--restricted`, the file tools, and a generated permission file. A dry run
                 # that showed the read-only argv would preview something that never runs.
@@ -2141,7 +2272,7 @@ def dispatch_worker(
             )
             command, spec = build_worker_command(
                 backend, host_mode, target_repo, role, capture_result=False,
-                write_settings=write_settings_path,
+                write_settings=write_settings_path, read_roots=read_roots,
             )
         attempt = _run_worker(
             command, spec, task, role, brief_path, target_repo, backend,
@@ -2176,7 +2307,7 @@ def dispatch_worker(
                 backend = fallback.details
                 command, spec = build_worker_command(
                     backend, host_mode, target_repo, role, capture_result=out_path is not None,
-                    write_settings=write_settings_path,
+                    write_settings=write_settings_path, read_roots=read_roots,
                 )
                 attempt = _run_worker(command, spec, task, role, brief_path, target_repo, backend)
                 _record_attempt(

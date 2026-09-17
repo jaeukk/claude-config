@@ -182,6 +182,22 @@ enforcing nothing. That is the boundary — not the prompt, and not the
 conductor's trust. A malformed pattern would fail *open*, so destinations containing `*?[]{}!` are
 refused rather than escaped.
 
+Nothing under `~/.claude` can be a `--write` destination: the CLI gates those paths as
+sensitive and asks a human, whatever the allowlist says, so a worker cannot edit this
+installation. `--write` is also refused outright while a managed-settings file exists, because
+managed settings merge into the worker's permissions and the generated allowlist would no longer
+be the whole authority. User- and project-scope settings do not merge under `--restricted`
+(measured 2026-09-18, with a control that applied the same grant without the flag).
+
+**Reading outside the repository.** A worker's cwd is `target_repo` and nothing else is readable,
+so a brief pointing at a PDF beside the task fails and the worker reports that as its own refusal.
+A contract may declare `read_scope`, a list of absolute existing directories, which the engine
+passes as `--add-dir`. Entries are canonicalized, must not be `$HOME` or a filesystem root, and are
+refused if they are, contain, or sit inside a credential or agent-configuration directory. It is
+Claude-only — a Codex worker's sandbox already reads the filesystem — and refused under
+`--host wsl`. Note that `--add-dir` grants **write** as well as read, so a read root is writable
+by a worker that also has `--write`.
+
 Before launch the engine copies the destination into `writes/<dispatch_id>.before` and verifies the
 copy, so `restore-write --dispatch-id <id>` can put it back; a destination that changed after the
 run was recorded refuses to restore rather than overwriting whoever changed it. Afterwards
