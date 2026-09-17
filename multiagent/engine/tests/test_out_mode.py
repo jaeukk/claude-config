@@ -1215,18 +1215,49 @@ class InterruptedWriteTest(unittest.TestCase):
         self.assertEqual(record["status"], "recovered")
         self.assertTrue(record["after"])
 
-        # A later dispatch's restore is no longer blocked by it.
+        # A later dispatch against the SAME destination must not be blocked by the retired
+        # record -- a different destination would not exercise the blocking this test exists
+        # to prove.
         later = "1" * 32
-        other = self.root / "other.md"
-        other.write_text("x", encoding="utf-8")
-        captured = pe.capture_write_baseline(self.task_dir, later, other, "file")
+        captured = pe.capture_write_baseline(self.task_dir, later, self.target, "file")
+        self.target.write_text("the later dispatch wrote this", encoding="utf-8")
         pe._state_path(self.task_dir, "outputs", later, ".json").write_text(
             json.dumps({"dispatch_id": later, "status": "succeeded", "mode": "write",
-                        "destination": str(other), "baseline": captured.details,
-                        "after": captured.details["files"]}),
+                        "destination": str(self.target), "baseline": captured.details,
+                        "after": {"": {"sha256": pe.hashlib.sha256(
+                            b"the later dispatch wrote this").hexdigest(), "bytes": 29}}}),
             encoding="utf-8",
         )
         self.assertTrue(pe.restore_write(self.task_dir, later).allowed)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "before")
+
+    def test_an_uninspectable_destination_after_recovery_blocks_the_next_restore(self):
+        # The restore path inspects the destination twice -- once to compare against the
+        # recorded after-state, once after replacing it -- and the baseline in between. Only
+        # the second inspection *of the destination* is the post-recovery one.
+        real = pe._write_manifest
+        seen = {"destination": 0}
+
+        def flaky(path, kind):
+            if path == self.target:
+                seen["destination"] += 1
+                if seen["destination"] == 2:
+                    return pe.Decision(False, "transient read failure")
+            return real(path, kind)
+
+        with mock.patch.object(pe, "_write_manifest", flaky):
+            self.assertTrue(
+                pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True).allowed
+            )
+        record = json.loads(
+            pe._state_path(self.task_dir, "outputs", self.dispatch, ".json")
+            .read_text(encoding="utf-8")
+        )
+        self.assertNotIn("after", record)
+        self.assertIn("transient read failure", record["after_unknown"])
+        again = pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True)
+        self.assertFalse(again.allowed)
+        self.assertIn("could not be inspected", again.reason)
 
     def test_repeating_a_recovery_after_later_edits_is_refused(self):
         self.assertTrue(pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True).allowed)

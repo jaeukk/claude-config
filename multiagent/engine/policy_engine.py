@@ -2079,6 +2079,13 @@ def _restore_write_locked(
         return Decision(False, "this dispatch recorded no write baseline")
     destination = Path(record["destination"])
     kind = baseline["kind"]
+    if record.get("after_unknown"):
+        return Decision(
+            False,
+            f"dispatch {dispatch_id} was restored but its destination could not be inspected "
+            f"afterwards ({record['after_unknown']}), so there is no state to compare against; "
+            "inspect it by hand before restoring again",
+        )
     current = write_change_set({"files": record.get("after", {})}, destination, kind)
     if record.get("status") == "in_flight" and assume_stopped:
         # No after-state was ever recorded, so there is nothing to compare against. The
@@ -2137,7 +2144,16 @@ def _restore_write_locked(
         restored = _write_manifest(destination, kind)
         record["status"] = "recovered"
         record["recovered_at"] = utc_now()
-        record["after"] = (restored.details or {}).get("files", {}) if restored.allowed else {}
+        record.pop("after_unknown", None)
+        if restored.allowed:
+            record["after"] = (restored.details or {}).get("files", {})
+        else:
+            # An empty manifest would read as "the destination is known to be empty", and a
+            # later restore would then compare a deleted file against `{}`, accept it, and
+            # resurrect the baseline over whatever happened since. Unknown is recorded as
+            # unknown, and the next restore refuses until someone looks.
+            record.pop("after", None)
+            record["after_unknown"] = restored.reason
         staging = record_path.with_suffix(".json.partial")
         staging.write_text(json.dumps(record, indent=2), encoding="utf-8")
         staging.replace(record_path)
