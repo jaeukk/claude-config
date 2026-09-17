@@ -14,6 +14,8 @@ sys.path.insert(0, str(ROOT / "engine"))
 
 from policy_engine import (  # noqa: E402
     OBSERVED_AUTHOR_FILE,
+    observed_author_families,
+    record_contributing_family,
     PRODUCING_ROLES,
     authorize_action,
     load_document,
@@ -79,10 +81,10 @@ def record_observed_author(task_path: Path, family: str, source: str) -> None:
     source:
         Human-readable provenance, e.g. ``implementer via mcp__codex__codex``.
     """
-    payload = {"family": family, "source": source}
-    (task_path.parent / OBSERVED_AUTHOR_FILE).write_text(
-        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-    )
+    # Accumulates. A native worker of one family writing over another family's retained
+    # output leaves both in the artifact, and keeping only the latest would erase the earlier
+    # contributor -- after which a reviewer of that family looks independent and is not.
+    record_contributing_family(task_path.parent, family, source)
 
 
 def observed_author(task_path: Path, task: dict[str, Any], bundle: Any) -> str | None:
@@ -94,9 +96,15 @@ def observed_author(task_path: Path, task: dict[str, Any], bundle: Any) -> str |
     sidecar = task_path.parent / OBSERVED_AUTHOR_FILE
     if sidecar.exists():
         try:
-            return str(json.loads(sidecar.read_text(encoding="utf-8")).get("family"))
-        except (json.JSONDecodeError, ValueError):
+            families = observed_author_families(task_path.parent)
+        except Exception:
             return None
+        if len(families) > 1:
+            # Mixed authorship has no independent reviewer. Returning a single family here
+            # would name one that shares a family with part of the artifact, so the caller
+            # is given a value no candidate can match and the spawn is denied.
+            return "mixed"
+        return families[0] if families else None
     backend = task.get("conductor", {}).get("backend")
     entry = bundle.backends.get(backend) if backend else None
     return str(entry["family"]) if entry else None

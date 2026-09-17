@@ -650,6 +650,15 @@ class OutDispatchTest(unittest.TestCase):
         record = json.loads(self.records()[0].read_text(encoding="utf-8"))
         self.assertEqual(record["status"], "unknown")
 
+    def test_a_mixed_authorship_artifact_blocks_the_reviewer(self):
+        # Both families' output is in the artifact, so every candidate shares a family with
+        # part of what it would review. Picking one anyway is the silent failure to avoid.
+        pe.record_contributing_family(self.task_dir, "claude", "implementer")
+        pe.record_contributing_family(self.task_dir, "codex", "implementer --write")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
     def test_write_and_out_together_are_refused(self):
         # Two authorities over one dispatch's result, with no rule for which wins.
         code, runner = self.dispatch_write("docs/note.md", out="docs/note.md")
@@ -1014,6 +1023,77 @@ class WritePermissionSettingsTest(unittest.TestCase):
                 self.assertFalse(
                     any(fnmatch.fnmatch(path, pattern) for pattern in patterns), path
                 )
+
+
+class WorkerProfileTest(unittest.TestCase):
+    """What a dispatched Claude worker inherits, and what it is told instead."""
+
+    def spec(self):
+        return pe._claude_cli({"backend": "claude-core", "host": "claude-code",
+                               "family": "claude", "model": "m", "effort": "high"})
+
+    def test_every_claude_worker_is_restricted(self):
+        # Without this the worker picks up the operator's plugins, hooks and permission
+        # entries -- which is how a coding persona was reaching literature-note work.
+        self.assertIn("--restricted", self.spec().args)
+
+    def test_the_baseline_replaces_what_restricted_removes(self):
+        args = self.spec().args
+        self.assertIn("--append-system-prompt", args)
+        prompt = args[args.index("--append-system-prompt") + 1]
+        self.assertIn("American spelling", prompt)
+        self.assertIn("one-shot worker", prompt)
+
+    def test_the_write_branch_does_not_double_the_flag(self):
+        backend = {"backend": "claude-core", "host": "claude-code", "family": "claude",
+                   "model": "m", "effort": "high"}
+        _, spec = pe.build_worker_command(
+            backend, "native", Path("/repo"), "implementer",
+            write_settings=Path("/tmp/generated.json"),
+        )
+        self.assertEqual(spec.args.count("--restricted"), 1)
+        self.assertIn("Read,Grep,Glob,Write,Edit,NotebookEdit", spec.args)
+
+
+class ContributingFamiliesTest(unittest.TestCase):
+    """Authorship accumulates, and a mixed artifact has no independent reviewer."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_a_second_family_is_added_not_substituted(self):
+        pe.record_contributing_family(self.dir, "codex", "implementer via dispatch-worker")
+        pe.record_contributing_family(self.dir, "claude", "implementer via dispatch-worker --write")
+        self.assertEqual(pe.observed_author_families(self.dir), ["claude", "codex"])
+        record = json.loads((self.dir / pe.OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(record["family"], "claude")  # latest, for older readers
+        self.assertEqual(record["families"], ["claude", "codex"])
+
+    def test_the_same_family_twice_stays_one_entry(self):
+        pe.record_contributing_family(self.dir, "claude", "a")
+        pe.record_contributing_family(self.dir, "claude", "b")
+        self.assertEqual(pe.observed_author_families(self.dir), ["claude"])
+
+    def test_an_older_single_family_record_still_reads(self):
+        (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text(
+            json.dumps({"family": "codex", "source": "implementer"}), encoding="utf-8"
+        )
+        self.assertEqual(pe.observed_author_families(self.dir), ["codex"])
+
+    def test_absence_is_empty_and_damage_raises(self):
+        self.assertEqual(pe.observed_author_families(self.dir), [])
+        (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text("{ not json", encoding="utf-8")
+        with self.assertRaises(pe.UnreadableAuthorRecord):
+            pe.observed_author_families(self.dir)
+
+    def test_an_unknown_family_in_the_list_raises(self):
+        (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text(
+            json.dumps({"families": ["claude", "acme"]}), encoding="utf-8"
+        )
+        with self.assertRaises(pe.UnreadableAuthorRecord):
+            pe.observed_author_families(self.dir)
 
 
 class ReadScopeTest(unittest.TestCase):

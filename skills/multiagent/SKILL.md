@@ -211,6 +211,26 @@ failure — a failed attempt that changed files still authored those changes.
 `--out` changes nothing about the worker: same `--tools Read,Grep,Glob --strict-mcp-config`, same
 prompt, and the worker is never told the destination.
 
+### What a dispatched worker inherits
+
+Nothing from your profile. Every CLI-dispatched Claude worker runs `--restricted`, which drops
+user, project and local settings — so plugins, hooks and permission entries stay out of a worker
+that never asked for them, and the input cost of a trivial dispatch roughly halves. It also drops
+the global `CLAUDE.md`, which is replaced deliberately: the engine appends a composed baseline
+(identity, American spelling, and that a one-shot worker states assumptions in its result instead
+of asking). Everything else the old inheritance carried — vault layout, HPC schedulers, Zotero —
+belongs in the brief that needs it. A worker cannot *run* `qsub`, but it can write a job script,
+so "unreachable to execute" is not "irrelevant to author".
+
+### Authorship accumulates
+
+The sidecar records every family that produced part of the artifact, not just the last one. A
+Claude `--write` over retained Codex output leaves both in the file, and a record that kept only
+the latest writer would let a Codex critic review work its own family partly wrote. When more than
+one family contributed, `critic` and `verifier` are **refused**: no candidate is independent of all
+of it, so the artifact has to be split or reviewed by hand. Older single-family sidecars read as a
+one-element list and mean exactly what they meant.
+
 ## Host adapter contract
 
 Roles and bindings are model-independent; **dispatch is not**. Concurrency, batching, context

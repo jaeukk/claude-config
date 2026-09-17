@@ -1325,7 +1325,13 @@ def _claude_cli(
     return WorkerCommand(
         "claude",
         [
+            # `--restricted` drops user, project and local settings, so the operator's plugins,
+            # hooks and permission entries stop leaking into a worker that never asked for
+            # them. Measured: it also halves the input tokens of a trivial dispatch. What it
+            # takes away -- the global CLAUDE.md -- is replaced deliberately below.
+            "--restricted",
             "--tools", "Read,Grep,Glob", "--strict-mcp-config",
+            "--append-system-prompt", WORKER_BASELINE_PROMPT,
             "--effort", str(backend["effort"]), "--model", str(backend["model"]), "-p",
             "--output-format", "json",
         ],
@@ -1423,7 +1429,7 @@ def build_worker_command(
         args[args.index("Read,Grep,Glob")] = "Read,Grep,Glob,Write,Edit,NotebookEdit"
         spec = dataclasses.replace(
             spec,
-            args=["--restricted", "--settings", str(write_settings), *args],
+            args=["--settings", str(write_settings), *args],
             enforcement="restricted-tool-surface + single-destination write allowlist",
         )
     if host_mode == "native":
@@ -1476,6 +1482,60 @@ def build_worker_command(
 
 class UnreadableAuthorRecord(Exception):
     """The authorship sidecar exists but cannot be trusted."""
+
+
+def observed_author_families(contract_dir: Path) -> list[str]:
+    """Return every family recorded as having produced part of this task's artifact.
+
+    Authorship accumulates. A failed Claude ``--write`` over retained Codex work leaves both
+    families' output in the artifact, and a record that kept only the last writer would erase
+    the Codex contribution -- after which a Codex critic would be picked to review work its own
+    family partly wrote. So the sidecar carries a list, and independence is judged against all
+    of it.
+
+    Older sidecars carry only ``family``; they read as a single-element list, so a record
+    written before this change keeps meaning exactly what it meant.
+    """
+    sidecar = contract_dir / OBSERVED_AUTHOR_FILE
+    if not sidecar.exists():
+        return []
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise UnreadableAuthorRecord(f"{sidecar} cannot be read: {error}") from error
+    if not isinstance(payload, dict):
+        raise UnreadableAuthorRecord(f"{sidecar} is not an object")
+    recorded = payload.get("families")
+    if recorded is None:
+        single = payload.get("family")
+        recorded = [single] if single is not None else []
+    if not isinstance(recorded, list) or not recorded:
+        raise UnreadableAuthorRecord(f"{sidecar} records no usable family: {recorded!r}")
+    for family in recorded:
+        if not isinstance(family, str) or family not in KNOWN_FAMILIES:
+            raise UnreadableAuthorRecord(f"{sidecar} records an unknown family: {family!r}")
+    return sorted(set(recorded))
+
+
+def record_contributing_family(contract_dir: Path, family: str, source: str) -> None:
+    """Add one family to the authorship record, keeping whoever was already there.
+
+    Read-modify-write, because the point is accumulation: overwriting is what loses the
+    earlier contributor. Callers hold the task lock, which is what makes this safe.
+    """
+    existing: list[str] = []
+    try:
+        existing = observed_author_families(contract_dir)
+    except UnreadableAuthorRecord:
+        # A damaged record is not a reason to drop the new fact; the reader still refuses to
+        # wave a review through, because the result here is a record it can parse but whose
+        # history it cannot vouch for.
+        existing = []
+    families = sorted(set(existing) | {family})
+    _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
+        json.dumps({"family": family, "families": families, "source": source}, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def observed_author_family(contract_dir: Path) -> str | None:
@@ -1748,6 +1808,20 @@ def resolve_write_target(
 PROTECTED_READ_LOCATIONS = (
     "~/.claude", "~/.claude-team", "~/.codex", "~/.gemini", "~/.copilot", "~/.orca",
     "~/.agents", "~/.ssh", "~/.gnupg", "~/.config", "~/.aws", "~/.mcp.json", "~/.npmrc",
+)
+
+#: What a dispatched worker is told, in place of whatever the operator's profile happened to
+#: contain. Composed rather than inherited: under ``--restricted`` a worker no longer picks up
+#: user settings, which is how the ponytail coding persona was reaching literature-note work
+#: (measured 2026-09-17: a normal worker answers yes to "do your instructions contain a ponytail
+#: rule", a restricted one answers no). Everything else the old inheritance carried is either
+#: brief-specific -- vault layout, HPC schedulers, Zotero -- or unreachable on a read-only tool
+#: surface, so it belongs in the brief that needs it, not here.
+WORKER_BASELINE_PROMPT = (
+    "You are working for Jaeuk Kim, PhD, a physics postdoc. Write in English with American "
+    "spelling, in everything you produce. You are a one-shot worker with no channel to ask "
+    "questions: state your assumptions explicitly and surface any uncertainty, conflict, or "
+    "missing input in your result rather than guessing silently."
 )
 
 MANAGED_SETTINGS_PATHS = (
@@ -2166,14 +2240,27 @@ def dispatch_worker(
     # not against what the contract asserts. The hook already does this for
     # natively-spawned reviewers; without it here, a stale author_family picks a
     # reviewer of the same family that actually wrote the code.
+    contributors: list[str] = []
     if role in {"critic", "verifier"} and contract_dir is not None:
         try:
-            seen = observed_author_family(contract_dir)
+            contributors = observed_author_families(contract_dir)
         except UnreadableAuthorRecord as error:
             print(json.dumps(Decision(
                 False, f"{role} blocked: {error}"
             ).as_dict(), indent=2), file=sys.stderr)
             return 2
+        if len(contributors) > 1:
+            # Two families' output in one artifact. Every candidate reviewer shares a family
+            # with part of what it would be reviewing, so there is no independent reviewer to
+            # pick -- and picking one anyway is exactly the silent failure this check exists
+            # to prevent. Split the artifact or review it by hand.
+            print(json.dumps(Decision(
+                False,
+                f"{role} blocked: this artifact has mixed authorship ("
+                f"{', '.join(contributors)}), so no candidate is independent of all of it",
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
+        seen = contributors[0] if contributors else None
         if seen is None:
             # No producing worker ran, so the conductor authored the artifact and
             # its family is the honest answer -- the same fallback the hook uses.
@@ -2392,10 +2479,9 @@ def dispatch_worker(
                 if not authorship.allowed:
                     print(f"warning: authorship not recorded: {authorship.reason}", file=sys.stderr)
                 else:
-                    _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
-                        json.dumps({"family": backend["family"],
-                                    "source": f"{role} via dispatch-worker --write"}, indent=2),
-                        encoding="utf-8",
+                    record_contributing_family(
+                        contract_dir, backend["family"],
+                        f"{role} via dispatch-worker --write",
                     )
             return 0 if write_status == "succeeded" else 2
         if status == 0 and role in PRODUCING_ROLES and contract_dir is not None:
@@ -2425,12 +2511,8 @@ def dispatch_worker(
                     f"warning: authorship not recorded: {authorship.reason}", file=sys.stderr
                 )
                 return status
-            _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
-                json.dumps(
-                    {"family": backend["family"], "source": f"{role} via dispatch-worker"}, indent=2
-                )
-                + "\n",
-                encoding="utf-8",
+            record_contributing_family(
+                contract_dir, backend["family"], f"{role} via dispatch-worker"
             )
         return status
     finally:
