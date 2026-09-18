@@ -1202,6 +1202,17 @@ class ContributingFamiliesTest(unittest.TestCase):
         with self.assertRaises(pe.UnreadableAuthorRecord):
             pe.observed_author_families(self.dir)
 
+    def test_a_present_but_null_families_key_is_damage_not_absence(self):
+        # `{"families": null}` must not read as an honest empty record: the key is there and
+        # unusable, which is exactly what keeps review blocked until someone reconciles it.
+        (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text(
+            json.dumps({"families": None}), encoding="utf-8"
+        )
+        with self.assertRaises(pe.UnreadableAuthorRecord):
+            pe.observed_author_families(self.dir)
+        (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text(json.dumps({}), encoding="utf-8")
+        self.assertEqual(pe.observed_author_families(self.dir), [])
+
     def test_an_unknown_family_in_the_list_raises(self):
         (self.dir / pe.OBSERVED_AUTHOR_FILE).write_text(
             json.dumps({"families": ["claude", "acme"]}), encoding="utf-8"
@@ -1410,6 +1421,63 @@ class InterruptedWriteTest(unittest.TestCase):
         decision = pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True)
         self.assertFalse(decision.allowed)
         self.assertIn("cannot be read", decision.reason)
+
+
+class HookObservedAuthorTest(unittest.TestCase):
+    """The hook must reach the same verdict as the engine, in the same order."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "claude_pretool", ENGINE / "adapters" / "claude_pretool.py"
+        )
+        cls.hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.hook)
+        cls.bundle = pe.load_policy(ROOT)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.task_path = Path(self.tmp.name) / "task.yaml"
+        self.addCleanup(self.tmp.cleanup)
+
+    def task(self, roles, approvals=(), author="claude"):
+        return {"roles_plan": list(roles), "author_family": author,
+                "approvals": {"user": list(approvals)},
+                "conductor": {"host": "claude-code", "backend": "claude-frontier"}}
+
+    def test_an_assertion_alone_does_not_stand_in_for_evidence(self):
+        # Round 9's counterexample: Claude conductor, critic-only plan, nothing observed,
+        # asserted codex, declared codex. The old hook returned "codex" and a native Claude
+        # critic passed both checks despite sharing the conductor's family.
+        pe.record_asserted_family(self.task_path.parent, "codex", "native")
+        seen = self.hook.observed_author(self.task_path, self.task(("critic",), author="codex"),
+                                         self.bundle)
+        self.assertEqual(seen, "mixed")  # conductor claude + asserted codex
+
+    def test_planned_producer_without_approval_is_none(self):
+        pe.record_asserted_family(self.task_path.parent, "codex", "native")
+        seen = self.hook.observed_author(self.task_path, self.task(("implementer", "critic")),
+                                         self.bundle)
+        self.assertIsNone(seen)
+
+    def test_planned_producer_with_approval_uses_the_assertion(self):
+        pe.record_asserted_family(self.task_path.parent, "codex", "native")
+        seen = self.hook.observed_author(
+            self.task_path, self.task(("implementer", "critic"), ("authorship_assertion",)),
+            self.bundle)
+        self.assertEqual(seen, "codex")
+
+    def test_an_empty_sidecar_still_falls_back_to_the_conductor(self):
+        # An existing object with no observed section reads the same as no sidecar.
+        self.task_path.parent.joinpath(pe.OBSERVED_AUTHOR_FILE).write_text("{}", encoding="utf-8")
+        seen = self.hook.observed_author(self.task_path, self.task(("critic",)), self.bundle)
+        self.assertEqual(seen, "claude")
+
+    def test_a_damaged_sidecar_is_none(self):
+        self.task_path.parent.joinpath(pe.OBSERVED_AUTHOR_FILE).write_text("{ nope", encoding="utf-8")
+        self.assertIsNone(self.hook.observed_author(self.task_path, self.task(("critic",)),
+                                                    self.bundle))
 
 
 class ReadScopeTest(unittest.TestCase):

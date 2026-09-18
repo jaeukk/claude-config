@@ -89,32 +89,46 @@ def record_observed_author(task_path: Path, family: str, source: str) -> None:
 
 
 def observed_author(task_path: Path, task: dict[str, Any], bundle: Any) -> str | None:
-    """Return the observed author family, or the conductor's when none ran.
+    """Return the one family a reviewer must differ from, ``"mixed"`` if there are several,
+    or ``None`` when independence cannot be established.
 
-    A task where no producing worker was dispatched was authored by the
-    conductor itself, so its backend family is the honest answer.
+    Same rule as the engine's dispatch check, in the same order: evidence first (observed
+    families), then -- only when a producer was planned and nothing was observed -- the
+    contract's recorded ``authorship_assertion`` approval together with asserted families,
+    then the conductor fallback for contracts that planned no producer. Assertions are
+    applied *after* that resolution, as exclusions only. Reading an assertion as evidence
+    here would let a conductor clear its own family's reviewer by asserting another family,
+    which is the bypass the engine refuses.
     """
-    sidecar = task_path.parent / OBSERVED_AUTHOR_FILE
-    if sidecar.exists():
-        try:
-            families = observed_author_families(task_path.parent)
-        except Exception:
+    contract_dir = task_path.parent
+    try:
+        observed = observed_author_families(contract_dir)
+    except Exception:
+        return None  # damaged record: deny, never guess
+    asserted = asserted_author_families(contract_dir)
+    planned = set(task.get("roles_plan", []) or []) & PRODUCING_ROLES
+    if observed:
+        contributors = list(observed)
+    elif planned:
+        approved = "authorship_assertion" in (task.get("approvals", {}).get("user") or [])
+        if not (approved and asserted):
             return None
-        families = sorted(set(families) | set(asserted_author_families(task_path.parent)))
-        if len(families) > 1:
-            # Mixed authorship -- observed, asserted, or both -- has no independent reviewer.
-            # Returning a single family here would name one that shares a family with part
-            # of the artifact, so the caller is given a value no candidate can match and the
-            # spawn is denied.
-            return "mixed"
-        return families[0] if families else None
-    if set(task.get("roles_plan", []) or []) & PRODUCING_ROLES:
-        # A producer was planned and none was observed. Falling back to the conductor's
-        # family here is a guess dressed as evidence; `None` makes the caller deny.
-        return None
-    backend = task.get("conductor", {}).get("backend")
-    entry = bundle.backends.get(backend) if backend else None
-    return str(entry["family"]) if entry else None
+        contributors = list(asserted)
+    else:
+        # No producer was planned and nothing observed: the conductor authored it. An
+        # existing sidecar with no observed section reads the same as no sidecar.
+        backend = task.get("conductor", {}).get("backend")
+        entry = bundle.backends.get(backend) if backend else None
+        if not entry:
+            return None
+        contributors = [str(entry["family"])]
+    excluded = sorted(set(contributors) | set(asserted))
+    if len(excluded) > 1:
+        # Mixed authorship -- observed, asserted, or both -- has no independent reviewer.
+        # Returning one family would name a candidate that shares a family with part of the
+        # artifact; a value no family can equal makes the caller deny.
+        return "mixed"
+    return excluded[0]
 
 
 def actor_role(event: dict[str, Any], task: dict[str, Any]) -> str:

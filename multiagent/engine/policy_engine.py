@@ -1513,15 +1513,16 @@ def observed_author_families(contract_dir: Path) -> list[str]:
             f"{sidecar} was rewritten over damaged history ({payload['damaged']}); "
             "reconcile authorship by hand before dispatching a reviewer"
         )
-    recorded = payload.get("families")
-    if recorded is None:
-        single = payload.get("family")
-        if single is None:
-            # No observed section at all. That is a record holding only assertions (or an
-            # empty one), which is a legitimate "nothing observed yet" -- not damage. Damage
-            # is an observed section that is present and unusable, handled below.
-            return []
-        recorded = [single]
+    if "families" in payload:
+        recorded = payload["families"]
+    elif "family" in payload:
+        recorded = [payload["family"]]
+    else:
+        # No observed section at all -- the key is absent, not present and null. That is a
+        # record holding only assertions (or an empty one): a legitimate "nothing observed
+        # yet", not damage. A key that is present but unusable is damage, handled below;
+        # collapsing the two would let a malformed record read as an honest empty one.
+        return []
     if not isinstance(recorded, list) or not recorded:
         raise UnreadableAuthorRecord(f"{sidecar} records no usable family: {recorded!r}")
     for family in recorded:
