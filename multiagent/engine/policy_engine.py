@@ -2427,6 +2427,23 @@ def dispatch_worker(
             False, "dispatch needs the contract path so every state write can recheck it"
         ).as_dict(), indent=2), file=sys.stderr)
         return 2
+    if not dry_run and task_dir is not None and contract_path is not None \
+            and Path(task_dir).resolve() != contract_path.parent.resolve():
+        # Everything a reviewer's admission depends on -- write reservations, lease-checked
+        # authorship, claimed worker slots -- is written under `task_dir`, while the hook can
+        # only look beside the contract. Round 13 walked the consequences of letting the two
+        # differ: a reviewer dispatched with a foreign task dir scans the wrong reservations,
+        # a producer's authorship silently fails its lease check and is never recorded, and
+        # running workers vanish from the ceiling the native path counts against. One
+        # location, enforced for every real dispatch, is checkable; a mapping is a second
+        # thing that can be wrong. A dry run touches no state and is exempt.
+        print(json.dumps(Decision(
+            False,
+            f"--task-dir must be the contract's own directory ({contract_path.parent}) for a "
+            f"real dispatch; {task_dir} is not, and state written there would be invisible "
+            "to the hook and to reviewers reading beside the contract",
+        ).as_dict(), indent=2), file=sys.stderr)
+        return 2
     read_scope = resolve_read_scope(task.get("read_scope"))
     if not read_scope.allowed:
         print(json.dumps(read_scope.as_dict(), indent=2), file=sys.stderr)
@@ -2509,7 +2526,7 @@ def dispatch_worker(
         # A dispatcher killed mid-write leaves changed files and never reaches the authorship
         # record, so the sidecar still names whoever wrote last time. Clearing a reviewer
         # against that is exactly the wrong-family review the check exists to prevent.
-        unresolved = _unresolved_write_reservations(task_dir)
+        unresolved = _unresolved_write_reservations(contract_dir)
         if unresolved:
             print(json.dumps(Decision(
                 False,

@@ -757,6 +757,46 @@ class OutDispatchTest(unittest.TestCase):
         self.assertEqual(code, 2)
         runner.assert_not_called()
 
+    def test_a_foreign_task_dir_is_refused_for_every_real_dispatch(self):
+        # Round 12: a write reservation landing where the hook never looks. Round 13: the
+        # same divergence also hides a reviewer's reservation scan, a producer's authorship
+        # (its lease check fails against the foreign lease and is silently skipped), and
+        # claimed worker slots. So every real dispatch is pinned, not only `--write`.
+        for role, write in (("implementer", "docs/note.md"), ("runner", None), ("critic", None)):
+            with self.subTest(role), tempfile.TemporaryDirectory() as elsewhere:
+                self.write_contract(role=role, author_family="claude")
+                foreign = Path(elsewhere)
+                pe.acquire_lease(foreign, "me", 300)
+                contract = pe.load_document(self.contract_path)
+                backend = {"backend": "claude-core", "host": "claude-code", "family": "claude",
+                           "model": "m", "effort": "high"}
+                runner = mock.Mock()
+                with mock.patch.object(pe, "_run_worker", runner), \
+                        mock.patch.object(pe, "_resolve_with_account",
+                                          return_value=(pe.Decision(True, "r", backend), "stub")), \
+                        mock.patch.object(pe.sys, "stdout"), mock.patch.object(pe.sys, "stderr"):
+                    code = pe.dispatch_worker(
+                        self.bundle, contract, role, self.brief, "native", False,
+                        None, foreign, self.task_dir, None, self.contract_path, 0, write,
+                    )
+                self.assertEqual(code, 2)
+                runner.assert_not_called()
+
+    def test_a_dry_run_with_a_foreign_task_dir_is_still_allowed(self):
+        # A dry run touches no state, so there is nothing to keep beside the contract.
+        with tempfile.TemporaryDirectory() as elsewhere:
+            contract = pe.load_document(self.contract_path)
+            backend = {"backend": "claude-core", "host": "claude-code", "family": "claude",
+                       "model": "m", "effort": "high"}
+            with mock.patch.object(pe, "_resolve_with_account",
+                                   return_value=(pe.Decision(True, "r", backend), "stub")), \
+                    mock.patch.object(pe.sys, "stdout"), mock.patch.object(pe.sys, "stderr"):
+                code = pe.dispatch_worker(
+                    self.bundle, contract, "runner", self.brief, "native", True,
+                    None, Path(elsewhere), self.task_dir, None, self.contract_path, 0, None,
+                )
+        self.assertEqual(code, 0)
+
     def test_write_and_out_together_are_refused(self):
         # Two authorities over one dispatch's result, with no rule for which wins.
         code, runner = self.dispatch_write("docs/note.md", out="docs/note.md")
@@ -1490,8 +1530,12 @@ class HookObservedAuthorTest(unittest.TestCase):
                 payload = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            reason = payload.get("hookSpecificOutput", {}).get("permissionDecisionReason")
+            output = payload.get("hookSpecificOutput", {})
+            reason = output.get("permissionDecisionReason")
             if reason:
+                # A reason is only a denial if the decision says so; a future allow/ask
+                # carrying explanatory text must not pass a test that claims a denial.
+                self.assertEqual(output.get("permissionDecision"), "deny")
                 return reason
         return None
 
