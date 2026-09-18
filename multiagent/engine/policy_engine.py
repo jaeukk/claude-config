@@ -2568,8 +2568,8 @@ def dispatch_worker(
             print(json.dumps(Decision(
                 False,
                 f"{role} blocked: the artifact's authorship is mixed ({', '.join(excluded)}"
-                f"{' -- observed plus asserted' if asserted and contributors != asserted else ''}), "
-                "so no candidate is independent of all of it",
+                f"{' -- observed plus asserted' if asserted and contributors != asserted else ''}); "
+                "mixed authorship is refused for review and needs manual reconciliation",
             ).as_dict(), indent=2), file=sys.stderr)
             return 2
         if seen is not None and seen != task.get("author_family"):

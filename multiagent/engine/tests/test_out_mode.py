@@ -1474,6 +1474,57 @@ class HookObservedAuthorTest(unittest.TestCase):
         seen = self.hook.observed_author(self.task_path, self.task(("critic",)), self.bundle)
         self.assertEqual(seen, "claude")
 
+    def run_handler(self, task, tool="mcp__codex__codex"):
+        """Drive the hook's `main()` with one event and return the denial reason, or None."""
+        import io
+        self.task_path.write_text(json.dumps(task), encoding="utf-8")
+        event = json.dumps({"tool_name": tool, "tool_input": {}})
+        out = io.StringIO()
+        with mock.patch.object(self.hook, "active_task_path", return_value=self.task_path), \
+                mock.patch.object(self.hook, "load_policy", return_value=self.bundle), \
+                mock.patch.object(self.hook.sys, "stdin", io.StringIO(event)), \
+                mock.patch.object(self.hook.sys, "stdout", out):
+            self.hook.main()
+        for line in out.getvalue().splitlines():
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            reason = payload.get("hookSpecificOutput", {}).get("permissionDecisionReason")
+            if reason:
+                return reason
+        return None
+
+    def full_task(self, roles, approvals=(), author="claude"):
+        return {"schema_version": 1, "task_id": "hooked", "status": "active",
+                "target_repo": str(self.task_path.parent), "write_scope": [],
+                "roles_plan": list(roles), "author_family": author,
+                "approvals": {"user": list(approvals)},
+                "conductor": {"host": "claude-code", "backend": "claude-frontier",
+                              "lease_owner": "me"},
+                "dispatch": {"current_role": "critic", "active_workers": 0}}
+
+    def test_the_caller_refuses_a_reviewer_while_a_write_has_no_outcome(self):
+        # Round 11's seam: the engine refused this on CLI dispatch, the hook did not, so an
+        # interrupted Codex write followed by a *native* Codex critic slipped through.
+        pe.record_contributing_family(self.task_path.parent, "claude", "implementer")
+        pe._state_path(self.task_path.parent, "outputs", "7" * 32, ".json").write_text(
+            json.dumps({"dispatch_id": "7" * 32, "status": "in_flight", "mode": "write",
+                        "destination": str(self.task_path.parent / "note.md")}),
+            encoding="utf-8",
+        )
+        reason = self.run_handler(self.full_task(("implementer", "critic")))
+        self.assertIsNotNone(reason)
+        self.assertIn("recorded no outcome", reason)
+
+    def test_the_caller_names_mixed_authorship_on_its_own_terms(self):
+        pe.record_contributing_family(self.task_path.parent, "claude", "implementer")
+        pe.record_asserted_family(self.task_path.parent, "codex", "native")
+        reason = self.run_handler(self.full_task(("implementer", "critic")))
+        self.assertIsNotNone(reason)
+        self.assertIn("mixed", reason)
+        self.assertNotIn("declares author_family", reason)
+
     def test_a_damaged_sidecar_is_none(self):
         self.task_path.parent.joinpath(pe.OBSERVED_AUTHOR_FILE).write_text("{ nope", encoding="utf-8")
         self.assertIsNone(self.hook.observed_author(self.task_path, self.task(("critic",)),

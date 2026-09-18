@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "engine"))
 
 from policy_engine import (  # noqa: E402
     OBSERVED_AUTHOR_FILE,
+    _unresolved_write_reservations,
     asserted_author_families,
     observed_author_families,
     record_contributing_family,
@@ -200,10 +201,37 @@ def main() -> int:
             # contradicts the observation is the interesting case: it would grant
             # a same-family reviewer while the contract claims otherwise.
             if role in {"critic", "verifier"}:
+                # Same refusal the engine applies on CLI dispatch: a write whose dispatcher
+                # died left changed files and never recorded which family changed them, so
+                # the sidecar still names the previous writer. Without this, an interrupted
+                # managed write defeats independence simply by reviewing natively instead.
+                pending = _unresolved_write_reservations(task_path.parent)
+                if pending:
+                    deny(
+                        f"{role} blocked: {', '.join(pending)} recorded no outcome, so what "
+                        "was written and by which family are both unknown; resolve them "
+                        "(restore-write --assume-stopped, or record the outcome) first"
+                    )
+                    return 0
                 seen = observed_author(task_path, task, bundle)
                 declared = task.get("author_family")
                 if seen is None:
-                    deny(f"{role} blocked: no observed author family recorded for this task")
+                    deny(
+                        f"{role} blocked: independence cannot be established -- a planned "
+                        "producer left no observed authorship (an assertion counts only with "
+                        "`authorship_assertion` under approvals.user), the authorship record "
+                        "is damaged, or the conductor backend is unknown"
+                    )
+                    return 0
+                if seen == "mixed":
+                    # Denied on its own terms. Left to the mismatch check below it would be
+                    # refused too -- no valid declaration equals "mixed" -- but the message
+                    # would blame the declaration for what is really mixed authorship.
+                    deny(
+                        f"{role} blocked: this artifact's authorship is mixed (observed and/or "
+                        "asserted); mixed authorship is refused for review and needs manual "
+                        "reconciliation"
+                    )
                     return 0
                 if declared != seen:
                     deny(
