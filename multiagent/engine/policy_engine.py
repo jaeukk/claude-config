@@ -2021,6 +2021,42 @@ def changed_anything(change_set: dict[str, Any]) -> bool:
     return bool(change_set["created"] or change_set["modified"] or change_set["removed"])
 
 
+def _unresolved_write_reservations(task_dir: Path | None) -> list[str]:
+    """Return dispatch ids whose write never recorded an outcome.
+
+    Each one means files may have changed with nothing recording who changed them, which is a
+    hole in authorship rather than merely a missing record.
+    """
+    if task_dir is None:
+        return []
+    outputs = task_dir / "outputs"
+    if not outputs.is_dir():
+        return []
+    pending: list[str] = []
+    for record in sorted(outputs.glob("*.json")):
+        try:
+            payload = json.loads(record.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pending.append(record.stem)
+            continue
+        if isinstance(payload, dict) and payload.get("status") == "in_flight":
+            pending.append(str(payload.get("dispatch_id") or record.stem))
+    return pending
+
+
+def _destinations_overlap(one: Any, other: Any) -> bool:
+    """Whether two write destinations can touch the same bytes.
+
+    String equality is not enough: a live worker writing ``docs/note.md`` does not equal
+    ``docs``, yet restoring the directory would take its file with it. Containment either way
+    counts.
+    """
+    if not isinstance(one, str) or not isinstance(other, str):
+        return False
+    first, second = Path(one), Path(other)
+    return first == second or first in second.parents or second in first.parents
+
+
 def restore_write(task_dir: Path, dispatch_id: str, assume_stopped: bool = False) -> Decision:
     """Put a ``--write`` destination back to its recorded baseline.
 
@@ -2061,11 +2097,12 @@ def _restore_write_locked(
             # very destination, and stepping past it is how a live worker's changes vanish.
             return Decision(False, f"{other} cannot be read ({error}); not restoring blind")
         if neighbor.get("status") == "in_flight" \
-                and neighbor.get("destination") == destination_now:
+                and _destinations_overlap(neighbor.get("destination"), destination_now):
             return Decision(
                 False,
-                f"dispatch {neighbor.get('dispatch_id')} is writing {destination_now} right "
-                "now; restoring would discard whatever it has written",
+                f"dispatch {neighbor.get('dispatch_id')} is writing "
+                f"{neighbor.get('destination')} right now, which overlaps {destination_now}; "
+                "restoring would discard whatever it has written",
             )
     if record.get("status") == "in_flight" and not assume_stopped:
         return Decision(
@@ -2082,9 +2119,11 @@ def _restore_write_locked(
     if record.get("after_unknown"):
         return Decision(
             False,
-            f"dispatch {dispatch_id} was restored but its destination could not be inspected "
-            f"afterwards ({record['after_unknown']}), so there is no state to compare against; "
-            "inspect it by hand before restoring again",
+            f"dispatch {dispatch_id} was restored, but its destination could not be inspected "
+            f"afterwards ({record['after_unknown']}), so no post-recovery state was ever "
+            "recorded. Automatic restore is not available for this dispatch again -- the "
+            "missing observation cannot be reconstructed by looking now. The recorded baseline "
+            f"path is {baseline.get('baseline')}, if the destination needs putting back by hand.",
         )
     current = write_change_set({"files": record.get("after", {})}, destination, kind)
     if record.get("status") == "in_flight" and assume_stopped:
@@ -2367,6 +2406,17 @@ def dispatch_worker(
                 "permissions, so the generated allowlist would not be the whole authority",
             ).as_dict(), indent=2), file=sys.stderr)
             return 2
+        for root in read_roots:
+            # `--add-dir` grants write as well as read, so a read root outside the destination
+            # is a second writable place the baseline never covers and the change set never
+            # reports. Refused rather than documented.
+            if not _destinations_overlap(root, str(Path(task["target_repo"]) / write_path)):
+                print(json.dumps(Decision(
+                    False,
+                    f"--write with a read root outside the destination: {root} would also be "
+                    "writable, outside the baseline and the recorded change set",
+                ).as_dict(), indent=2), file=sys.stderr)
+                return 2
         resolved_write = resolve_write_target(task["target_repo"], write_path, task, task_dir)
         if not resolved_write.allowed:
             print(json.dumps(resolved_write.as_dict(), indent=2), file=sys.stderr)
@@ -2391,6 +2441,18 @@ def dispatch_worker(
     # reviewer of the same family that actually wrote the code.
     contributors: list[str] = []
     if role in {"critic", "verifier"} and contract_dir is not None:
+        # A dispatcher killed mid-write leaves changed files and never reaches the authorship
+        # record, so the sidecar still names whoever wrote last time. Clearing a reviewer
+        # against that is exactly the wrong-family review the check exists to prevent.
+        unresolved = _unresolved_write_reservations(task_dir)
+        if unresolved:
+            print(json.dumps(Decision(
+                False,
+                f"{role} blocked: {', '.join(unresolved)} recorded no outcome, so what they "
+                "wrote and which family wrote it are both unknown; resolve them "
+                "(restore-write --assume-stopped, or record the outcome) before reviewing",
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
         try:
             contributors = observed_author_families(contract_dir)
         except UnreadableAuthorRecord as error:
@@ -2632,8 +2694,14 @@ def dispatch_worker(
                 "backend": backend["backend"], "family": backend["family"],
                 "account": backend.get("account", "private"), "model": backend.get("model"),
                 "attempt": attempt_number, "changes": changes, "baseline": baseline,
-                "after": (after.details or {}).get("files", {}) if after.allowed else {},
             }
+            if after.allowed:
+                record["after"] = (after.details or {}).get("files", {})
+            else:
+                # Same rule as the recovery path: an empty manifest would read as "known to be
+                # empty", and a later restore would compare a deleted destination against it,
+                # accept, and resurrect the baseline over that deletion.
+                record["after_unknown"] = after.reason
             check, _ = _lease_check(bundle, task_dir, owner, generation, contract_path)
             if not check.allowed:
                 print(f"warning: write record not stored: {check.reason}", file=sys.stderr)

@@ -659,6 +659,18 @@ class OutDispatchTest(unittest.TestCase):
         self.assertEqual(code, 2)
         runner.assert_not_called()
 
+    def test_an_unresolved_write_blocks_a_reviewer(self):
+        # A killed dispatcher leaves changed files and never records who changed them, so the
+        # sidecar still names whoever wrote last time.
+        pe._state_path(self.task_dir, "outputs", "9" * 32, ".json").write_text(
+            json.dumps({"dispatch_id": "9" * 32, "status": "in_flight", "mode": "write",
+                        "destination": str(self.repo / "docs" / "note.md")}),
+            encoding="utf-8",
+        )
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
     def test_write_and_out_together_are_refused(self):
         # Two authorities over one dispatch's result, with no rule for which wins.
         code, runner = self.dispatch_write("docs/note.md", out="docs/note.md")
@@ -1112,6 +1124,39 @@ class ContributingFamiliesTest(unittest.TestCase):
             pe.observed_author_families(self.dir)
 
 
+class OverlapAndReservationTest(unittest.TestCase):
+    """Two holes round 6 found by looking wider than the last fix."""
+
+    def test_overlapping_destinations_count_as_the_same_place(self):
+        # A live worker writing `docs/note.md` does not equal `docs`, but restoring the
+        # directory would take its file with it.
+        self.assertTrue(pe._destinations_overlap("/repo/docs", "/repo/docs/note.md"))
+        self.assertTrue(pe._destinations_overlap("/repo/docs/note.md", "/repo/docs"))
+        self.assertTrue(pe._destinations_overlap("/repo/docs", "/repo/docs"))
+        self.assertFalse(pe._destinations_overlap("/repo/docs", "/repo/src"))
+        self.assertFalse(pe._destinations_overlap("/repo/docs", None))
+
+    def test_an_unresolved_reservation_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            self.assertEqual(pe._unresolved_write_reservations(task_dir), [])
+            pe._state_path(task_dir, "outputs", "a" * 32, ".json").write_text(
+                json.dumps({"dispatch_id": "a" * 32, "status": "in_flight"}), encoding="utf-8"
+            )
+            pe._state_path(task_dir, "outputs", "b" * 32, ".json").write_text(
+                json.dumps({"dispatch_id": "b" * 32, "status": "succeeded"}), encoding="utf-8"
+            )
+            self.assertEqual(pe._unresolved_write_reservations(task_dir), ["a" * 32])
+
+    def test_an_unreadable_record_counts_as_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            pe._state_path(task_dir, "outputs", "c" * 32, ".json").write_text(
+                "{ truncated", encoding="utf-8"
+            )
+            self.assertEqual(pe._unresolved_write_reservations(task_dir), ["c" * 32])
+
+
 class RestoreSafetyTest(unittest.TestCase):
     """Restore's failure paths, which are the ones that can destroy data."""
 
@@ -1258,6 +1303,10 @@ class InterruptedWriteTest(unittest.TestCase):
         again = pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True)
         self.assertFalse(again.allowed)
         self.assertIn("could not be inspected", again.reason)
+        # The wording must not suggest that looking at the file now restores the option:
+        # the missing observation cannot be reconstructed after the fact.
+        self.assertIn("not available for this dispatch again", again.reason)
+        self.assertIn(".before", again.reason)  # names the baseline for a manual put-back
 
     def test_repeating_a_recovery_after_later_edits_is_refused(self):
         self.assertTrue(pe.restore_write(self.task_dir, self.dispatch, assume_stopped=True).allowed)

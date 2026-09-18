@@ -35,8 +35,9 @@ Reviews in `tasks/2026-09-18-post-audit/workers/critic/`.
 - **Nothing under `~/.claude` can be a `--write` destination.** The CLI gates those paths as
   sensitive and asks a human, so a worker cannot edit this installation. Protective, but it means
   the engine cannot be maintained through its own write path.
-- **`--add-dir` grants write as well as read**, so a `read_scope` root is writable by a worker
-  that also holds `--write`. The two scopes are not independent.
+- **`--add-dir` grants write as well as read.** Closed 2026-09-18 by refusing `--write` whenever
+  a read root falls outside the write destination, on round 6's recommendation: the root would
+  otherwise be a second writable place that no baseline covers and no change set reports.
 
 ## B. Missing regression test for the Orca adapter
 
