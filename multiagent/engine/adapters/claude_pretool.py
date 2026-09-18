@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "engine"))
 
 from policy_engine import (  # noqa: E402
     OBSERVED_AUTHOR_FILE,
+    asserted_author_families,
     observed_author_families,
     record_contributing_family,
     PRODUCING_ROLES,
@@ -99,12 +100,18 @@ def observed_author(task_path: Path, task: dict[str, Any], bundle: Any) -> str |
             families = observed_author_families(task_path.parent)
         except Exception:
             return None
+        families = sorted(set(families) | set(asserted_author_families(task_path.parent)))
         if len(families) > 1:
-            # Mixed authorship has no independent reviewer. Returning a single family here
-            # would name one that shares a family with part of the artifact, so the caller
-            # is given a value no candidate can match and the spawn is denied.
+            # Mixed authorship -- observed, asserted, or both -- has no independent reviewer.
+            # Returning a single family here would name one that shares a family with part
+            # of the artifact, so the caller is given a value no candidate can match and the
+            # spawn is denied.
             return "mixed"
         return families[0] if families else None
+    if set(task.get("roles_plan", []) or []) & PRODUCING_ROLES:
+        # A producer was planned and none was observed. Falling back to the conductor's
+        # family here is a guess dressed as evidence; `None` makes the caller deny.
+        return None
     backend = task.get("conductor", {}).get("backend")
     entry = bundle.backends.get(backend) if backend else None
     return str(entry["family"]) if entry else None

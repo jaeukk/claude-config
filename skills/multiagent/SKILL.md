@@ -198,6 +198,12 @@ Claude-only — a Codex worker's sandbox already reads the filesystem — and re
 `--host wsl`. Note that `--add-dir` grants **write** as well as read, so a read root is writable
 by a worker that also has `--write`.
 
+Recovery is the engine's baseline, not git. A vault may gitignore the very layer the builds
+write — `20_Notes/.gitignore` ignores `40_Resources/`, so `git status` and `git diff HEAD` see
+nothing there and a retained-change test built on them is inert, not merely awkward. Where git is
+blind, `find <dir> -newermt '<launch time>'` is a discovery aid — it misses deletions and anything
+written with a preserved timestamp — and the engine's baseline comparison is the complete answer.
+
 Before launch the engine copies the destination into `writes/<dispatch_id>.before` and verifies the
 copy, so `restore-write --dispatch-id <id>` can put it back; a destination that changed after the
 run was recorded refuses to restore rather than overwriting whoever changed it. Afterwards
@@ -207,6 +213,11 @@ be inspected — never reported as success). A rate-limited write attempt is **n
 retry rule assumes a repeat duplicates computation and never side effects, which stops being true
 once files exist. Authorship is recorded whenever the change set is non-empty, including after a
 failure — a failed attempt that changed files still authored those changes.
+
+When `--write` produces a summary note, the brief must carry the note's frontmatter schema
+(`citekey`, `zotero_key`, `tags`, `type`, `status`, `creator`, `Created`, …). A worker infers
+none of it, and a batch of shards each guessing produces the per-note variance a critic then has
+to find one field at a time.
 
 `--out` changes nothing about the worker: same `--tools Read,Grep,Glob --strict-mcp-config`, same
 prompt, and the worker is never told the destination.
@@ -221,6 +232,31 @@ the global `CLAUDE.md`, which is replaced deliberately: the engine appends a com
 of asking). Everything else the old inheritance carried — vault layout, HPC schedulers, Zotero —
 belongs in the brief that needs it. A worker cannot *run* `qsub`, but it can write a job script,
 so "unreachable to execute" is not "irrelevant to author".
+
+### Authorship must be evidenced, not assumed
+
+A reviewer is cleared against what was *observed* producing the artifact. Two things record that:
+the PreToolUse hook for a native producer, and `dispatch-worker` for a CLI one. The hook is wired
+in `multiagent/.claude/settings.json` and loads only for a session launched from the installation
+root — a session conducting from a vault never loads it, so its native producers leave no record.
+The engine no longer papers over that: if the contract's `roles_plan` includes a producing role
+and no authorship was *observed*, `critic` and `verifier` are **refused**, because "nothing was
+recorded" and "the conductor wrote it" cannot be told apart otherwise. The conductor-is-author
+fallback survives only for contracts that planned no producer at all.
+
+A conductor's own account does not fill the gap. `record-author --task-dir … --family <family>
+--source <what produced it>` stores an **assertion**, kept apart from observations: it can only
+*add* families a reviewer must differ from, never stand in for the missing observation —
+trusting it would reopen the bypass that rejecting `author_family` closed. Review is cleared on
+assertions alone only when the user records `authorship_assertion` under `approvals.user`, the
+same channel every other escalation uses, and every family that produced anything is asserted.
+Be clear about what that channel is: the engine trusts `approvals.user` as the user's recorded
+word everywhere, and it authenticates nobody — a conductor willing to fabricate an approval is
+outside this model, as it is for every other escalation. Whether or not review is unblocked,
+asserted families always *add* to the set a reviewer must differ from.
+Remaining gaps, recorded rather than fixed: a native producer that was never named in
+`roles_plan`, or removed from it afterwards, still reaches the fallback; the check reads the plan
+as it stands, not as it ever was.
 
 ### Authorship accumulates
 

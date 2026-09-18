@@ -1516,13 +1516,67 @@ def observed_author_families(contract_dir: Path) -> list[str]:
     recorded = payload.get("families")
     if recorded is None:
         single = payload.get("family")
-        recorded = [single] if single is not None else []
+        if single is None:
+            # No observed section at all. That is a record holding only assertions (or an
+            # empty one), which is a legitimate "nothing observed yet" -- not damage. Damage
+            # is an observed section that is present and unusable, handled below.
+            return []
+        recorded = [single]
     if not isinstance(recorded, list) or not recorded:
         raise UnreadableAuthorRecord(f"{sidecar} records no usable family: {recorded!r}")
     for family in recorded:
         if not isinstance(family, str) or family not in KNOWN_FAMILIES:
             raise UnreadableAuthorRecord(f"{sidecar} records an unknown family: {family!r}")
     return sorted(set(recorded))
+
+
+def asserted_author_families(contract_dir: Path) -> list[str]:
+    """Families a conductor *asserted* produced part of the artifact, kept apart from observed.
+
+    An assertion is a declaration, and the design refuses to trust declarations for clearing a
+    reviewer -- that is why ``author_family`` alone never does. So assertions live in their own
+    list: they can *add* families a reviewer must differ from, and they can never stand in for
+    the observation the gate is waiting on.
+    """
+    sidecar = contract_dir / OBSERVED_AUTHOR_FILE
+    if not sidecar.exists():
+        return []
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    asserted = payload.get("asserted") if isinstance(payload, dict) else None
+    if not isinstance(asserted, list):
+        return []
+    return sorted({name for name in asserted if isinstance(name, str) and name in KNOWN_FAMILIES})
+
+
+def record_asserted_family(contract_dir: Path, family: str, source: str) -> None:
+    """Record a conductor's assertion about authorship, without touching the observed list."""
+    with _lease_lock(contract_dir):
+        sidecar = contract_dir / OBSERVED_AUTHOR_FILE
+        payload: dict[str, Any] = {}
+        if sidecar.exists():
+            # Refuse rather than replace. A fresh assertion-only object written over an
+            # unreadable record would erase the damage that was keeping review blocked, and
+            # the next approval or single-family observation would then clear it.
+            try:
+                loaded = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise UnreadableAuthorRecord(
+                    f"{sidecar} cannot be read ({error}); reconcile it before asserting"
+                ) from error
+            if not isinstance(loaded, dict):
+                raise UnreadableAuthorRecord(f"{sidecar} is not an object; reconcile it first")
+            payload = loaded
+        previous = payload.get("asserted") if isinstance(payload.get("asserted"), list) else []
+        payload["asserted"] = sorted({*(x for x in previous if isinstance(x, str)), family})
+        payload.setdefault("assertions", [])
+        if isinstance(payload["assertions"], list):
+            payload["assertions"].append({"family": family, "source": source, "at": utc_now()})
+        _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 def record_contributing_family(contract_dir: Path, family: str, source: str) -> None:
@@ -1571,6 +1625,16 @@ def record_contributing_family(contract_dir: Path, family: str, source: str) -> 
         }
         if damaged is not None:
             payload["damaged"] = damaged
+        # Assertions are a separate structure; an observation landing later must not erase
+        # them, or a family a reviewer had to differ from quietly stops counting.
+        try:
+            prior = json.loads((contract_dir / OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8"))
+            if isinstance(prior, dict):
+                for key in ("asserted", "assertions"):
+                    if isinstance(prior.get(key), list):
+                        payload[key] = prior[key]
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
         _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
             json.dumps(payload, indent=2) + "\n", encoding="utf-8"
         )
@@ -2460,25 +2524,53 @@ def dispatch_worker(
                 False, f"{role} blocked: {error}"
             ).as_dict(), indent=2), file=sys.stderr)
             return 2
-        if len(contributors) > 1:
-            # Two families' output in one artifact. Every candidate reviewer shares a family
-            # with part of what it would be reviewing, so there is no independent reviewer to
-            # pick -- and picking one anyway is exactly the silent failure this check exists
-            # to prevent. Split the artifact or review it by hand.
-            print(json.dumps(Decision(
-                False,
-                f"{role} blocked: this artifact has mixed authorship ("
-                f"{', '.join(contributors)}), so no candidate is independent of all of it",
-            ).as_dict(), indent=2), file=sys.stderr)
-            return 2
+        asserted = asserted_author_families(contract_dir)
         seen = contributors[0] if contributors else None
-        if seen is None:
-            # No producing worker ran, so the conductor authored the artifact and
-            # its family is the honest answer -- the same fallback the hook uses.
-            # Trusting the declaration here instead would let a conductor review
-            # its own work simply by declaring another family.
+        planned = sorted(set(task.get("roles_plan", []) or []) & PRODUCING_ROLES)
+        if seen is None and planned:
+            # A producer was planned and nothing *observed* producing anything. That is not
+            # "the conductor wrote it" -- it is missing evidence. A conductor's own assertion
+            # cannot fill the gap: trusting it would reopen the bypass that rejecting
+            # `author_family` closed. What can fill it is the contract's recorded user
+            # approval, the same channel every other escalation uses -- explicit, in the
+            # contract, and an override rather than evidence -- together with at least one
+            # asserted family to review against.
+            approved = "authorship_assertion" in (task.get("approvals", {}).get("user") or [])
+            if not (approved and asserted):
+                print(json.dumps(Decision(
+                    False,
+                    f"{role} blocked: the plan includes {', '.join(planned)} but no "
+                    "authorship was observed, so independence cannot be established. "
+                    "An assertion (`record-author`) does not count as evidence; if the "
+                    "user accepts the conductor's account of what ran, record "
+                    "`authorship_assertion` under approvals.user and assert every family "
+                    "that produced anything.",
+                ).as_dict(), indent=2), file=sys.stderr)
+                return 2
+            contributors = list(asserted)
+            seen = asserted[0]
+        elif seen is None:
+            # No producer was ever planned, so the conductor authored the artifact and its
+            # family is the honest answer. Trusting the declaration instead would let a
+            # conductor review its own work simply by declaring another family.
             conductor_backend = bundle.backends.get(task["conductor"]["backend"])
             seen = conductor_backend["family"] if conductor_backend else None
+            if seen is not None:
+                contributors = [seen]
+        # Assertions always tighten. Observed claude plus asserted codex means a codex
+        # reviewer shares a family with part of the artifact, whatever the observation
+        # says; and an approved mixed assertion must not be cleared by one later
+        # single-family observation. Approval governs whether an assertion may *substitute*
+        # for missing evidence; it never governs whether it excludes.
+        excluded = sorted(set(contributors) | set(asserted))
+        if len(excluded) > 1:
+            print(json.dumps(Decision(
+                False,
+                f"{role} blocked: the artifact's authorship is mixed ({', '.join(excluded)}"
+                f"{' -- observed plus asserted' if asserted and contributors != asserted else ''}), "
+                "so no candidate is independent of all of it",
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
         if seen is not None and seen != task.get("author_family"):
             print(json.dumps(Decision(
                 False,
@@ -3102,6 +3194,13 @@ def main(argv: list[str] | None = None) -> int:
         lease_parser.add_argument("--task-dir", type=Path, required=True)
         lease_parser.add_argument("--owner", required=True)
         lease_parser.add_argument("--ttl", type=int, default=300)
+    author_parser = subparsers.add_parser("record-author")
+    author_parser.add_argument("--task-dir", type=Path, required=True)
+    author_parser.add_argument("--family", required=True, choices=sorted(KNOWN_FAMILIES))
+    author_parser.add_argument(
+        "--source", required=True,
+        help="what produced the artifact, e.g. 'implementer via native Task, hook not loaded'",
+    )
     restore_parser = subparsers.add_parser("restore-write")
     restore_parser.add_argument("--task-dir", type=Path, required=True)
     restore_parser.add_argument("--dispatch-id", required=True)
@@ -3163,6 +3262,18 @@ def main(argv: list[str] | None = None) -> int:
         return _print_decision(heartbeat_lease(args.task_dir, args.owner, args.ttl))
     if args.command == "release-lease":
         return _print_decision(release_lease(args.task_dir, args.owner))
+    if args.command == "record-author":
+        # An assertion, not an observation, and recorded as one: the source is prefixed so a
+        # later reader can tell a hook's record from a conductor's word.
+        record_asserted_family(args.task_dir, args.family, args.source)
+        return _print_decision(Decision(
+            True,
+            f"recorded an assertion that {args.family} produced part of this artifact. This is "
+            "not evidence: it can only add to the families a reviewer must differ from, and it "
+            "clears a reviewer only with `authorship_assertion` recorded under approvals.user.",
+            {"observed": observed_author_families(args.task_dir),
+             "asserted": asserted_author_families(args.task_dir)},
+        ))
     if args.command == "restore-write":
         return _print_decision(
             restore_write(args.task_dir, args.dispatch_id, args.assume_stopped)

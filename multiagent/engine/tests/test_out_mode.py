@@ -451,12 +451,14 @@ class OutDispatchTest(unittest.TestCase):
         lease = pe.acquire_lease(self.task_dir, "me")
         self.assertTrue(lease.allowed, lease.reason)
 
-    def write_contract(self, role="runner", write_scope=("docs", "tasks")):
+    def write_contract(self, role="runner", write_scope=("docs", "tasks"), roles_plan=None,
+                       author_family=None):
         """Write a valid contract that plans ``role`` and scopes writes to ``write_scope``."""
         self.contract_path.write_text(json.dumps({
             "schema_version": 1, "task_id": "t1", "status": "active",
             "target_repo": str(self.repo), "write_scope": list(write_scope),
-            "roles_plan": [role], "approvals": {"user": []},
+            "roles_plan": list(roles_plan) if roles_plan else [role], "approvals": {"user": []},
+            **({"author_family": author_family} if author_family else {}),
             "conductor": {"host": "claude-code", "backend": "claude-frontier",
                           "lease_owner": "me"},
             "dispatch": {"current_role": role, "active_workers": 0},
@@ -658,6 +660,90 @@ class OutDispatchTest(unittest.TestCase):
         code, runner = self.dispatch(None, role="critic")
         self.assertEqual(code, 2)
         runner.assert_not_called()
+
+    def test_a_planned_producer_with_no_record_blocks_the_reviewer(self):
+        # Native producer, hook never loaded: nothing recorded producing anything. The old
+        # fallback would have called the conductor the author and picked a reviewer against a
+        # guess -- right answer by luck for a same-family run, wrong for a mixed one.
+        self.write_contract(role="critic", roles_plan=("implementer", "critic"), author_family="claude")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
+    def test_an_assertion_alone_does_not_unblock_the_reviewer(self):
+        # A conductor's word is a declaration, and declarations were refused as evidence for
+        # exactly this reason: a conductor could clear its own reviewer by asserting another
+        # family. The assertion is stored, but it does not open the gate.
+        self.write_contract(role="critic", roles_plan=("implementer", "critic"), author_family="claude")
+        pe.record_asserted_family(self.task_dir, "claude", "native Task, hook not loaded")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+        self.assertEqual(pe.observed_author_families(self.task_dir), [])
+        self.assertEqual(pe.asserted_author_families(self.task_dir), ["claude"])
+
+    def test_recorded_user_approval_plus_assertion_unblocks(self):
+        # The contract's own approval channel, not a side command, is what an override is.
+        self.write_contract(role="critic", roles_plan=("implementer", "critic"), author_family="claude")
+        contract = json.loads(self.contract_path.read_text(encoding="utf-8"))
+        contract["approvals"]["user"] = ["authorship_assertion"]
+        self.contract_path.write_text(json.dumps(contract), encoding="utf-8")
+        pe.record_asserted_family(self.task_dir, "claude", "native Task, hook not loaded")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 0)
+        runner.assert_called_once()
+
+    def test_a_mixed_assertion_blocks_even_with_approval(self):
+        self.write_contract(role="critic", roles_plan=("implementer", "critic"), author_family="claude")
+        contract = json.loads(self.contract_path.read_text(encoding="utf-8"))
+        contract["approvals"]["user"] = ["authorship_assertion"]
+        self.contract_path.write_text(json.dumps(contract), encoding="utf-8")
+        pe.record_asserted_family(self.task_dir, "claude", "native")
+        pe.record_asserted_family(self.task_dir, "codex", "native")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
+    def test_no_planned_producer_with_a_false_declaration_is_caught(self):
+        # Round 8: the fallback had ended up after an unconditional return, so with no
+        # producer planned and nothing observed, `seen` stayed None and the declared/observed
+        # mismatch check was skipped -- a Claude conductor declaring codex could clear a
+        # Claude reviewer. The conductor is claude-frontier here, so declaring codex must fail.
+        self.write_contract(role="critic", roles_plan=("critic",), author_family="codex")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
+    def test_assertions_tighten_even_when_something_was_observed(self):
+        # Observed claude plus asserted codex: a codex reviewer shares a family with part of
+        # the artifact and must not be cleared, whatever the observation says.
+        self.write_contract(role="critic", roles_plan=("implementer", "critic"), author_family="claude")
+        pe.record_contributing_family(self.task_dir, "claude", "implementer via dispatch-worker")
+        pe.record_asserted_family(self.task_dir, "codex", "native, hook not loaded")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
+    def test_an_assertion_never_overwrites_a_damaged_sidecar(self):
+        sidecar = self.task_dir / pe.OBSERVED_AUTHOR_FILE
+        sidecar.write_text("{ not json", encoding="utf-8")
+        with self.assertRaises(pe.UnreadableAuthorRecord):
+            pe.record_asserted_family(self.task_dir, "claude", "native")
+        self.assertEqual(sidecar.read_text(encoding="utf-8"), "{ not json")
+
+    def test_an_observation_does_not_erase_assertions(self):
+        pe.record_asserted_family(self.task_dir, "codex", "native")
+        pe.record_contributing_family(self.task_dir, "claude", "implementer via dispatch-worker")
+        self.assertEqual(pe.observed_author_families(self.task_dir), ["claude"])
+        self.assertEqual(pe.asserted_author_families(self.task_dir), ["codex"])
+
+    def test_no_planned_producer_still_falls_back_to_the_conductor(self):
+        # Nothing was ever going to produce, so the conductor is the honest author and a
+        # cross-family reviewer is correct without a record.
+        self.write_contract(role="critic", roles_plan=("critic",), author_family="claude")
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 0)
+        runner.assert_called_once()
 
     def test_an_unresolved_write_blocks_a_reviewer(self):
         # A killed dispatcher leaves changed files and never records who changed them, so the
