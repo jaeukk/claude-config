@@ -1571,10 +1571,105 @@ class HookObservedAuthorTest(unittest.TestCase):
         self.assertIn("mixed", reason)
         self.assertNotIn("declares author_family", reason)
 
+    def test_a_native_producer_is_refused_by_the_hook_without_a_reason(self):
+        task = self.full_task(("implementer", "critic"))
+        task["dispatch"]["current_role"] = "implementer"
+        reason = self.run_handler(task, tool="Task")
+        self.assertIsNotNone(reason)
+        self.assertIn("native_reason", reason)
+        self.assertFalse((self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).exists())
+
+    def test_the_hook_snapshots_the_reason_it_admitted(self):
+        # The contract field is mutable and task-wide; the record must carry what it said
+        # at this spawn, not what it says later.
+        task = self.full_task(("implementer", "critic"))
+        task["dispatch"]["current_role"] = "implementer"
+        task["dispatch"]["native_reason"] = "needs Bash for 250-dpi page renders"
+        self.assertIsNone(self.run_handler(task, tool="Task"))  # admitted: no denial emitted
+        record = json.loads(
+            (self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8")
+        )
+        self.assertEqual(record["families"], ["claude"])
+        self.assertIn("native_reason: needs Bash for 250-dpi page renders", record["source"])
+
+    def test_every_native_admission_survives_later_producers(self):
+        # Round 16: `source` keeps only the latest producer, so reason A vanished when B was
+        # recorded, and a managed dispatch afterwards erased the native reason entirely. The
+        # admissions history is what a later reader consults.
+        task = self.full_task(("implementer", "critic"))
+        task["dispatch"]["current_role"] = "implementer"
+        task["dispatch"]["native_reason"] = "reason A: needs Bash for renders"
+        self.assertIsNone(self.run_handler(task, tool="Task"))
+        task["dispatch"]["native_reason"] = "reason B: file set discovered while reading"
+        self.assertIsNone(self.run_handler(task, tool="Task"))
+        pe.record_contributing_family(
+            self.task_path.parent, "codex", "implementer via dispatch-worker"
+        )
+        record = json.loads(
+            (self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8")
+        )
+        self.assertEqual(record["families"], ["claude", "codex"])
+        self.assertEqual(record["source"], "implementer via dispatch-worker")
+        reasons = [a["native_reason"] for a in record["admissions"]]
+        self.assertEqual(reasons, ["reason A: needs Bash for renders",
+                                   "reason B: file set discovered while reading"])
+        for entry in record["admissions"]:
+            self.assertEqual(entry["family"], "claude")
+            self.assertEqual(entry["tool"], "Task")
+            self.assertIn("at", entry)
+
     def test_a_damaged_sidecar_is_none(self):
         self.task_path.parent.joinpath(pe.OBSERVED_AUTHOR_FILE).write_text("{ nope", encoding="utf-8")
         self.assertIsNone(self.hook.observed_author(self.task_path, self.task(("critic",)),
                                                     self.bundle))
+
+
+class NativeProducerReasonTest(unittest.TestCase):
+    """A native spawn of a producing role is the exception, and must say why."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bundle = pe.load_policy(ROOT)
+
+    def task(self, roles, native_reason=None):
+        dispatch = {"current_role": roles[0], "active_workers": 0}
+        if native_reason is not None:
+            dispatch["native_reason"] = native_reason
+        return {"schema_version": 1, "task_id": "t", "status": "active",
+                "target_repo": str(ROOT), "write_scope": [], "roles_plan": list(roles),
+                "author_family": "claude", "approvals": {"user": []},
+                "conductor": {"host": "claude-code", "backend": "claude-frontier",
+                              "lease_owner": "me"},
+                "dispatch": dispatch}
+
+    def spawn(self, task, role, native):
+        return pe.authorize_action(
+            self.bundle, task, {"kind": "spawn_worker", "actor_role": "conductor",
+                                "role": role, "native": native}
+        )
+
+    def test_a_native_producer_without_a_reason_is_refused(self):
+        for role in ("implementer", "bulk_worker"):
+            with self.subTest(role):
+                decision = self.spawn(self.task((role,)), role, native=True)
+                self.assertFalse(decision.allowed)
+                self.assertIn("native_reason", decision.reason)
+
+    def test_a_stated_reason_admits_the_native_producer(self):
+        task = self.task(("implementer",), native_reason="needs Bash for 250-dpi page renders")
+        decision = self.spawn(task, "implementer", native=True)
+        self.assertTrue(decision.allowed, decision.reason)
+
+    def test_a_blank_reason_does_not_count(self):
+        task = self.task(("implementer",), native_reason="   ")
+        self.assertFalse(self.spawn(task, "implementer", native=True).allowed)
+        errors, _ = pe.validate_task(self.bundle, task)
+        self.assertTrue(any("native_reason" in e for e in errors), errors)
+
+    def test_cli_dispatch_and_non_producing_roles_need_no_reason(self):
+        # The engine path is the default; a runner is not a producer.
+        self.assertTrue(self.spawn(self.task(("implementer",)), "implementer", native=False).allowed)
+        self.assertTrue(self.spawn(self.task(("runner",)), "runner", native=True).allowed)
 
 
 class ReadScopeTest(unittest.TestCase):

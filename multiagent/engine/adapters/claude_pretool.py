@@ -70,7 +70,9 @@ def active_task_path() -> Path | None:
     return ROOT / "tasks" / task_id / "task.yaml"
 
 
-def record_observed_author(task_path: Path, family: str, source: str) -> None:
+def record_observed_author(
+    task_path: Path, family: str, source: str, admission: dict[str, Any] | None = None
+) -> None:
     """Record which family actually produced the artifact.
 
     Parameters
@@ -86,7 +88,7 @@ def record_observed_author(task_path: Path, family: str, source: str) -> None:
     # Accumulates. A native worker of one family writing over another family's retained
     # output leaves both in the artifact, and keeping only the latest would erase the earlier
     # contributor -- after which a reviewer of that family looks independent and is not.
-    record_contributing_family(task_path.parent, family, source)
+    record_contributing_family(task_path.parent, family, source, admission=admission)
 
 
 def observed_author(task_path: Path, task: dict[str, Any], bundle: Any) -> str | None:
@@ -264,7 +266,14 @@ def main() -> int:
                 deny(f"current role {role} has no compatible {family} backend")
                 return 0
             if role in PRODUCING_ROLES:
-                record_observed_author(task_path, family, f"{role} via {tool}")
+                # Snapshot the reason as it read at this spawn. The contract field is
+                # task-wide and mutable, so without this a later reader would see only
+                # whatever the field says now, not what justified this particular producer.
+                reason = str(task.get("dispatch", {}).get("native_reason", "")).strip()
+                record_observed_author(
+                    task_path, family, f"{role} via {tool}; native_reason: {reason}",
+                    admission={"role": str(role), "tool": tool, "native_reason": reason},
+                )
             return 0
         return 0
     except Exception as error:  # Claude must fail closed when a task is active or malformed.

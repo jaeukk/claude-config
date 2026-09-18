@@ -39,6 +39,38 @@ Reviews in `tasks/2026-09-18-post-audit/workers/critic/`.
   a read root falls outside the write destination, on round 6's recommendation: the root would
   otherwise be a second writable place that no baseline covers and no change set reports.
 
+- **`dispatch.native_reason` is presence-checked, task-wide and semantically unchecked** (rounds
+  15-17). The gate turns an unexamined default into a recorded exception; it does not verify the
+  reason is true, belongs to one of the three kinds, or was written for this shard. A non-list
+  `admissions` value in the sidecar is silently replaced by the next write — audit-integrity
+  debt, not a reviewer-independence bypass, since family evidence stays authoritative.
+- **TODO (round 17's one recommendation): a session-start preflight** that proves, through the
+  real hook path, that a reasonless producing spawn is denied before any native production
+  starts. An unloaded hook bypasses both the reason gate and native-family recording, and
+  static inspection of settings cannot prove it loaded.
+
+## A-clone. TODO: no direct writes into `~/.claude` or `~/.agents`; work in a clone, merge by command
+
+Decided 2026-09-18 as a todo, not yet built. Today a dispatched worker cannot write under
+`~/.claude` (the CLI's sensitive-path gate), but a conductor or native subagent can, under the
+session's own permissions -- which is how every change this week reached the live config.
+
+- **Enforcement layer.** A user-level permission deny that every session and subagent inherits,
+  scoped to the *tracked* config trees only (`agents/`, `commands/`, `hooks/`, `multiagent/`,
+  `scripts/`, `shell/`, `skills/`, `CLAUDE.md`, `README.md`, `settings*.json`) plus `~/.agents/**`
+  and `~/.codex/**`. Never `projects/` (memory), `cache/`, `backups/`, `.credentials.json`: deny
+  outranks allow, so a blanket rule cannot be carved back out. The user applies the rule; the
+  engine mirrors it in `authorize_action` for sessions that load the hook.
+- **Workflow.** A second checkout of `claude-config` is where conductors and workers edit, test
+  and commit -- `multiagent/engine/` included, which retires the "engine cannot maintain itself"
+  limitation. `scripts/merge-config.sh` fetches the branch, `git merge --ff-only` into `~/.claude`,
+  redeploys `~/.multiagent`. Bash, not Edit, by design: the only way into the live tree is a
+  fast-forward of something already committed and tested elsewhere.
+- **Costs.** Two checkouts to keep in sync; a hotfix made by hand in `~/.claude` must be committed
+  before the next merge or `--ff-only` refuses (correct, and a new habit); small doc fixes become
+  clone → commit → merge → deploy.
+- **Migration.** Move `temp/2026-09-18-worker-write` to the clone and continue there.
+
 ## B. Missing regression test for the Orca adapter
 
 Seven review rounds hardened `engine/adapters/orca_worker_start.py`; every case was verified

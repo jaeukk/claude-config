@@ -467,6 +467,9 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
     target = Path(str(task.get("target_repo", "")))
     if not target.is_absolute():
         errors.append("target_repo must be absolute")
+    native_reason = (task.get("dispatch") or {}).get("native_reason")
+    if native_reason is not None and (not isinstance(native_reason, str) or not native_reason.strip()):
+        errors.append("dispatch.native_reason, when present, must be a non-empty string")
     if "read_scope" in task:
         readable = resolve_read_scope(task["read_scope"])
         if not readable.allowed:
@@ -586,6 +589,27 @@ def authorize_action(
         in_flight = task["dispatch"]["active_workers"] + held_worker_slots(task_dir)
         if in_flight >= limit:
             return Decision(False, f"active-worker limit reached for {host} ({in_flight}/{limit})")
+        if action.get("native") and role in PRODUCING_ROLES:
+            # A native producer bills the session login, gets no baseline and no change set,
+            # and leaves an observed author only where the hook happens to be loaded. So the
+            # default shape of producing work is a `--write` dispatch, and a native spawn is
+            # the exception that has to say why -- Bash, a file set that cannot be declared
+            # before the shard starts, or bounded work `--write` itself refuses.
+            #
+            # What this checks is presence: a non-blank string in a contract field the
+            # conductor writes. It does not verify the reason is true or that it was written
+            # for this shard; the field is task-wide and mutable. It turns an unexamined
+            # default into a recorded exception, and the hook snapshots the text it saw into
+            # the authorship record so a later reader has the reason as of that spawn.
+            reason = task.get("dispatch", {}).get("native_reason")
+            if not isinstance(reason, str) or not reason.strip():
+                return Decision(
+                    False,
+                    f"native spawn of {role} refused: producing work is dispatched with "
+                    "`dispatch-worker --write <destination>` by default; a native producer "
+                    "needs `dispatch.native_reason` in the contract (it runs commands, or its "
+                    "destinations cannot be declared up front)",
+                )
         author_family = task.get("author_family") if role in {"critic", "verifier"} else None
         return resolve_binding(
             bundle, role, author_family=author_family, conductor_host=host,
@@ -1580,7 +1604,9 @@ def record_asserted_family(contract_dir: Path, family: str, source: str) -> None
         )
 
 
-def record_contributing_family(contract_dir: Path, family: str, source: str) -> None:
+def record_contributing_family(
+    contract_dir: Path, family: str, source: str, admission: dict[str, Any] | None = None
+) -> None:
     """Add one family to the authorship record, keeping whoever was already there.
 
     Read-modify-write under the task lock, because the point is accumulation: overwriting is
@@ -1626,16 +1652,22 @@ def record_contributing_family(contract_dir: Path, family: str, source: str) -> 
         }
         if damaged is not None:
             payload["damaged"] = damaged
-        # Assertions are a separate structure; an observation landing later must not erase
-        # them, or a family a reviewer had to differ from quietly stops counting.
+        # Assertions and admissions are separate histories; an observation landing later must
+        # not erase them. Drop the assertions and a family a reviewer had to differ from
+        # quietly stops counting; drop the admissions and the reason that justified an earlier
+        # native producer is gone the moment the next producer is recorded -- `source` keeps
+        # only the latest, which is all it is for.
         try:
             prior = json.loads((contract_dir / OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8"))
             if isinstance(prior, dict):
-                for key in ("asserted", "assertions"):
+                for key in ("asserted", "assertions", "admissions"):
                     if isinstance(prior.get(key), list):
                         payload[key] = prior[key]
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             pass
+        if admission is not None:
+            payload.setdefault("admissions", [])
+            payload["admissions"].append({"family": family, "at": utc_now(), **admission})
         _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
             json.dumps(payload, indent=2) + "\n", encoding="utf-8"
         )

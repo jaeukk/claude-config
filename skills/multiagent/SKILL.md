@@ -53,7 +53,14 @@ session is actually running. The conductor binding is a session assertion — th
 something false until the pin and the two session levers (D10) follow it.
 
 1. Decompose the request into the smallest useful role set: `implementer`, `critic`,
-   `bulk_worker`, `verifier`, or `runner`.
+   `bulk_worker`, `verifier`, or `runner`. **Shape every producing shard around one
+   destination** — one file, or one existing directory — so it can go through
+   `dispatch-worker --write` (or `--out` for a returned document). That is the default, not an
+   option: it is the only shape that reaches the team account, that gets a baseline and a change
+   set, and that leaves an observed author. A shard that needs Bash, or whose file set is
+   discovered while working rather than declared up front, is a native spawn — the exception —
+   and the contract must say why in `dispatch.native_reason` before it is spawned. Where the
+   hook loads, a producing spawn without that field is refused.
 2. Create and validate a task contract with explicit `target_repo`, `write_scope`,
    planned roles, approval state, and lease owner.
 3. Acquire the task lease. Never run two conductors for one task.
@@ -92,7 +99,8 @@ The team column is a *separate registry entry*, not a variant of the private one
   account. That costs nothing, because a CLI-dispatched implementer was already text-only:
   `codex-core` and `claude-core-team` alike are read-only workers that return a patch nobody can
   land — see "What cannot land" below. Dispatch document production as `implementer`, not
-  `bulk_worker`, when the writing quality matters.
+  `bulk_worker`, when the writing quality matters — and dispatch it, with `--write`, rather than
+  spawning it: a native implementer is the exception that needs `dispatch.native_reason`.
 - `critic`: ceiling tier, different family from the author. Claude-authored work gets
   `codex-ceiling`; Codex-authored work gets `claude-ceiling`.
 - `verifier`: mid tier, different family from the author. Mind the CLI asymmetry under "What
@@ -129,10 +137,27 @@ one with Fable) and **team** (`~/.claude-team`). The account is fixed per proces
   worker process. `claude-core-team`, `claude-mid-team` and `claude-fast-team` are the team-bound backends;
   `config_dir` in `backends.yaml` is what binds them. A backend in no binding is unreachable:
   `--required-family` filters a role's candidate list, it cannot summon a backend from outside it.
-- **Prefer dispatch for `bulk_worker` and `runner`.** Spawn them natively only when a shard needs
-  Bash inside its own loop; record why in the contract and say plainly that it billed the session
-  account. Writing *code* is still private-only, since only a native subagent can write under the
-  hook and a native spawn is never team (see "What cannot land").
+- **Dispatch producing work; spawn it natively only with a stated reason.** A native
+  `implementer` or `bulk_worker` bills the session login, leaves no observed author unless the
+  hook happens to be loaded, and gets no baseline. So the default for any producing shard is
+  `dispatch-worker --write <one destination>` (or `--out`), and a native spawn of a producing role
+  requires `dispatch.native_reason` in the contract. Three things make that reason legitimate:
+  the shard runs commands ("needs Bash for 250-dpi page renders"); its destinations cannot be
+  declared before it starts ("file set is discovered while reading"); or managed dispatch cannot
+  perform this bounded work — a destination `--write` refuses (a path carrying `*?[]{}!`, a
+  managed-settings host), or a tightly coupled edit across known files whose only common
+  directory is one `--write` refuses, such as the repository root. "It touches several known
+  files" is not by itself a reason: independent files are independent `--write` dispatches. The
+  reason should say which of the three it is and for what — "Bash" alone is accepted by the gate
+  and useless to whoever reads the contract later. `runner`, `critic` and `verifier` are not
+  producing roles and need no reason. Writing *code* natively is still private-only, and still
+  needs the reason.
+
+  Be clear about what the gate guarantees: that a producing spawn was made against a contract
+  carrying *some* stated reason. It does not check the reason is true, or that it belongs to one
+  of the three kinds, or that it was written for this shard rather than an earlier one — the
+  field is task-wide and the conductor writes it. It turns an unexamined default into a recorded
+  exception; it is not a boundary against a conductor that wants to lie.
 - **Quota routing is not a health check.** Before selecting a team backend the engine probes that
   account: `available` routes there, `exhausted` (a window at or past 95%) falls to the private
   backend, and `unknown` — an unreadable probe, a rate-limited usage endpoint — **routes to team
@@ -526,27 +551,26 @@ stop, report verification as blocked, and request a conductor handoff (user appr
 
 ## Authorship is observed, not declared
 
-Independence is checked against `observed-author.json` beside the contract. `dispatch-worker`
-writes it for CLI producers **only after the worker exits 0**, so a failed CLI run cannot
-overwrite the real author's record. That write is guarded like every other engine state write —
-lease generation and contract ownership rechecked under the lock, destination resolved so a
-symlink cannot stand where the sidecar belongs — and it is skipped with a warning rather than
-forced if the lease moved mid-run. A `--out` publication additionally records its own producer in
+Independence is checked against `observed-author.json` beside the contract, and the record
+**accumulates**: every family observed producing part of the artifact stays in `families`, so a
+later producer adds to the record and never replaces it (see "Authorship accumulates" above).
+`dispatch-worker` records a CLI producer after the worker exits 0, or — under `--write` — whenever
+the change set is non-empty, since a failed attempt that changed files still authored those
+changes. That write is guarded like every other engine state write — lease generation and
+contract ownership rechecked under the lock, destination resolved so a symlink cannot stand where
+the sidecar belongs — and it is skipped with a warning rather than forced if the lease moved
+mid-run. A `--out` publication additionally records its own producer in
 `outputs/<dispatch_id>.json`, so an artifact's author is known without widening the task-wide
-sidecar; that is what attributes a `runner` or `bulk_worker` publication. The hook writes it for native producers **before the call
-runs** — a PreToolUse hook cannot see the outcome — so a native producer that fails still
-overwrites the record with its intent. A reviewer dispatch is
-refused when the sidecar contradicts `author_family`, and also when the sidecar exists but is
-unreadable, malformed, or names an unknown family. A *missing* sidecar means no producing
-worker ran: the conductor authored the artifact and its own family is used. Fix the contract, not the
-sidecar — with one narrow exception. A *failed native* producer has already overwritten the
-record with its intent. Restore the previous author **only if** it retained nothing: compare
-against the state before the call with `git status` plus `git diff HEAD` (working tree *and*
-index; plain `git diff` misses staged and untracked files), and confirm no other producer ran
-in between. Keep the baseline in context or in an authorized file — redirection is denied. If the failed producer left *any* retained change, the record is
-correct as it stands — those changes are its — and the artifact is now mixed-family. Last
-recorded producer wins; a mixed-family artifact collapses to one, so say so in the review
-brief rather than pretending the earlier author is the only one.
+sidecar; that is what attributes a `runner` or `bulk_worker` publication. The hook records a native
+producer **before the call runs** — a PreToolUse hook cannot see the outcome — together with the
+`native_reason` it admitted, appended to an `admissions` history that survives later producers. A
+reviewer dispatch is refused when the sidecar contradicts `author_family`, when it is unreadable,
+malformed, or names an unknown family, when it records more than one family, and when the plan
+names a producing role but nothing was observed (see "Authorship must be evidenced, not
+assumed"). A missing sidecar falls back to the conductor's family **only** for a contract that
+planned no producer. Fix the contract, not the sidecar. Because the record accumulates, a failed
+native producer no longer overwrites the real author; what it leaves behind is a family a
+reviewer must now differ from, which is the correct consequence of having run it.
 
 ## Approval and enforcement
 
