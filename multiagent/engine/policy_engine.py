@@ -2216,9 +2216,9 @@ def _restore_write_locked(
     if record.get("after_unknown"):
         return Decision(
             False,
-            f"dispatch {dispatch_id} was restored, but its destination could not be inspected "
-            f"afterwards ({record['after_unknown']}), so no post-recovery state was ever "
-            "recorded. Automatic restore is not available for this dispatch again -- the "
+            f"dispatch {dispatch_id}'s destination could not be inspected after its last run "
+            f"or recovery ({record['after_unknown']}), so no post-state was ever recorded. "
+            "Automatic restore is not available for this dispatch -- the "
             "missing observation cannot be reconstructed by looking now. The recorded baseline "
             f"path is {baseline.get('baseline')}, if the destination needs putting back by hand.",
         )
@@ -2524,11 +2524,16 @@ def dispatch_worker(
                 "permissions, so the generated allowlist would not be the whole authority",
             ).as_dict(), indent=2), file=sys.stderr)
             return 2
+        intended = (Path(task["target_repo"]).expanduser().resolve() / write_path)
         for root in read_roots:
             # `--add-dir` grants write as well as read, so a read root outside the destination
             # is a second writable place the baseline never covers and the change set never
-            # reports. Refused rather than documented.
-            if not _destinations_overlap(root, str(Path(task["target_repo"]) / write_path)):
+            # reports. Containment, not overlap: a root *above* the destination overlaps it
+            # and would hand the worker everything under that root -- round 18's case was
+            # read_scope=[<repo>] with --write <repo>/x.md, which passed and granted the
+            # whole repository. A root must equal the destination or sit inside it.
+            candidate = Path(root)
+            if not (candidate == intended or intended in candidate.parents):
                 print(json.dumps(Decision(
                     False,
                     f"--write with a read root outside the destination: {root} would also be "
@@ -2848,6 +2853,31 @@ def dispatch_worker(
                 # empty", and a later restore would compare a deleted destination against it,
                 # accept, and resurrect the baseline over that deletion.
                 record["after_unknown"] = after.reason
+            if touched and contract_dir is not None:
+                # Authorship first, terminal record second. The reservation is what tells a
+                # reviewer that files changed with no recorded author; retiring it before the
+                # author is written opens a window -- a dispatcher dying in between -- where
+                # nothing is in flight and the sidecar still names the previous writer. If the
+                # author cannot be recorded, the reservation stays in flight on purpose.
+                authorship, _ = _lease_check(bundle, contract_dir, owner, generation, contract_path)
+                recorded = authorship.allowed
+                if recorded:
+                    try:
+                        record_contributing_family(
+                            contract_dir, backend["family"],
+                            f"{role} via dispatch-worker --write",
+                        )
+                    except (OSError, UnreadableAuthorRecord) as error:
+                        recorded = False
+                        authorship = Decision(False, f"authorship write failed: {error}")
+                if not recorded:
+                    print(json.dumps(Decision(
+                        False,
+                        f"authorship not recorded ({authorship.reason}); the write reservation "
+                        f"for {dispatch_id} stays in flight until it is -- files changed and "
+                        "nothing yet says by which family",
+                    ).as_dict(), indent=2), file=sys.stderr)
+                    return 2
             check, _ = _lease_check(bundle, task_dir, owner, generation, contract_path)
             if not check.allowed:
                 print(f"warning: write record not stored: {check.reason}", file=sys.stderr)
@@ -2858,17 +2888,6 @@ def dispatch_worker(
             print(json.dumps({"write": {k: record[k] for k in
                                        ("status", "destination", "changes", "account", "model")}},
                              indent=2), file=sys.stderr)
-            if touched and contract_dir is not None:
-                # A failed attempt that changed files still authored those changes. Recording
-                # only successes would attribute them to whoever ran next.
-                authorship, _ = _lease_check(bundle, contract_dir, owner, generation, contract_path)
-                if not authorship.allowed:
-                    print(f"warning: authorship not recorded: {authorship.reason}", file=sys.stderr)
-                else:
-                    record_contributing_family(
-                        contract_dir, backend["family"],
-                        f"{role} via dispatch-worker --write",
-                    )
             return 0 if write_status == "succeeded" else 2
         if status == 0 and role in PRODUCING_ROLES and contract_dir is not None:
             # The hook records authorship only for natively-spawned workers.

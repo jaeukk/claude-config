@@ -464,18 +464,29 @@ class OutDispatchTest(unittest.TestCase):
             "dispatch": {"current_role": role, "active_workers": 0},
         }, indent=2), encoding="utf-8")
 
-    def dispatch_write(self, write, out=None, attempt=None, role="implementer"):
-        """Run one `--write` dispatch with the worker process replaced."""
+    def dispatch_write(self, write, out=None, attempt=None, role="implementer", run=None,
+                       extra=None):
+        """Run one `--write` dispatch with the worker process replaced.
+
+        ``extra`` is merged into the contract after it is written (this helper writes the
+        contract itself, so anything a test wrote beforehand would be lost). ``run`` is a side
+        effect for the mocked worker, so a test can make it change the destination.
+        """
         # The default fixture contract plans `runner`; a write dispatch needs a role that may
         # write, and a lease it owns.
         self.write_contract(role=role)
+        if extra:
+            contract = json.loads(self.contract_path.read_text(encoding="utf-8"))
+            contract.update(extra)
+            self.contract_path.write_text(json.dumps(contract), encoding="utf-8")
         pe.acquire_lease(self.task_dir, "me", 600)
         contract = pe.load_document(self.contract_path)
         backend = {"backend": "claude-core-team", "host": "claude-code", "family": "claude",
                    "model": "claude-opus-5", "effort": "high", "account": "team",
                    "config_dir": "/tmp/team"}
         spec = pe._claude_cli(backend)
-        runner = mock.Mock(return_value=attempt if attempt is not None
+        runner = mock.Mock(side_effect=run,
+                           return_value=attempt if attempt is not None
                            else claude_attempt(0, envelope(), "done"))
         with mock.patch.object(pe, "_run_worker", runner), \
                 mock.patch.object(pe, "build_worker_command", return_value=(["claude"], spec)), \
@@ -798,6 +809,51 @@ class OutDispatchTest(unittest.TestCase):
                     None, Path(elsewhere), self.task_dir, None, self.contract_path, 0, None,
                 )
         self.assertEqual(code, 2)
+
+    def test_a_read_root_above_the_write_destination_is_refused(self):
+        # Round 18: `_destinations_overlap` accepts ancestors, so read_scope=[<repo>] with
+        # --write <repo>/docs/note.md passed and handed the whole repository to --add-dir,
+        # which grants write. A read root must sit inside the destination, never above it.
+        code, runner = self.dispatch_write(
+            "docs/note.md", extra={"read_scope": [str(self.repo)], "author_family": "claude"}
+        )
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
+    def test_a_read_root_inside_a_directory_destination_is_allowed(self):
+        (self.repo / "docs" / "refs").mkdir(parents=True, exist_ok=True)
+
+        def worker_writes_inside(*args, **kwargs):
+            # A no-change dispatch exits 2 by design, so the worker must change something
+            # for the admission itself to show as exit 0.
+            (self.repo / "docs" / "made.md").write_text("made", encoding="utf-8")
+            return claude_attempt(0, envelope(), "done")
+
+        code, runner = self.dispatch_write(
+            "docs", run=worker_writes_inside,
+            extra={"read_scope": [str(self.repo / "docs" / "refs")], "author_family": "claude"},
+        )
+        self.assertEqual(code, 0)
+        runner.assert_called_once()
+
+    def test_authorship_lands_before_the_reservation_is_retired(self):
+        # Round 18: the terminal record replaced `in_flight` before authorship was written,
+        # so a dispatcher dying between the two left no reservation and a stale sidecar --
+        # and a reviewer of the wrong family could be cleared. If authorship cannot be
+        # recorded, the reservation must stay in flight.
+        target = self.repo / "docs" / "note.md"
+
+        def worker_changes_the_file(*args, **kwargs):
+            target.write_text("changed by the worker", encoding="utf-8")
+            return claude_attempt(0, envelope(), "done")
+
+        with mock.patch.object(pe, "record_contributing_family",
+                               side_effect=OSError("disk full")):
+            code, _ = self.dispatch_write("docs/note.md", run=worker_changes_the_file,
+                                          extra={"author_family": "claude"})
+        self.assertEqual(code, 2)
+        record = json.loads(self.records()[0].read_text(encoding="utf-8"))
+        self.assertEqual(record["status"], "in_flight")
 
     def test_write_and_out_together_are_refused(self):
         # Two authorities over one dispatch's result, with no rule for which wins.
@@ -1444,7 +1500,7 @@ class InterruptedWriteTest(unittest.TestCase):
         self.assertIn("could not be inspected", again.reason)
         # The wording must not suggest that looking at the file now restores the option:
         # the missing observation cannot be reconstructed after the fact.
-        self.assertIn("not available for this dispatch again", again.reason)
+        self.assertIn("not available for this dispatch", again.reason)
         self.assertIn(".before", again.reason)  # names the baseline for a manual put-back
 
     def test_repeating_a_recovery_after_later_edits_is_refused(self):

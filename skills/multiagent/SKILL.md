@@ -560,15 +560,19 @@ changes. That write is guarded like every other engine state write — lease gen
 contract ownership rechecked under the lock, destination resolved so a symlink cannot stand where
 the sidecar belongs — and it is skipped with a warning rather than forced if the lease moved
 mid-run. A `--out` publication additionally records its own producer in
-`outputs/<dispatch_id>.json`, so an artifact's author is known without widening the task-wide
-sidecar; that is what attributes a `runner` or `bulk_worker` publication. The hook records a native
+`outputs/<dispatch_id>.json`, so an artifact's author is known per artifact. A `runner`
+publication is attributed *only* there — `runner` is not a producing role and never touches the
+task-wide sidecar — while a `bulk_worker` publication reaches both, since `bulk_worker` is. The hook records a native
 producer **before the call runs** — a PreToolUse hook cannot see the outcome — together with the
 `native_reason` it admitted, appended to an `admissions` history that survives later producers. A
 reviewer dispatch is refused when the sidecar contradicts `author_family`, when it is unreadable,
 malformed, or names an unknown family, when it records more than one family, and when the plan
-names a producing role but nothing was observed (see "Authorship must be evidenced, not
-assumed"). A missing sidecar falls back to the conductor's family **only** for a contract that
-planned no producer. Fix the contract, not the sidecar. Because the record accumulates, a failed
+names a producing role but nothing was observed — unless the user has recorded
+`authorship_assertion` under `approvals.user` and every producing family was asserted (see
+"Authorship must be evidenced, not assumed"). A missing sidecar falls back to the conductor's
+family **only** for a contract that planned no producer. The lease check and the authorship write
+are two separate lock acquisitions, not one atomic step: the check can pass and the lease move
+before the write, in which case the write is skipped with a warning rather than forced. Fix the contract, not the sidecar. Because the record accumulates, a failed
 native producer no longer overwrites the real author; what it leaves behind is a family a
 reviewer must now differ from, which is the correct consequence of having run it.
 
