@@ -2427,7 +2427,7 @@ def dispatch_worker(
             False, "dispatch needs the contract path so every state write can recheck it"
         ).as_dict(), indent=2), file=sys.stderr)
         return 2
-    if not dry_run and task_dir is not None and contract_path is not None \
+    if task_dir is not None and contract_path is not None \
             and Path(task_dir).resolve() != contract_path.parent.resolve():
         # Everything a reviewer's admission depends on -- write reservations, lease-checked
         # authorship, claimed worker slots -- is written under `task_dir`, while the hook can
@@ -2435,13 +2435,17 @@ def dispatch_worker(
         # differ: a reviewer dispatched with a foreign task dir scans the wrong reservations,
         # a producer's authorship silently fails its lease check and is never recorded, and
         # running workers vanish from the ceiling the native path counts against. One
-        # location, enforced for every real dispatch, is checkable; a mapping is a second
-        # thing that can be wrong. A dry run touches no state and is exempt.
+        # location, enforced, is checkable; a mapping is a second thing that can be wrong.
+        #
+        # Dry runs are not exempt. A dry run writes nothing, but it *reads*: slot counts from
+        # `task_dir`, reservations and authorship from beside the contract. Let those diverge
+        # and a foreign empty directory hides occupied slots, so the preview says yes to an
+        # invocation the real dispatch refuses one flag later.
         print(json.dumps(Decision(
             False,
-            f"--task-dir must be the contract's own directory ({contract_path.parent}) for a "
-            f"real dispatch; {task_dir} is not, and state written there would be invisible "
-            "to the hook and to reviewers reading beside the contract",
+            f"--task-dir must be the contract's own directory ({contract_path.parent}); "
+            f"{task_dir} is not, and state there would be invisible to the hook and to "
+            "reviewers reading beside the contract",
         ).as_dict(), indent=2), file=sys.stderr)
         return 2
     read_scope = resolve_read_scope(task.get("read_scope"))

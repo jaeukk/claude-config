@@ -782,8 +782,10 @@ class OutDispatchTest(unittest.TestCase):
                 self.assertEqual(code, 2)
                 runner.assert_not_called()
 
-    def test_a_dry_run_with_a_foreign_task_dir_is_still_allowed(self):
-        # A dry run touches no state, so there is nothing to keep beside the contract.
+    def test_a_dry_run_with_a_foreign_task_dir_is_refused_too(self):
+        # Round 14: a dry run writes nothing but reads slot counts from task_dir and
+        # reservations from beside the contract. A foreign empty directory hid occupied
+        # slots, so the preview said yes to an invocation the real dispatch refuses.
         with tempfile.TemporaryDirectory() as elsewhere:
             contract = pe.load_document(self.contract_path)
             backend = {"backend": "claude-core", "host": "claude-code", "family": "claude",
@@ -795,7 +797,7 @@ class OutDispatchTest(unittest.TestCase):
                     self.bundle, contract, "runner", self.brief, "native", True,
                     None, Path(elsewhere), self.task_dir, None, self.contract_path, 0, None,
                 )
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_write_and_out_together_are_refused(self):
         # Two authorities over one dispatch's result, with no rule for which wins.
