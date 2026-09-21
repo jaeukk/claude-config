@@ -1,16 +1,20 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "model": "claude-opus-5",
-  "enabledMcpjsonServers": ["codex"],
+  "enabledMcpjsonServers": [
+    "codex"
+  ],
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|NotebookEdit|Bash|Task|mcp__codex__.*",
+        "matcher": "Edit|Write|NotebookEdit|Bash|Task|Agent|mcp__codex__.*",
         "hooks": [
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PROJECT_DIR}/engine/adapters/claude_pretool_runner.js"]
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/engine/adapters/claude_pretool_runner.js"
+            ]
           }
         ]
       }

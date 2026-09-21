@@ -1628,12 +1628,26 @@ class HookObservedAuthorTest(unittest.TestCase):
         self.assertNotIn("declares author_family", reason)
 
     def test_a_native_producer_is_refused_by_the_hook_without_a_reason(self):
-        task = self.full_task(("implementer", "critic"))
-        task["dispatch"]["current_role"] = "implementer"
-        reason = self.run_handler(task, tool="Task")
-        self.assertIsNotNone(reason)
-        self.assertIn("native_reason", reason)
-        self.assertFalse((self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).exists())
+        # Under BOTH tool names. Current Claude Code calls the subagent tool `Agent`; the
+        # hook matched only `Task`, so every native spawn bypassed it -- found by the
+        # post-merge smoke test, 2026-09-21.
+        for tool in ("Task", "Agent"):
+            with self.subTest(tool):
+                self.setUp()
+                task = self.full_task(("implementer", "critic"))
+                task["dispatch"]["current_role"] = "implementer"
+                reason = self.run_handler(task, tool=tool)
+                self.assertIsNotNone(reason, tool)
+                self.assertIn("native_reason", reason)
+                self.assertFalse((self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).exists())
+
+    def test_the_settings_matcher_names_both_spawn_tools(self):
+        # The hook code and the settings matcher must agree, or one CLI version goes dark.
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        matchers = [h.get("matcher", "") for h in settings["hooks"]["PreToolUse"]]
+        for name in self.hook.NATIVE_SPAWN_TOOLS:
+            with self.subTest(name):
+                self.assertTrue(any(name in m.split("|") for m in matchers), (name, matchers))
 
     def test_the_hook_snapshots_the_reason_it_admitted(self):
         # The contract field is mutable and task-wide; the record must carry what it said

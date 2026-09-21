@@ -43,6 +43,12 @@ DANGEROUS_SHELL = re.compile(
 WORKER_CLI_SHELL = re.compile(r"(?:^|[;&|(]\s*)\s*(?:claude|codex|agy)(?:\.cmd)?\s", re.IGNORECASE)
 
 
+#: Tool names under which Claude Code spawns a native subagent. Keep both: the hook must
+#: keep working on a CLI that still says `Task`, and must not fall silent on one that says
+#: `Agent`. The settings matcher in `multiagent/.claude/settings.json` lists the same names.
+NATIVE_SPAWN_TOOLS = frozenset({"Task", "Agent"})
+
+
 def deny(reason: str) -> None:
     """Emit a Claude Code hook denial."""
     print(
@@ -194,7 +200,10 @@ def main() -> int:
                 deny("shell-based mutation is forbidden during an active task; use hook-visible file tools")
             return 0
 
-        if tool == "Task" or tool.startswith("mcp__codex__"):
+        # `Agent` is the subagent tool's name in current Claude Code; `Task` is the older
+        # name. Matching only `Task` is how every native spawn bypassed this hook -- found by
+        # the post-merge smoke test on 2026-09-21, not by any of eighteen review rounds.
+        if tool in NATIVE_SPAWN_TOOLS or tool.startswith("mcp__codex__"):
             role = task.get("dispatch", {}).get("current_role")
             family = "codex" if tool.startswith("mcp__codex__") else "claude"
 
