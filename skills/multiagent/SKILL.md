@@ -247,6 +247,30 @@ to find one field at a time.
 `--out` changes nothing about the worker: same `--tools Read,Grep,Glob --strict-mcp-config`, same
 prompt, and the worker is never told the destination.
 
+### Agent-defined workers that need a shell: the headless team driver
+
+`paper-reviewer` and `book-summarizer` cannot run through `dispatch-worker`: they render pages
+with `pdftoppm`, crop figures, and run the vault's gate scripts, and a CLI worker has no Bash by
+design (A2). The sanctioned substitute is a headless `claude -p --agent <name>` process per
+paper or chapter under `CLAUDE_CONFIG_DIR=~/.claude-team`, cwd = the vault, launched by a driver
+*under* a contract rather than by hand:
+
+    python3 _shared/adapters/book_summarizer_team.py --task-dir tasks/<id> --job tasks/<id>/job.json
+
+Start from `_templates/book-summarizer-team/` (contract with the deviation pre-written, the
+brief, the job file). The driver resolves nothing about the book: the conductor supplies the
+PDF path, page offset and per-chapter page ranges in the job, as the agent's own orchestration
+section asks. One chapter at a time by default; `--jobs N` only when the user authorized
+parallel chapters. A chapter counts as built when its `x.00` overview note carries an `agent:`
+line, so a rerun skips it. After each built chapter the driver runs `record-author`, which is an
+**assertion**: a later critic or verifier still needs `authorship_assertion` under
+`approvals.user`. The shell grant is a named allowlist (the PDF tools, `python3`, `curl`,
+read-only file commands), not bare Bash, but nothing intercepts a write — containment is the
+brief, and the contract's `deviations` must say so. The model is the job's (`claude-sonnet-5`,
+the agent's own tier), not the implementer binding's Opus. The paper-reviewer precedent
+(16 papers, 2026-09-20) lives in `tasks/2026-09-18-plasmon-litsearch-campaign/workers/
+implementer/wave3/`.
+
 ### What a dispatched worker inherits
 
 Nothing from your profile. Every CLI-dispatched Claude worker runs `--restricted`, which drops

@@ -1,0 +1,18 @@
+{
+  "_doc": "Job file for _shared/adapters/book_summarizer_team.py. The conductor resolves the book once (PDF path, page offset, chapter page ranges) and the driver runs one book-summarizer worker per chapter on the team account. book_root is vault-relative, or absolute when the build must be isolated from the vault (the driver then grants it with --add-dir). model is a full model id: it is passed to --model and copied into the notes' agent: line as BUILDER_ID. folder is the chapter folder name the notes go under; done = <book_root>/<folder>/<chapter>.00_*.md exists with an agent: line.",
+  "citekey": "torquato_random_2002",
+  "zotero_key": "F3B8P3S3",
+  "pdf": "/mnt/c/Users/<WINDOWS_USER>/My Drive/_WORKSPACE/40_Resources/ZoteroStorage/Torquato_2002_Random Heterogeneous Materials/Torquato - 2002 - Random Heterogeneous Materials Microstructure and Macroscopic Properties 1.pdf",
+  "book_root": "40_Resources/20_LongForms/10_Books/Torquato_RandomHeterogeneousMaterials_2002",
+  "offset": 18,
+  "model": "claude-sonnet-5",
+  "chapters": [
+    {
+      "chapter": 20,
+      "folder": "20_Exact_Contrast_Expansions",
+      "pdf_pages": "527-570",
+      "scope": "the whole chapter: overview note 20.00 plus one note per section",
+      "focus": "strong-contrast expansions; carry every printed equation, Tables 20.1-20.2, Figures 20.1-20.3"
+    }
+  ]
+}

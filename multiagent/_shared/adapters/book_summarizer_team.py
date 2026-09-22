@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Run ``book-summarizer`` chapter by chapter as headless team-account workers.
+
+The engine's CLI worker has no Bash, so it cannot render pages, crop figures or run the
+vault's gates, and ``dispatch-worker`` therefore cannot execute a book build. This driver is
+the sanctioned substitute, generalized from the paper-reviewer driver that built 16 papers
+on the team account (``tasks/2026-09-18-plasmon-litsearch-campaign/workers/implementer/
+wave3/run_wave3.py``): one ``claude -p --agent book-summarizer`` process per chapter under
+``CLAUDE_CONFIG_DIR=~/.claude-team``, cwd = the contract's ``target_repo`` (the vault, so the
+vault's agent definition and scripts resolve), and an authorship assertion recorded on the
+contract after every built chapter so a later cross-family critic can be dispatched through
+the engine once the user records ``authorship_assertion``.
+
+Unlike that precedent, the shell grant is a named allowlist (the PDF tools, python3 for the
+crops and gates, curl for the local Zotero API, and read-only file commands), not bare Bash.
+Containment is still the brief only: nothing here intercepts a write. Record that in the
+contract's ``deviations``, as the paper-reviewer runs did.
+
+Usage
+-----
+    python3 book_summarizer_team.py --task-dir <contract dir> --job <job.json>
+            [--only 20 21] [--jobs 1] [--timeout-min 120] [--dry-run]
+
+The contract dir holds ``task.yaml`` (``target_repo`` = vault root) and
+``workers/implementer/brief-book.md``; results land beside the brief. The job file is
+documented in ``_templates/book-summarizer-team/job.json``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+ENGINE = ROOT / "engine" / "policy_engine.py"
+TEAM_DIR = pathlib.Path.home() / ".claude-team"
+LIMIT = re.compile(r"(session|usage|weekly) limit|rate.?limit|429", re.I)
+RESET = re.compile(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.I)
+#: The launcher drops inherited MCP servers, so the worker reads Zotero over the local REST
+#: API instead; the user id comes from the `zotero-obsidian-sync` skill, never `/users/0/`.
+ZOTERO_USER = 5872032
+#: What the agent definition and contract actually invoke: page render and text (pdftoppm,
+#: pdftotext, pdfinfo), python3 for crops and the three gate scripts, curl for the local
+#: Zotero API, wslpath for attachment paths, plus read-only file commands. No rm, mv, git,
+#: pip or network beyond curl.
+SHELL_ALLOW = [
+    f"Bash({name}:*)" for name in (
+        "pdftoppm", "pdftotext", "pdfinfo", "python3", "curl", "wslpath", "mkdir", "cp",
+        "convert", "magick", "identify", "cd", "ls", "cat", "head", "tail", "wc", "grep",
+        "find", "stat", "file", "md5sum", "date", "echo",
+    )
+]
+#: Measured 2026-09-22 (§20.1 smoke, 160 turns): 11 shell calls were denied, all of them
+#: shapes a prefix rule cannot match -- a leading `VAR=...`/`export`, a `for` loop, `cd`
+#: outside the vault, `bash script.sh`, `chmod` -- and the worker recovered every time. The
+#: brief tells it to call the listed tools directly, one per call; keep that line in the brief.
+
+gate = threading.Event()
+gate.set()
+lock = threading.Lock()
+
+
+class Driver:
+    """One book build: contract, brief, job, log; ``build`` runs one chapter."""
+
+    def __init__(self, task_dir: pathlib.Path, job: dict, timeout_min: int, dry_run: bool) -> None:
+        self.task_dir = task_dir
+        self.work = task_dir / "workers" / "implementer"
+        self.brief = (self.work / "brief-book.md").read_text(encoding="utf-8")
+        self.log_path = self.work / "driver.log"
+        contract = json.loads((task_dir / "task.yaml").read_text(encoding="utf-8"))
+        self.vault = pathlib.Path(contract["target_repo"]).expanduser().resolve()
+        self.job = job
+        self.model = job.get("model", "claude-sonnet-5")
+        root = pathlib.Path(job["book_root"])
+        self.book_root = root if root.is_absolute() else self.vault / root
+        self.timeout = timeout_min * 60
+        self.dry_run = dry_run
+        self.env = {**os.environ, "CLAUDE_CONFIG_DIR": str(TEAM_DIR)}
+
+    def log(self, msg: str) -> None:
+        """Append a timestamped line to the driver log and echo it."""
+        line = f"[{dt.datetime.now():%m-%d %H:%M:%S}] {msg}"
+        with lock:
+            with self.log_path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        print(line, flush=True)
+
+    def overview(self, chapter: dict) -> pathlib.Path | None:
+        """The chapter's ``x.00`` overview note, if one exists."""
+        folder = self.book_root / chapter["folder"]
+        hits = sorted(folder.glob(f"{chapter['chapter']}.00_*.md")) if folder.is_dir() else []
+        return hits[0] if hits else None
+
+    def done(self, chapter: dict) -> bool:
+        """True when the overview note exists, is attributed, and is not a stub."""
+        note = self.overview(chapter)
+        return bool(
+            note and note.stat().st_size > 2000
+            and re.search(r"^agent:", note.read_text(encoding="utf-8"), re.M)
+        )
+
+    def prompt(self, chapter: dict) -> str:
+        """The brief plus the per-chapter fields the agent's orchestration section asks for."""
+        job = self.job
+        key = job.get("zotero_key", "none")
+        fields = [
+            f"Vault root / cwd: `{self.vault}`",
+            f"BUILDER_ID: {self.model}",
+            f"citekey: {job['citekey']}; zotero-key: {key}",
+            f"PDF (read THIS file; nothing else is the source): `{job['pdf']}`",
+            f"book root: `{self.book_root}`; this chapter's folder: "
+            f"`{self.book_root / chapter['folder']}` (create if absent)",
+            f"page offset: printed_page = PDF_page - {job['offset']}; verify it from a running header",
+            f"chapter: {chapter['chapter']}; PDF pages {chapter['pdf_pages']}; "
+            f"scope: {chapter.get('scope', 'the whole chapter')}",
+            f"focus: {chapter.get('focus', 'none beyond the agent definition')}",
+            "allow-list: build it yourself with Glob over the book root; a basename absent there stays plain text",
+            "Zotero MCP tools are unavailable in this run: read item metadata with "
+            f"`curl -s http://localhost:23119/api/users/{ZOTERO_USER}/items/{key}` "
+            "and owner annotations at `.../children`",
+            f"today: {dt.date.today():%Y-%m-%d}",
+        ]
+        return f"{self.brief}\n\n---\n# Per-chapter fields\n" + "\n".join(f"- {f}" for f in fields) + "\n"
+
+    def command(self, chapter: dict) -> list[str]:
+        """The headless launch: the vault's agent, the job's model, a named tool allowlist, no MCP."""
+        argv = ["claude", "--model", self.model, "--agent", "book-summarizer", "-p", self.prompt(chapter),
+                "--output-format", "json", "--permission-mode", "acceptEdits",
+                "--allowedTools", *SHELL_ALLOW, "Read", "Write", "Edit", "Glob", "Grep",
+                "--strict-mcp-config"]
+        if self.vault not in self.book_root.parents:
+            # An isolated book root (a smoke test, a scratch copy) is outside cwd, so the
+            # worker's file tools need it granted explicitly; `acceptEdits` covers cwd only.
+            argv += ["--add-dir", str(self.book_root)]
+        return argv
+
+    def record_author(self, chapter: dict) -> None:
+        """Assert Claude authorship on the contract; the engine records it as an assertion."""
+        source = (f"book-summarizer v1.3 headless on the team account, chapter {chapter['chapter']} "
+                  f"({self.model}); driver _shared/adapters/book_summarizer_team.py")
+        result = subprocess.run(
+            [sys.executable, str(ENGINE), "record-author", "--task-dir", str(self.task_dir),
+             "--family", "claude", "--source", source],
+            capture_output=True, text=True, check=False,
+        )
+        self.log(f"ch{chapter['chapter']}: record-author exit {result.returncode}: "
+                 f"{(result.stdout or result.stderr).strip()[:200]}")
+
+    def wait_for_reset(self, text: str) -> None:
+        """Pause all lanes until the reset time named in ``text`` (fallback: 30 min)."""
+        with lock:
+            if not gate.is_set():
+                return
+            gate.clear()
+        now = dt.datetime.now()
+        match = RESET.search(text or "")
+        if match:
+            hour = int(match.group(1)) % 12 + (12 if match.group(3).lower() == "pm" else 0)
+            moment = now.replace(hour=hour, minute=int(match.group(2) or 0), second=0, microsecond=0)
+            if moment <= now:
+                moment += dt.timedelta(days=1)
+            secs = (moment - now).total_seconds() + 180
+        else:
+            secs = 1800
+        self.log(f"TEAM ACCOUNT LIMIT -> all lanes sleep {secs / 60:.0f} min "
+                 f"(until {now + dt.timedelta(seconds=secs):%m-%d %H:%M})")
+        time.sleep(secs)
+        gate.set()
+        self.log("limit wait over, resuming")
+
+    def build(self, chapter: dict) -> tuple[str, str]:
+        """Run one chapter to completion, retrying up to 3 real attempts."""
+        tag = f"ch{chapter['chapter']}"
+        if self.done(chapter):
+            self.log(f"{tag}: already built ({self.overview(chapter).name}), skipped")
+            return tag, "skipped"
+        if self.dry_run:
+            argv = self.command(chapter)
+            print(" ".join("<prompt>" if i == 6 else a for i, a in enumerate(argv)))
+            print(self.prompt(chapter))
+            return tag, "dry-run"
+        attempts = 0
+        while attempts < 3:
+            gate.wait()
+            attempts += 1
+            self.log(f"{tag}: attempt {attempts} start ({self.model}, team)")
+            started = time.time()
+            try:
+                proc = subprocess.run(self.command(chapter), cwd=self.vault, env=self.env,
+                                      capture_output=True, text=True, timeout=self.timeout)
+                out = proc.stdout
+            except subprocess.TimeoutExpired as error:
+                out = error.stdout.decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
+                self.log(f"{tag}: TIMEOUT after {self.timeout // 60} min")
+            (self.work / f"{tag}.attempt{attempts}.json").write_text(out or "", encoding="utf-8")
+            try:
+                envelope = json.loads(out)
+                text, err = str(envelope.get("result", "")), envelope.get("is_error")
+            except (TypeError, ValueError):
+                envelope, text, err = {}, out or "", True
+            if LIMIT.search(text[:400]) and not self.done(chapter):
+                attempts -= 1  # a limit wait is not a real attempt
+                self.wait_for_reset(text)
+                continue
+            if self.done(chapter):
+                (self.work / f"{tag}.result.md").write_text(text, encoding="utf-8")
+                self.log(f"{tag}: BUILT in {(time.time() - started) / 60:.1f} min, "
+                         f"cost ${envelope.get('total_cost_usd', 0):.2f}, error_flag={err}")
+                self.record_author(chapter)
+                return tag, "built"
+            self.log(f"{tag}: attempt {attempts} produced no valid overview note "
+                     f"(error_flag={err}); head: {text[:160]!r}")
+        return tag, "FAILED"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--task-dir", type=pathlib.Path, required=True)
+    parser.add_argument("--job", type=pathlib.Path, required=True)
+    parser.add_argument("--only", nargs="*", help="chapter numbers to run")
+    parser.add_argument("--jobs", type=int, default=1,
+                        help="lanes; more than 1 only when the user authorized parallel chapters")
+    parser.add_argument("--timeout-min", type=int, default=120)
+    parser.add_argument("--dry-run", action="store_true", help="print the command and prompt; launch nothing")
+    args = parser.parse_args()
+    job = json.loads(args.job.read_text(encoding="utf-8"))
+    driver = Driver(args.task_dir.resolve(), job, args.timeout_min, args.dry_run)
+    chapters = job["chapters"]
+    if args.only:
+        chapters = [c for c in chapters if str(c["chapter"]) in args.only]
+    if not chapters:
+        sys.exit("no chapters selected")
+    if not pathlib.Path(job["pdf"]).is_file():
+        sys.exit(f"PDF not found: {job['pdf']}")
+    driver.log(f"{job['citekey']}: {len(chapters)} chapter(s), {args.jobs} lane(s), model {driver.model}")
+    with ThreadPoolExecutor(args.jobs) as pool:
+        results = list(pool.map(driver.build, chapters))
+    driver.log("SUMMARY " + json.dumps(dict(results)))
+
+
+if __name__ == "__main__":
+    main()

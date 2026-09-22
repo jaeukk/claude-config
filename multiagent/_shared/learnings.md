@@ -205,3 +205,26 @@ whole pipeline. Separately, a long-lived conductor session dominated private cos
 reads (46.9 M over 67 turns) — more than any routing change would save, so start a fresh conductor
 per batch.
 **worker**: implementer x5 (claude-core-team), critic x5 (codex-ceiling), fixer/ingest (native Opus)
+
+## 2026-09-22 book-summarizer on the team account: the headless driver, not dispatch-worker
+
+**측정**: chapter-20 preamble + §20.1 of Torquato 2002 (21 pages, 84 printed equations, 2 tables,
+3 figures) built by `book-summarizer` v1.3 as a headless `claude -p --agent` worker under
+`CLAUDE_CONFIG_DIR=~/.claude-team` (claude-sonnet-5): 15.3 min, $4.93, 160 turns. 84/84 tags in
+printed order, 79/79 table cells carried, all three crops correct on read-back, `agent:` exact,
+gates PASS (identity INDETERMINATE by contract). The same scope scored PARTIAL on 2026-09-10; this
+run's remaining unknown is equation-body fidelity, which only a page-image critic can judge.
+**원인**: a CLI-dispatched worker has no Bash (A2), so `dispatch-worker --write` cannot run an
+agent that renders pages and crops figures. The paper-reviewer precedent (16 papers, 2026-09-20)
+already ran outside the engine; this generalizes it into `_shared/adapters/book_summarizer_team.py`
+under a contract, with `record-author` after each chapter.
+**교훈**: (1) a *named* shell allowlist (`Bash(pdftoppm:*)` …) works for this agent instead of
+bare Bash, at a price: 11 of 160 turns were denied calls a prefix rule cannot match (leading
+`VAR=`/`export`, `for` loops, `cd` outside the vault, `bash script.sh`, `chmod`). The worker
+recovered every time; the brief now says to call tools directly, one per call. (2) A book root
+outside the vault (`--add-dir`) makes `check_wikilinks.py` index the real vault and report the
+figure embeds BROKEN — an artifact of isolation, not of the notes; read the crops back instead.
+(3) `record-author` is an assertion, so a cross-family critic on a team-built chapter still needs
+`authorship_assertion` under `approvals.user`. (4) Budget roughly $5 and 15 min per short section
+at Sonnet; a full chapter is several times that.
+**worker**: implementer (book-summarizer, claude-sonnet-5, team, headless); scoring by the conductor
