@@ -86,3 +86,28 @@
 2. 「현재 배정」 표 갱신 + 「배정 이력」에 날짜·근거 추가 (기존 이력 삭제 금지)
 3. 담당명 병기 사본을 **전부** 이 표와 동기화 — `routing.md`(트리 · Worker 역할 상세의 슬롯 표기 · 최소 Worker Set), `CLAUDE.md`(Architecture 워커 풀), `README.md`(Workers 목록), `.claude/agents/claude-main.md`(description·역할). 병기는 편의 사본 — 슬롯 정의는 불변
 4. 시스템 구조 파일(orchestrator-rules·invariants 등)은 손대지 않는다
+
+- **2026-09-23** Opus 5.5 vs Opus 5 벤치마크 (`tasks/2026-09-23-opus-55-benchmark/`, 정본은
+  `~/.claude/multiagent`). 「현재 배정」 표는 **변경 없음** — 슬롯→워커 배정이 아니라 Claude
+  core/frontier 백엔드의 **모델 핀** 판정이다(식별자 갱신은 `backends.yaml`·config 소관, D7).
+  근거: implementer 형태 10문항(숨김 `unittest` 채점, 엔진 `_claude_cli` argv 그대로) × 3 arm
+  × 3 repeat = 90콜, 전송 실패·재시도 0. `opus5-high` 29/30 = 96.7%(유일 오답 E03 r1은 마커 안에
+  ```` ```python ```` 펜스를 넣은 **형식 실수** — 펜스 제거 시 10/10 통과; 사후 민감도이며 공식
+  점수에 반영하지 않음), `opus55-high` 30/30, `opus55-med` 30/30. 사전등록 게이트 3개(정확도
+  −5 pp · 계약 −5 pp · 반복 산포 +1) **전부 통과**. 비용 $0.089 → $0.066/콜(−27%), medium
+  $0.053(−41%); 중앙 지연 29.7 → 22.3 s(medium 17.7 s). **천장효과로 정확도는 변별력이 없다** —
+  판정은 "동등 이상이면서 더 싸고 빠르다"이지 "우월"이 아니다. 팀 계정에서도 서빙 확인(probe 1콜).
+  **권고**: `claude-core`·`claude-core-team`·`claude-frontier` → `claude-opus-5-5`(implementer
+  effort는 high 유지) + 세션 레버 동반 갱신(`multiagent/.claude/settings.json`, installer
+  `CONDUCTOR_MODEL`, `~/.claude/agents/deep-reasoner.md`). `claude-main.md`는 `opus` 별칭이라
+  **이미** 5.5로 이동했다(routing.md:179의 설계 — 단, 측정 전에 움직였다). 핀 변경은 사용자 결정
+  대기, 이 작업은 `policy/`를 건드리지 않았다. **미완**: 교차 벤더 critic(`codex-ceiling`) —
+  Codex 한도 소진(2026-09-28 18:24 재개), dispatch `d4306e44` exit 1 기록; 동일 family 대체
+  검토는 하지 않았으므로 위 판정은 **미검토** 상태다.
+
+- **2026-09-27**: Applied the user-requested model refresh: `codex-core` now uses
+  `gpt-6-sol`; `claude-core`, `claude-core-team`, and `claude-frontier` use
+  `claude-opus-5-5`. Implementer effort remains high; account and role preferences
+  are unchanged. This supersedes the September 23 pending-pin decision, not its
+  outstanding critic review. Evidence and limitations are recorded in
+  `~/.claude/skills/multiagent/references/model-refresh-2026-09-27.md`.

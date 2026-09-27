@@ -228,3 +228,27 @@ figure embeds BROKEN — an artifact of isolation, not of the notes; read the cr
 `authorship_assertion` under `approvals.user`. (4) Budget roughly $5 and 15 min per short section
 at Sonnet; a full chapter is several times that.
 **worker**: implementer (book-summarizer, claude-sonnet-5, team, headless); scoring by the conductor
+
+## 2026-09-23 Opus 5.5 vs Opus 5 benchmark: harness and monitor lessons
+
+**측정**: 90 implementer-shaped calls (10 frozen items, hidden `unittest` graders, argv taken from
+`policy_engine._claude_cli` by running it in a subprocess from `engine/`), 3 arms × 3 repeats,
+about $6.2 API-equivalent on the private Max account, 0 transport failures. Opus 5.5 high 30/30,
+Opus 5 high 29/30, Opus 5.5 medium 30/30; −27% cost per call at high, −41% at medium.
+**교훈**: (1) A `Monitor` loop gated on `pgrep -f '<script> <args>'` matches the monitor's own
+command line and never ends; gate on the pid (`kill -0`) or a pidfile. (2) In a
+`run_in_background` Bash call, a relative redirect after `cd … &&` failed with "No such file or
+directory" although the directory existed; use absolute paths for log targets. (3) A file-marker
+deliverable (`=== FILE … ===` / `=== END FILE ===`) still drew a markdown fence *inside* the
+markers from Opus 5 in 1 of 30 calls; decide before freezing whether the brief forbids fences or
+the grader strips them — leaving it implicit turns a format slip into a correctness miss. (4)
+Codex's exhausted-quota message ("You've hit your usage limit … try again at <date>") carries no
+429 and no "rate limit" text, so `accounts.classify` reports `error`, not `rate_limited`; the
+attempt event then reads like a worker failure rather than a quota stop. Recorded in
+OPEN_ITEMS rather than fixed — the classifier's patterns are meant to grow from captured
+fixtures, and this is one. (5) With two families, an exhausted Codex window blocks *every*
+cross-family review of Claude-authored work for the rest of the window (D14); check the Codex
+bar before planning a task whose acceptance needs a critic, the same way the team window is
+checked before a batch. (6) Obtaining the worker argv from the engine at run time, instead of
+copying it, kept the benchmark on the real dispatch path without a `sys.path` hack.
+**worker**: none completed; critic (codex-ceiling) refused by Codex quota, deferred to 2026-09-28.

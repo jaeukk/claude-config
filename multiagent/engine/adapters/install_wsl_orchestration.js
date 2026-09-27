@@ -8,7 +8,7 @@ const path = require("node:path");
 // Must match the claude-frontier model in policy/backends.yaml: the conductor
 // binding is a session assertion, so the installed default has to be the model
 // the conductor actually runs on.
-const CONDUCTOR_MODEL = "claude-opus-5";
+const CONDUCTOR_MODEL = "claude-opus-5-5";
 
 function parseArguments(argumentsList) {
   const options = { canonical: "", dryRun: false };

@@ -1,7 +1,7 @@
 # Multi-agent architecture
 
 Claude Code is the default application for an active task, with the conductor binding
-`claude-frontier` (`Opus 5`); Codex may also conduct as `codex-frontier`. Eligibility is
+`claude-frontier` (`Opus 5.5`); Codex may also conduct as `codex-frontier`. Eligibility is
 computed rather than pinned: a host may conduct when its backend is a declared `conductor`
 candidate and its `conductor_adapters` entry declares `dispatch_hosts` reaching an
 independent critic and verifier for every author family. Adding a conductor therefore means

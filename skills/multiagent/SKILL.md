@@ -6,7 +6,7 @@ description: Conductor mode, runnable from Claude Code or Codex, for routing mod
 # Orchestration
 
 Operate as the conductor on any host declared in the `conductor` binding — today Claude Code
-(`claude-frontier`, currently Opus 5) and Codex (`codex-frontier`, currently Astra). The invariant being
+(`claude-frontier`, currently Opus 5.5) and Codex (`codex-frontier`, currently Astra). The invariant being
 protected is not "Claude conducts": it is that **a host may conduct only if it can actually
 reach a different-family critic and verifier**. That is a property of the host's dispatch
 adapter, not of its vendor, and the engine checks it directly instead of trusting a hard-coded
@@ -77,14 +77,15 @@ something false until the pin and the two session levers (D10) follow it.
 
 Backends are named `<family>-<tier>` for Claude and Codex, and each tier carries one role on
 both families — except `fast`, which carries both `bulk_worker` and `runner`.
-A tier is a capability rank, not an effort: `codex-frontier` runs at medium while `codex-core`
-runs at high, because Astra at medium still out-reasons Sol at high.
+A tier names a routing role rather than a reasoning effort: `codex-frontier` runs at medium
+while `codex-core` runs at high. Tier order is a routing preference, not a measured
+cross-model ranking.
 
 | Tier | Role | Claude | Codex | Team backend |
 |---|---|---|---|---|
 | ceiling | critic | Fable 5.1, high | Astra, medium | — |
-| frontier | conductor | Opus 5 (session assertion) | Astra, medium | — |
-| core | implementer | Opus 5, high | Sol, high | `claude-core-team` |
+| frontier | conductor | Opus 5.5 (session assertion) | Astra, medium | — |
+| core | implementer | Opus 5.5, high | GPT-6 Sol, high | `claude-core-team` |
 | mid | verifier | Sonnet 5, medium | Terra, medium | `claude-mid-team` |
 | fast | bulk_worker, runner | Haiku 4.5, low | Terra, low | `claude-fast-team` |
 
@@ -124,6 +125,15 @@ compatible same-family binding exists, so a native spawn runs whatever the agent
 session selects. Resolving `claude-ceiling` does not make a native subagent Fable 5.1 — only
 its frontmatter does. Keep both model and effort in the frontmatter in sync with the binding,
 and never report the resolved backend as the model that ran unless the frontmatter says so.
+
+## Model refresh evidence
+
+The September 27, 2026 refresh pins `codex-core` to `gpt-6-sol` and Claude
+core/team/frontier to `claude-opus-5-5`. Keep implementer effort at high and preserve
+team-first routing. Model upgrades do not route native children to the team account.
+See [the brief benchmark comparison](references/model-refresh-2026-09-27.md) when
+assessing these choices; distinguish published scores, prior local measurements, and
+unmeasured claims. Changing the conductor pin does not switch an already running session.
 
 ## Accounts
 

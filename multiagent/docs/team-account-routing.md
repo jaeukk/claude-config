@@ -8,7 +8,7 @@ A registry entry in `policy/backends.yaml` is account-bound when it carries an `
 
 Three team backends exist, all on `host: claude-code`, all with `config_dir: ~/.claude-team`:
 
-- `claude-core-team` — `claude-opus-5`, capabilities `implementation, review, verification, structured_result`
+- `claude-core-team` — `claude-opus-5-5`, capabilities `implementation, review, verification, structured_result`
 - `claude-mid-team` — `claude-sonnet-5`, capabilities `verification, structured_result`
 - `claude-fast-team` — `claude-haiku-4-5`, capabilities `bulk, mechanical, verification, structured_result`
 
@@ -73,5 +73,5 @@ So `implementer` and `bulk_worker` prefer team first; `runner` reaches it only w
 - `policy/routing.yaml` was not in my input set, so the actual `conductor_adapters` / `dispatch_hosts` contents are unverified. Whether any given conductor host can in fact reach `claude-code` is therefore asserted only structurally, not from the data.
 - `engine/accounts.py` was not in my input set. `accounts.probe`'s definition of "available", what `state`/`reason` it returns, and what `note_run_rate_limited` does (called at line ~1808 when a team attempt is classified `rate_limited`) are unverified.
 - I did not read the dispatch path around lines 1700–1860, so how `_resolve_with_account`'s result feeds the actual subprocess launch, and any fallback-to-private behavior after a failed team attempt, is beyond what I can cite.
-- `claude-core-team` and `claude-core` declare the same model (`claude-opus-5`) and capabilities; the only registry differences are `account`, `config_dir`, and `write_mode`. Why both exist, rather than one, is not stated in any file I read.
+- `claude-core-team` and `claude-core` declare the same model (`claude-opus-5-5`) and capabilities; the only registry differences are `account`, `config_dir`, and `write_mode`. Why both exist, rather than one, is not stated in any file I read.
 - The three team entries appear in two separate places in `backends.yaml` (`claude-core-team` at line 57; `claude-mid-team`/`claude-fast-team` after the `agy-*` entries at line 210). Nothing in the loader depends on order; I mention it only because it makes the registry easy to misread.

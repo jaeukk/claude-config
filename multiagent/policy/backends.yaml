@@ -22,7 +22,7 @@
     "claude-frontier": {
       "host": "claude-code",
       "family": "claude",
-      "model": "claude-opus-5",
+      "model": "claude-opus-5-5",
       "capabilities": [
         "planning",
         "routing",
@@ -40,7 +40,7 @@
     "claude-core": {
       "host": "claude-code",
       "family": "claude",
-      "model": "claude-opus-5",
+      "model": "claude-opus-5-5",
       "capabilities": [
         "implementation",
         "review",
@@ -57,7 +57,7 @@
     "claude-core-team": {
       "host": "claude-code",
       "family": "claude",
-      "model": "claude-opus-5",
+      "model": "claude-opus-5-5",
       "capabilities": [
         "implementation",
         "review",
@@ -134,12 +134,12 @@
       "writes_mediated": false,
       "write_mode": "host-approval",
       "supports_subagents": true,
-      "note": "Codex's newest model, and the one the user's own ~/.codex/config.toml selects. Verified working 2026-09-05 on this ChatGPT-account auth. NB: the id does not follow the gpt-5.6-* pattern of sol/terra -- guessing 'gpt-5.6-astra' from that pattern fails, and the API returns the SAME generic refusal for every unrecognised id, so that message must not be read as evidence the name was correct."
+      "note": "Astra was verified working 2026-09-05 on this ChatGPT-account auth. Model IDs are explicit: gpt-6-astra and gpt-6-sol; the retained Terra backend uses gpt-5.6-terra. Do not infer IDs from another tier's version. The historical probe returned the same generic refusal for unknown IDs; a refusal alone does not confirm model identity or account availability."
     },
     "codex-core": {
       "host": "codex",
       "family": "codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-6-sol",
       "capabilities": [
         "implementation",
         "review",
