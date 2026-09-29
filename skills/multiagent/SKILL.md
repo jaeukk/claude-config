@@ -45,12 +45,13 @@ Run from `multiagent/`, with `E=engine/policy_engine.py`.
 2. The contract names an absolute `target_repo`, `write_scope`, `roles_plan`, `audit_cycles`,
    `author_family` when review is planned, and `conductor.lease_owner`.
 3. `python3 $E acquire-lease --task-dir tasks/<id> --owner <lease_owner>`. One conductor per
-   task. Options cannot be abbreviated, and lease and event commands refuse a folder with no
-   `task.yaml`.
+   task. Options cannot be abbreviated, and `acquire-lease` and `append-event` refuse a folder with
+   no `task.yaml`.
 4. For the hook to enforce the task, put its ID in `tasks/.active-task`.
 5. `python3 $E dispatch-worker --task tasks/<id>/task.yaml --role <role> --brief <file>`, plus
-   `--write` or `--out` (below). `--dry-run` prints the resolved command, account and
-   `enforcement` without launching. Before a native spawn under an active contract, set
+   `--write` or `--out` (below). `--dry-run` prints the resolved backend, account and
+   `enforcement` without launching; for `--write`, read `write.enforcement`, not the
+   base argv it shows. Before a native spawn under an active contract, set
    `dispatch.current_role` to that role: the hook authorizes the spawn against it. Workers do not
    spawn workers, widen scope, or synthesize the final answer.
 6. Critic and verifier differ in family from the artifact's author (see "Authorship").
@@ -83,8 +84,7 @@ Backends are named `<family>-<tier>`. A tier is a routing role, not an effort le
 - `critic`: the other family's ceiling. `verifier`: `codex-mid` for Claude-authored work;
   `claude-mid-team`, then `claude-mid`, for Codex-authored work.
 - `bulk_worker`: one pool led by `claude-fast-team`; the validator requires both families in it.
-- `runner`: `codex-fast` first (equal accuracy at 26× fewer tokens on the recorded benchmark,
-  `_shared/capability-profile.md`), then `claude-fast-team`, then `claude-fast`.
+- `runner`: `codex-fast` first (cheapest at equal accuracy, `_shared/capability-profile.md`), then `claude-fast-team`, then `claude-fast`.
 
 "First, then" is preference, not failover: `resolve_binding` returns the first compatible
 candidate without a health check, and a failed worker is reported, not retried on the next one.
@@ -124,7 +124,7 @@ immutable snapshot, then the destination, then `outputs/<dispatch_id>.json` (acc
 model, attempt, sha256, lease generation). An unsuccessful worker result publishes nothing; its
 `status: failed` record is written only if the lease check and state write succeed. Publication is not atomic: a guard failing partway (lost lease,
 narrowed scope) can leave a snapshot or the destination written with no record; inspect both
-before retrying. A result under 200 bytes of non-whitespace is `below_min_bytes` and is not
+before retrying. A result under 200 UTF-8 bytes after trimming leading and trailing whitespace is `below_min_bytes` and is not
 published, because a one-word refusal also exits 0; pass `--min-bytes` for genuinely short output
 (`0` disables it).
 
@@ -139,7 +139,7 @@ published, because a one-word refusal also exits 0; pass `--min-bytes` for genui
   The worker runs `--restricted` with the file tools and a generated permission file whose `Edit`
   rules name the destination; any other path has no rule and is refused. Paths containing
   `*?[]{}!` are refused, not escaped. `--write` is refused while a managed-settings file exists.
-  Nothing under `~/.claude` works as a destination (the CLI asks a human for those paths).
+  Nothing under `~/.claude` works as a destination (the CLI asks a human).
 - Before launch the engine copies the destination to `writes/<dispatch_id>.before`;
   `restore-write --task-dir … --dispatch-id <id>` puts it back, and refuses if the destination
   changed after the run was recorded. `outputs/<dispatch_id>.json` carries the change set and one
@@ -226,7 +226,7 @@ The dry run reports `enforcement`:
 | Host | Enforcement | Meaning |
 |---|---|---|
 | `codex` | `os-sandbox-read-only` | The OS refuses writes. |
-| `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops MCP servers. Binds the agent, not the process. `--write` and `--exec` extend the string with what they grant. |
+| `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops MCP servers. Binds the agent, not the process. `--write` and `--exec` extend it (`write.enforcement`; the write record). |
 
 Never claim a Claude-hosted worker is sandboxed.
 
