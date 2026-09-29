@@ -37,6 +37,7 @@
     },
     "author_family": {"enum": ["claude", "codex", "gemini", null]},
     "direct_code_files": {"type": "integer", "minimum": 0},
+    "audit_cycles": {"type": "integer", "minimum": 0, "default": 0, "description": "Critic rounds the task may run; 0, the default, skips audit."},
     "created_at": {"type": "string"},
     "updated_at": {"type": "string"}
   },

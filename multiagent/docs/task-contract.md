@@ -15,7 +15,9 @@
    count is kept by the engine — the contract number is as accurate as you make it.
 5. Store each worker result separately. The conductor alone appends task events and
    synthesizes the final result.
-6. Run critic and verifier with a model family different from the artifact author.
+6. Run critic and verifier with a model family different from the artifact author. A critic
+   runs only within the audit budget `audit_cycles` (absent or 0: no audit; N: at most N
+   completed critic rounds), which `dispatch-worker` enforces.
 7. Release the lease, remove `.active-task`, and mark the task complete.
 
 Only transport, timeout, and rate-limit failures are retryable. Invalid input, policy

@@ -212,6 +212,15 @@ def main() -> int:
             # contradicts the observation is the interesting case: it would grant
             # a same-family reviewer while the contract claims otherwise.
             if role in {"critic", "verifier"}:
+                budget = task.get("audit_cycles", 0)
+                if role == "critic" and (type(budget) is not int or budget < 1):
+                    # Same gate as dispatch-worker. Native critic rounds are not counted against
+                    # the budget -- nothing records them -- so only the zero budget is enforced here.
+                    deny(
+                        f"critic blocked: audit_cycles is {budget!r}; 0, the default, means this "
+                        "task skips audit. Set audit_cycles to the number of critic rounds."
+                    )
+                    return 0
                 # Same refusal the engine applies on CLI dispatch: a write whose dispatcher
                 # died left changed files and never recorded which family changed them, so
                 # the sidecar still names the previous writer. Without this, an interrupted

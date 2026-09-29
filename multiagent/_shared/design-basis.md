@@ -150,6 +150,17 @@
   with. Verified end to end: team session quota 0% → 8%, private unchanged, snapshot
   byte-identical to the published file. (2026-09-17)
 
+- **D16 audit budget, default zero** = the contract field `audit_cycles` (non-negative integer,
+  absent = 0) is how many critic rounds a task may run; 0 means no audit. `dispatch-worker`
+  refuses a critic while the budget is 0 or spent, counting one round per critic dispatch whose
+  attempt succeeded (`events.ndjson`); `validate-task` rejects a critic planned with a zero
+  budget; the hook refuses a native critic at 0 but cannot count native rounds. The verifier is
+  outside the budget. **Why**: the practice had been an unwritten critic pass on every task plus
+  N rounds when the user said so; for simple or bulk work the review cost more than it caught,
+  and the user asked for audit to be opt-in, with the number of rounds explicit. **Kept**:
+  direct conductor code edits still require critic review (`approvals.yaml`), surfaced as a
+  `validate-task` warning when the budget is 0. (2026-09-29)
+
 ## 4. 불변식
 
 구체 항목·검증 명령은 `_shared/system-invariants.md`. 시스템 수정 후 그 자가점검을 돌린다.

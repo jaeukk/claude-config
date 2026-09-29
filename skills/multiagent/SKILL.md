@@ -61,7 +61,8 @@ something false until the pin and the two session levers (D10) follow it.
    discovered while working rather than declared up front, is a native spawn — the exception —
    and the contract must say why in `dispatch.native_reason` before it is spawned. Where the
    hook loads, a producing spawn without that field is refused.
-2. Create and validate a task contract with explicit `target_repo`, `write_scope`,
+2. Create and validate a task contract with explicit `target_repo`, `write_scope`, the audit
+   budget `audit_cycles` (below),
    planned roles, approval state, and lease owner.
 3. Acquire the task lease. Never run two conductors for one task.
 4. Resolve each role through `bindings.yaml`; do not encode model names in a role or
@@ -72,6 +73,18 @@ something false until the pin and the two session levers (D10) follow it.
 6. Require critic and verifier families to differ from the artifact author.
 7. Collect structured evidence, apply the retry classification, synthesize once, and
    release the lease.
+
+**Audit budget.** `audit_cycles` in the contract is how many critic rounds the task may run.
+Absent means 0, and 0 means the task skips audit: the default for simple or bulk work, where a
+review costs more than it catches. Set it from the user's instruction ("up to three audit
+cycles" is 3), never above it; raising it mid-task is the user's call. One round is one critic
+dispatch that returned a result; a failed or rate-limited attempt spends nothing. The engine
+refuses a critic dispatch, dry runs included, while the budget is 0 or spent, and
+`validate-task` rejects a plan that names a critic with a zero budget. The hook refuses a
+native critic spawn at 0 but cannot count native rounds, so keep a native audit loop within the
+budget yourself. The verifier is not an audit and is not budgeted. Direct conductor code edits
+still require critic review (`approvals.yaml`), so a task that makes them needs
+`audit_cycles` of at least 1; `validate-task` warns otherwise.
 
 ## Tiers and required bindings
 

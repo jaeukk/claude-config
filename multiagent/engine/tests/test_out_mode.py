@@ -459,6 +459,8 @@ class OutDispatchTest(unittest.TestCase):
             "target_repo": str(self.repo), "write_scope": list(write_scope),
             "roles_plan": list(roles_plan) if roles_plan else [role], "approvals": {"user": []},
             **({"author_family": author_family} if author_family else {}),
+            # A plan with a critic needs an audit budget; absent means 0, which refuses it.
+            **({"audit_cycles": 1} if "critic" in (roles_plan or [role]) else {}),
             "conductor": {"host": "claude-code", "backend": "claude-frontier",
                           "lease_owner": "me"},
             "dispatch": {"current_role": role, "active_workers": 0},
@@ -1032,6 +1034,70 @@ class OutDispatchTest(unittest.TestCase):
 
 
 
+    # -- audit budget ------------------------------------------------------------------------
+
+    def _set_contract(self, **fields):
+        contract = json.loads(self.contract_path.read_text(encoding="utf-8"))
+        for key, value in fields.items():
+            if value is None:
+                contract.pop(key, None)
+            else:
+                contract[key] = value
+        self.contract_path.write_text(json.dumps(contract), encoding="utf-8")
+
+    def test_a_critic_is_refused_when_the_audit_budget_is_absent(self):
+        # Absent means 0, and 0 means the task skips audit: nothing is launched.
+        self.write_contract(role="critic", roles_plan=("critic",), author_family="claude")
+        self._set_contract(audit_cycles=None)
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
+    def test_the_audit_budget_admits_that_many_rounds_then_refuses(self):
+        self.write_contract(role="critic", roles_plan=("critic",), author_family="claude")
+        self.assertEqual(pe.completed_audit_cycles(self.task_dir), 0)
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 0)
+        runner.assert_called_once()
+        self.assertEqual(pe.completed_audit_cycles(self.task_dir), 1)
+        code, runner = self.dispatch(None, role="critic")
+        self.assertEqual(code, 2)
+        runner.assert_not_called()
+
+    def test_a_failed_critic_attempt_does_not_spend_the_budget(self):
+        events = self.task_dir / "events.ndjson"
+        with events.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"type": "worker_attempt", "dispatch_id": "a" * 32,
+                                     "role": "critic", "classification": "error"}) + "\n")
+            stream.write("not json\n")
+            stream.write(json.dumps({"type": "worker_attempt", "dispatch_id": "b" * 32,
+                                     "role": "implementer", "classification": "ok"}) + "\n")
+        self.assertEqual(pe.completed_audit_cycles(self.task_dir), 0)
+        with events.open("a", encoding="utf-8") as stream:
+            for _ in range(2):  # a retried dispatch records two attempts under one id
+                stream.write(json.dumps({"type": "worker_attempt", "dispatch_id": "c" * 32,
+                                         "role": "critic", "classification": "ok"}) + "\n")
+        self.assertEqual(pe.completed_audit_cycles(self.task_dir), 1)
+
+    def test_audit_cycles_validation(self):
+        base = json.loads(self.contract_path.read_text(encoding="utf-8"))
+
+        def check(**fields):
+            return pe.validate_task(self.bundle, {**base, **fields})
+
+        self.assertEqual(check()[0], [])  # no critic planned, budget absent: fine
+        for bad in (-1, True, "2", 1.5):
+            self.assertTrue(any("audit_cycles" in e for e in check(audit_cycles=bad)[0]), bad)
+        errors, _ = check(roles_plan=["runner", "critic"], author_family="claude")
+        self.assertTrue(any("audit_cycles is 0" in e for e in errors))
+        self.assertEqual(check(roles_plan=["runner", "critic"], author_family="claude", audit_cycles=2)[0], [])
+        errors, warnings = check(audit_cycles=2)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("no critic" in w for w in warnings))
+        _, warnings = check(direct_code_files=1)
+        self.assertTrue(any("direct conductor code edits" in w for w in warnings))
+
+
 class ObservedAuthorGuardTest(unittest.TestCase):
     """The authorship sidecar is a state write, and it decides reviewer independence."""
 
@@ -1597,10 +1663,18 @@ class HookObservedAuthorTest(unittest.TestCase):
                 return reason
         return None
 
+    def test_the_hook_refuses_a_native_critic_when_the_audit_budget_is_zero(self):
+        task = self.full_task(("critic",))
+        task["audit_cycles"] = 0
+        reason = self.run_handler(task)
+        self.assertIsNotNone(reason)
+        self.assertIn("audit_cycles", reason)
+
     def full_task(self, roles, approvals=(), author="claude"):
         return {"schema_version": 1, "task_id": "hooked", "status": "active",
                 "target_repo": str(self.task_path.parent), "write_scope": [],
                 "roles_plan": list(roles), "author_family": author,
+                "audit_cycles": 1 if "critic" in roles else 0,
                 "approvals": {"user": list(approvals)},
                 "conductor": {"host": "claude-code", "backend": "claude-frontier",
                               "lease_owner": "me"},

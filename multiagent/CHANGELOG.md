@@ -3,6 +3,13 @@
 이 파일은 MultiAgent orchestration 시스템의 주요 변경을 기록한다.
 형식은 [Keep a Changelog](https://keepachangelog.com/), 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따른다.
 
+## [Unreleased]
+
+### Added
+- **Audit budget `audit_cycles`** (design-basis D16) — critic rounds a task may run; absent or 0
+  skips audit. Enforced by `dispatch-worker` (zero or spent budget refuses a critic) and
+  `validate-task`; the hook refuses a native critic at 0. Templates default to 0.
+
 ## [1.3.1] - 2026-09-29
 
 ### Changed

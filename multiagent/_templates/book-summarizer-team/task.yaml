@@ -24,6 +24,7 @@
     "active_workers": 0
   },
   "author_family": "claude",
+  "audit_cycles": 0,
   "direct_code_files": 0,
   "created_at": "YYYY-MM-DDTHH:MM:SSZ",
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ",

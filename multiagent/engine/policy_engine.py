@@ -416,6 +416,34 @@ def resolve_binding(
     return Decision(False, f"no compatible backend for {role}")
 
 
+def completed_audit_cycles(task_dir: Path | None) -> int:
+    """Count the critic rounds a task has completed.
+
+    One round is one critic dispatch whose recorded attempt succeeded (``classification`` is
+    ``ok``); a rate-limited attempt retried within the same dispatch counts once, and a failed
+    one not at all. Read from ``events.ndjson``. An unreadable line is skipped, so a damaged
+    stream can only under-count.
+    """
+    # ponytail: unlocked read -- two critics launched at the same instant can both take the last
+    # free cycle; read under the lease lock if concurrent critic dispatch ever matters.
+    if task_dir is None:
+        return 0
+    try:
+        lines = (Path(task_dir) / "events.ndjson").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    done: set[str] = set()
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if (isinstance(event, dict) and event.get("type") == "worker_attempt"
+                and event.get("role") == "critic" and event.get("classification") == "ok"):
+            done.add(str(event.get("dispatch_id")))
+    return len(done)
+
+
 def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Validate a task contract without third-party schema dependencies."""
     errors: list[str] = []
@@ -493,6 +521,31 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
             errors.append(
                 "tasks planning critic or verifier must declare author_family as one of "
                 f"{sorted(KNOWN_FAMILIES)}; got {task.get('author_family')!r}"
+            )
+    # `audit_cycles` is the audit budget: how many critic rounds the task may run. Absent means
+    # 0, and 0 means the task skips audit -- the default for simple or bulk work.
+    audit_cycles = task.get("audit_cycles", 0)
+    if type(audit_cycles) is not int or audit_cycles < 0:
+        errors.append(
+            f"audit_cycles must be a non-negative integer (0, the default, means no audit); "
+            f"got {audit_cycles!r}"
+        )
+    elif isinstance(planned, list):
+        if "critic" in planned and audit_cycles == 0:
+            errors.append(
+                "roles_plan includes critic but audit_cycles is 0 (the default, meaning no "
+                "audit); set audit_cycles to the number of critic rounds, or drop critic"
+            )
+        if "critic" not in planned and audit_cycles > 0:
+            warnings.append(
+                f"audit_cycles is {audit_cycles} but roles_plan has no critic, so the budget "
+                "cannot be used"
+            )
+        edit_policy = bundle.documents.get("approvals", {}).get("direct_conductor_edit", {})
+        if audit_cycles == 0 and task.get("direct_code_files") and edit_policy.get("requires_critic_review"):
+            warnings.append(
+                "direct conductor code edits require critic review (approvals.yaml "
+                "direct_conductor_edit), but audit_cycles is 0; set it to at least 1"
             )
     dispatch = task.get("dispatch", {})
     if not isinstance(dispatch.get("active_workers"), int) or dispatch.get("active_workers", -1) < 0:
@@ -2451,6 +2504,25 @@ def dispatch_worker(
             "set the contract's current_role before dispatching",
         ).as_dict(), indent=2), file=sys.stderr)
         return 2
+    if role == "critic":
+        # The audit budget. Dry runs included, so a preview never promises a critic the real
+        # dispatch would refuse.
+        budget = task.get("audit_cycles", 0)
+        if type(budget) is not int or budget < 1:
+            print(json.dumps(Decision(
+                False,
+                f"critic refused: audit_cycles is {budget!r}; 0, the default, means this task "
+                "skips audit. Set audit_cycles to the number of critic rounds to run one.",
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
+        done = completed_audit_cycles(task_dir if task_dir is not None else contract_dir)
+        if done >= budget:
+            print(json.dumps(Decision(
+                False,
+                f"critic refused: audit budget spent ({done} of {budget} critic rounds "
+                "completed); raising audit_cycles is the user's call",
+            ).as_dict(), indent=2), file=sys.stderr)
+            return 2
     if not dry_run and contract_path is None:
         # Every state write reloads and revalidates the contract from disk, so a real
         # dispatch cannot proceed without knowing which file that is. Guessing the name
@@ -3114,6 +3186,7 @@ def self_test(root: Path) -> Decision:
         "dispatch": {"current_role": "critic", "active_workers": 0},
         "author_family": "claude",
         "direct_code_files": 0,
+        "audit_cycles": 1,
     }
     task_errors, _ = validate_task(bundle, task)
     if task_errors:

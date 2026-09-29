@@ -120,6 +120,3 @@ the groups they were found in:
   direct Codex writing. Replace its body with a pointer to this file.
 - `~/.multiagent` (the deployed global fallback) is stale since 2026-09-01. Deploy sources are
   clean as of `e5598d4`; run `scripts/deploy-multiagent.sh global`.
-- The audit-cycle loop (N rounds of critic → fix → critic) remains a practice, not a
-  procedure: the skill mandates one critic pass and one verifier pass. Encode it only if the
-  manual loop proves error-prone; two commands per cycle has not been.
