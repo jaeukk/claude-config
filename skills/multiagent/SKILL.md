@@ -9,9 +9,9 @@ description: Conductor mode for Claude Code or Codex. The default is a single se
 
 The default is **one producer and no review loop**: this session, a native subagent (Claude
 `Agent`, Codex `spawn_agent`; no contract), or one team-account worker with Bash
-(`dispatch-worker --write <dest> --exec`). Measured 2026-09-29 on two test-oracle code tasks (four
-runs per arm): the critic → fix loop changed no score, and the multiagent arm cost 2–3.7× a single
-session, mostly because its implementer lacked Bash.
+(`dispatch-worker --write <dest> --exec`). Measured 2026-09-29/30 on two test-oracle code tasks: the
+multiagent arm scored within noise of a single session at 2–3.7× its cost, mostly because its
+implementer lacked Bash; one critic → fix round changed the score in 1 of 7 runs.
 
 Reach for the engine only for:
 
@@ -28,7 +28,7 @@ On Claude Code a PreToolUse hook enforces the contract, but only in sessions lau
 
 ## Load the local authority
 
-Policy is `multiagent/policy/{roles,bindings,backends,routing,approvals}.yaml` (JSON syntax). The
+Policy is `multiagent/policy/{roles,bindings,backends,routing,approvals}.yaml`. The
 engine reads it from its own tree (`--root`, default: the installation holding
 `policy_engine.py`), never from `~/.multiagent`. Machine-readable policy wins over prose. Fix it in
 a clone of `~/.claude`, never in a deployed copy (`multiagent/AGENTS.md`). Contract fields and
@@ -150,8 +150,8 @@ published, because a one-word refusal also exits 0; pass `--min-bytes` for genui
   `cat`, `head`, `tail`, `sed -n`, `grep`, `wc`, `find`, `git diff`, `git status`, `git log`.
   **Bash writes are not confined to the destination and are outside the change set**; the brief
   is their only containment, and the recorded `enforcement` says so. Use it for code with a test
-  oracle: on 2026-09-29 the same argv matched a no-Bash implementer's catches within noise at
-  about half the tokens and time.
+  oracle: in three runs (2026-09-30) it matched a single session's catches at 0.85× its cost and
+  half a no-Bash implementer's tokens and time.
 - A brief for summary notes must carry the note's frontmatter schema (`citekey`, `zotero_key`,
   `tags`, …); a worker infers none of it.
 
@@ -227,8 +227,6 @@ The dry run reports `enforcement`:
 |---|---|---|
 | `codex` | `os-sandbox-read-only` | The OS refuses writes. |
 | `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops MCP servers. Binds the agent, not the process. `--write` and `--exec` extend it (`write.enforcement`; the write record). |
-
-Never claim a Claude-hosted worker is sandboxed.
 
 ## Conductor host support
 

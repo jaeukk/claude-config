@@ -173,6 +173,13 @@
   time). Both graders saturated, so this means "no advantage detectable on test-oracle code", not
   "equal on hard work"; review stays opt-in for work with no oracle. Critic dispatch remains the
   most-used engine feature (68 of 128 dispatches), which is why review is kept at all.
+  **Acceptance (2026-09-30, three trimmed runs `T1`–`T3` of the undirected `accounts.py` benchmark,
+  `tasks/2026-09-29-cut-stage2-3/results.md`)**: the new default path (one team worker with
+  `--exec`, no review) scored 11, 12, 12 of 12 (single session: 12, 12, 11) at 0.85× the single
+  session's cost; adding one review round gave 12/12 in all three (untrimmed loop: 12/12) at about
+  0.7× the untrimmed loop's cost and 0.6× its wall time. Review changed the score in 1 of 3 of these
+  runs (T1: the draft missed M10, the same bug the single session missed once), so across both
+  benchmarks the loop changed a score in 1 of 7 runs.
   **Cut** (C1–C9 in `tasks/2026-09-29-cut-stage2-3/plan.md`): the `native_reason` gate, which
   enforced "dispatch by default", the default the evidence reversed; the `direct_code_files` cap
   and `approvals.yaml` `direct_conductor_edit`, which nothing incremented (this withdraws D16's
