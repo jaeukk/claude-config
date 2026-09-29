@@ -4,6 +4,9 @@
 #   deploy-multiagent.sh global
 #       Refresh the global fallback home (~/.multiagent on this machine):
 #       policy/ + skills/multiagent, plus a provenance stamp.
+#       Codex does not read this skill copy: since 2026-09-29 ~/.codex/skills/multiagent
+#       links to the canonical ~/.claude/skills/multiagent, so skill edits reach Codex
+#       without a deploy. The policy/ fallback here is still what a deploy refreshes.
 #
 #   deploy-multiagent.sh project <dir>
 #       Install/refresh a project installation at <dir>/_multiagent:

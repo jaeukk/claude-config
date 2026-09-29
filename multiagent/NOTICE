@@ -5,8 +5,11 @@ Operating Principles (4원칙)
 ----------------------------
 
 The "운영 원칙 (Operating Principles)" section in the orchestrator instruction
-file (CLAUDE.md / AGENTS.md) reproduces, verbatim, the behavioral guidelines
-from:
+file (CLAUDE.md / AGENTS.md) applies the behavioral guidelines from the source
+below. Until 2026-09-29 it reproduced them verbatim; it now points to the
+`karpathy-guidelines` skill (~/.claude/skills/karpathy-guidelines/SKILL.md),
+which carries the text, and quotes only the closing success-indicator line.
+Source:
 
   - Source:  https://github.com/multica-ai/andrej-karpathy-skills (CLAUDE.md)
   - Author:  forrestchang (multica-ai)

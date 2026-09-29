@@ -3,6 +3,13 @@
 이 파일은 MultiAgent orchestration 시스템의 주요 변경을 기록한다.
 형식은 [Keep a Changelog](https://keepachangelog.com/), 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따른다.
 
+## [1.3.1] - 2026-09-29
+
+### Changed
+- **CLAUDE.md / AGENTS.md "운영 원칙"** — the verbatim copy of the four principles is replaced by a pointer to the
+  `karpathy-guidelines` skill file, the one authoritative copy. The success-indicator line, the layering rule and the
+  attribution stay. NOTICE, design-basis D8 and INV12 (new INV12g: the skill file exists) updated.
+
 ## [1.3.0] - 2026-07-13
 
 ### Added
