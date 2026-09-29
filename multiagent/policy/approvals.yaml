@@ -12,10 +12,5 @@
     "external_side_effect",
     "secret_or_credential_access",
     "override_policy_denial"
-  ],
-  "direct_conductor_edit": {
-    "max_code_files": 2,
-    "requires_critic_review": true,
-    "shell_mutation_forbidden": true
-  }
+  ]
 }

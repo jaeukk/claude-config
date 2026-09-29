@@ -146,9 +146,10 @@ class ClaudeCliTest(unittest.TestCase):
     def test_no_config_dir_means_no_env(self):
         self.assertEqual(pe._claude_cli({"model": "m", "effort": "low"}).env, {})
 
-    def test_wsl_launcher_refuses_account_bound(self):
+    def test_only_the_native_launcher_exists(self):
+        # The WSL launcher was retired in 1.4.0 (never used).
         backend = {"host": "claude-code", "model": "m", "effort": "low", "config_dir": "~/.claude-team"}
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(ValueError):
             pe.build_worker_command(backend, "wsl", Path("."))
 
 

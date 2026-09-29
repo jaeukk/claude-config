@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -63,6 +64,7 @@ class HeartbeatTtlTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.task_dir = Path(self.tmp.name)
+        (self.task_dir / "task.yaml").write_text("{}", encoding="utf-8")
         self.addCleanup(self.tmp.cleanup)
 
     def test_a_short_heartbeat_does_not_cut_a_long_lease(self):
@@ -78,6 +80,31 @@ class HeartbeatTtlTest(unittest.TestCase):
         pe.acquire_lease(self.task_dir, "me", ttl_seconds=60)
         beat = pe.heartbeat_lease(self.task_dir, "me", 7200)
         self.assertGreater(beat.details["expires_epoch"], time.time() + 3600)
+
+
+class LeaseNeedsContractTest(unittest.TestCase):
+    """A lease or event lands only in a folder that holds its contract (2026-09-27 stray)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_no_lease_and_no_folder_without_a_contract(self):
+        stray = self.root / "2026-09-27-some-task"
+        decision = pe.acquire_lease(stray, "me")
+        self.assertFalse(decision.allowed)
+        self.assertIn("task.yaml", decision.reason)
+        self.assertFalse(stray.exists())
+        self.root.joinpath("lease.json").write_text("{}", encoding="utf-8")
+        self.assertFalse(pe.append_event(self.root, "me", {"type": "x"}).allowed)
+        self.assertFalse(self.root.joinpath("events.ndjson").exists())
+
+    def test_abbreviated_options_are_refused(self):
+        # `--task` was once accepted as `--task-dir`, which is how the stray folder was made.
+        with self.assertRaises(SystemExit), \
+                unittest.mock.patch("sys.stderr"):
+            pe.main(["acquire-lease", "--task", str(self.root), "--owner", "me"])
 
 
 if __name__ == "__main__":

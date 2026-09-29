@@ -26,10 +26,7 @@ import accounts  # sibling module: team-first account selection
 
 POLICY_FILES = ("roles.yaml", "bindings.yaml", "backends.yaml", "routing.yaml", "approvals.yaml")
 VALID_EFFORTS = {"low", "medium", "high"}
-KNOWN_FAMILIES = {"claude", "codex", "gemini"}
-#: A real Gemini model id, e.g. ``gemini-3.6-flash-low``. Anchored so that a
-#: vendor name smuggled after the prefix (``gemini-claude-sonnet-4-6``) fails.
-GEMINI_MODEL = re.compile(r"gemini-\d[\w.]*(?:-[a-z]+)*")
+KNOWN_FAMILIES = {"claude", "codex"}
 #: Roles whose dispatch produces the artifact a critic later reviews.
 PRODUCING_ROLES = frozenset({"implementer", "bulk_worker"})
 #: Sidecar recording which family actually produced the artifact. Both dispatch
@@ -44,6 +41,18 @@ OBSERVED_AUTHOR_FILE = "observed-author.json"
 #: -- and the destination may be a real note the refusal would overwrite. Lower it with
 #: ``--min-bytes`` when a short result is the expected output; ``0`` disables the gate.
 MIN_PUBLISH_BYTES = 200
+#: Commands a ``--write --exec`` worker may run through Bash: the allowlist the 2026-09-29
+#: benchmark's single-session arm used. ``python3`` can write anywhere, so Bash writes are held
+#: to the destination by the brief, not by this list; the recorded enforcement says so.
+EXEC_BASH_ALLOW = (
+    "python3", "python", "ls", "cat", "head", "tail", "sed -n", "grep", "wc", "find",
+    "git diff", "git status", "git log",
+)
+WRITE_ENFORCEMENT = "restricted-tool-surface + single-destination write allowlist"
+EXEC_ENFORCEMENT = (
+    f"{WRITE_ENFORCEMENT} + Bash limited to a named command allowlist; Bash writes are not "
+    "confined to the destination and are outside the change set"
+)
 
 CODE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".jsx",
@@ -309,18 +318,6 @@ def validate_policy(bundle: PolicyBundle) -> tuple[list[str], list[str]]:
             )
         if backend.get("family") not in KNOWN_FAMILIES:
             errors.append(f"{alias} declares unknown family {backend.get('family')!r}")
-        # agy fronts several vendors, so its declared family cannot be inferred from the
-        # host. Require both the family and a genuine Gemini model id: a bare "gemini-"
-        # prefix check would accept "gemini-claude-sonnet-4-6".
-        if backend.get("host") == "agy" and (
-            backend.get("family") != "gemini"
-            or not GEMINI_MODEL.fullmatch(str(backend.get("model", "")))
-        ):
-            errors.append(
-                f"{alias} must declare family 'gemini' and a gemini-<version> model; "
-                "agy also serves other vendors, so a mismatch here silently defeats "
-                "different-family independence"
-            )
     return errors, warnings
 
 
@@ -495,9 +492,6 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
     target = Path(str(task.get("target_repo", "")))
     if not target.is_absolute():
         errors.append("target_repo must be absolute")
-    native_reason = (task.get("dispatch") or {}).get("native_reason")
-    if native_reason is not None and (not isinstance(native_reason, str) or not native_reason.strip()):
-        errors.append("dispatch.native_reason, when present, must be a non-empty string")
     if "read_scope" in task:
         readable = resolve_read_scope(task["read_scope"])
         if not readable.allowed:
@@ -541,15 +535,10 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
                 f"audit_cycles is {audit_cycles} but roles_plan has no critic, so the budget "
                 "cannot be used"
             )
-        edit_policy = bundle.documents.get("approvals", {}).get("direct_conductor_edit", {})
-        if audit_cycles == 0 and task.get("direct_code_files") and edit_policy.get("requires_critic_review"):
-            warnings.append(
-                "direct conductor code edits require critic review (approvals.yaml "
-                "direct_conductor_edit), but audit_cycles is 0; set it to at least 1"
-            )
+    # `native_reason`, `direct_code_files` and `dispatch.active_workers` were retired in 1.4.0
+    # (the cut plan, 2026-09-30). Older contracts still carry them; they are accepted and
+    # ignored. `current_role` stays: the hook reads it to name a native spawn's role.
     dispatch = task.get("dispatch", {})
-    if not isinstance(dispatch.get("active_workers"), int) or dispatch.get("active_workers", -1) < 0:
-        errors.append("dispatch.active_workers must be a non-negative integer")
     current_role = dispatch.get("current_role")
     if current_role is not None and current_role not in task.get("roles_plan", []):
         errors.append("dispatch.current_role must be null or planned")
@@ -614,9 +603,8 @@ def authorize_action(
 ) -> Decision:
     """Authorize a normalized orchestration action against a task contract.
 
-    ``task_dir`` lets the native-spawn path see the slots CLI dispatches hold. Without
-    it the two paths check the same ceiling against different numbers, and each can
-    fill it independently.
+    ``task_dir`` lets the native-spawn path see the slots CLI dispatches hold on the lease,
+    which is the only worker count the engine keeps.
     """
     task_errors, _ = validate_task(bundle, task)
     if task_errors:
@@ -624,7 +612,6 @@ def authorize_action(
     kind = action.get("kind")
     actor_role = action.get("actor_role", "conductor")
     approvals = set(task.get("approvals", {}).get("user", []))
-    approval_policy = bundle.documents["approvals"]
 
     if kind == "spawn_worker":
         role = action.get("role")
@@ -636,33 +623,9 @@ def authorize_action(
         limit = worker_limit(bundle, host)
         if limit is None:
             return Decision(False, f"no conductor adapter configured for host: {host}")
-        # Both kinds of worker charge one ceiling, from whichever side asks: the
-        # contract's count of natively-spawned workers plus the slots CLI
-        # dispatches hold on the lease.
-        in_flight = task["dispatch"]["active_workers"] + held_worker_slots(task_dir)
+        in_flight = held_worker_slots(task_dir)
         if in_flight >= limit:
             return Decision(False, f"active-worker limit reached for {host} ({in_flight}/{limit})")
-        if action.get("native") and role in PRODUCING_ROLES:
-            # A native producer bills the session login, gets no baseline and no change set,
-            # and leaves an observed author only where the hook happens to be loaded. So the
-            # default shape of producing work is a `--write` dispatch, and a native spawn is
-            # the exception that has to say why -- Bash, a file set that cannot be declared
-            # before the shard starts, or bounded work `--write` itself refuses.
-            #
-            # What this checks is presence: a non-blank string in a contract field the
-            # conductor writes. It does not verify the reason is true or that it was written
-            # for this shard; the field is task-wide and mutable. It turns an unexamined
-            # default into a recorded exception, and the hook snapshots the text it saw into
-            # the authorship record so a later reader has the reason as of that spawn.
-            reason = task.get("dispatch", {}).get("native_reason")
-            if not isinstance(reason, str) or not reason.strip():
-                return Decision(
-                    False,
-                    f"native spawn of {role} refused: producing work is dispatched with "
-                    "`dispatch-worker --write <destination>` by default; a native producer "
-                    "needs `dispatch.native_reason` in the contract (it runs commands, or its "
-                    "destinations cannot be declared up front)",
-                )
         author_family = task.get("author_family") if role in {"critic", "verifier"} else None
         return resolve_binding(
             bundle, role, author_family=author_family, conductor_host=host,
@@ -679,10 +642,6 @@ def authorize_action(
             return Decision(False, "implementer is not planned")
         if not _is_in_scope(path_value, task["target_repo"], task["write_scope"]):
             return Decision(False, "path is outside target_repo/write_scope")
-        if actor_role == "conductor" and Path(path_value).suffix.lower() in CODE_SUFFIXES:
-            maximum = approval_policy["direct_conductor_edit"]["max_code_files"]
-            if task.get("direct_code_files", 0) >= maximum:
-                return Decision(False, "conductor direct-code-edit limit reached")
         return Decision(True, "write is inside the approved task scope")
 
     if kind in {"conductor_handoff", "scope_expansion", "destructive_action", "external_side_effect", "secret_or_credential_access"}:
@@ -783,7 +742,7 @@ def _mutate_lease(task_dir: Path, mutate: Any) -> Decision:
         return Decision(False, str(error))
 
 
-def claim_worker_slot(task_dir: Path, owner: str, limit: int, reserved: int = 0) -> Decision:
+def claim_worker_slot(task_dir: Path, owner: str, limit: int) -> Decision:
     """Take one simultaneous-worker slot, recorded on the lease.
 
     The count lives on the lease rather than in the task contract because the
@@ -791,10 +750,6 @@ def claim_worker_slot(task_dir: Path, owner: str, limit: int, reserved: int = 0)
     left at zero permits unlimited workers; a count the engine increments does
     not. The lease is already the one file with a single owner, so it is where a
     number that must not be forged belongs.
-
-    ``reserved`` is the contract's own count of natively-spawned workers, which
-    never reach this engine. Both are charged against **one** ceiling: counting
-    them separately would let a host run ``limit`` workers of each kind.
 
     The returned ``generation`` identifies the lease this claim belongs to, so a
     release cannot decrement a counter that a later acquisition started.
@@ -804,15 +759,14 @@ def claim_worker_slot(task_dir: Path, owner: str, limit: int, reserved: int = 0)
         if payload.get("owner") != owner or float(payload.get("expires_epoch", 0)) <= time.time():
             return Decision(False, "a live matching lease is required")
         active = int(payload.get("active_workers", 0))
-        if reserved + active >= limit:
-            return Decision(False, f"active-worker limit reached ({reserved + active}/{limit})")
+        if active >= limit:
+            return Decision(False, f"active-worker limit reached ({active}/{limit})")
         payload["active_workers"] = active + 1
         return Decision(
             True,
             "worker slot claimed",
             {
                 "active_workers": active + 1,
-                "reserved": reserved,
                 "limit": limit,
                 "generation": payload.get("acquired_at"),
             },
@@ -846,14 +800,26 @@ def release_worker_slot(task_dir: Path, owner: str, generation: str) -> Decision
     return _mutate_lease(task_dir, mutate)
 
 
+def _missing_contract(task_dir: Path) -> Decision | None:
+    """Refuse a task folder that does not hold a ``task.yaml``; ``None`` when it does."""
+    if not (task_dir / "task.yaml").is_file():
+        return Decision(False, f"{task_dir} holds no task.yaml; pass the contract's own folder")
+    return None
+
+
 def acquire_lease(task_dir: Path, owner: str, ttl_seconds: int = 300) -> Decision:
     """Acquire an exclusive task lease, replacing only an expired lease.
 
     Takes the same lock as every other lease mutation. Acquiring outside it could
     replace a lease that a concurrent heartbeat or slot claim had already read,
     which would then write its stale payload back over the new one.
+
+    The task folder must already exist and hold its ``task.yaml``. Creating it here is how a
+    mistyped relative path once grew a stray task folder outside ``tasks/`` (2026-09-27).
     """
-    task_dir.mkdir(parents=True, exist_ok=True)
+    missing = _missing_contract(task_dir)
+    if missing is not None:
+        return missing
     lease_path = task_dir / "lease.json"
     try:
         with _lease_lock(task_dir):
@@ -942,6 +908,9 @@ def append_event(task_dir: Path, owner: str, event: dict[str, Any]) -> Decision:
     A write made *during a dispatch* wants more than this -- the lease lock, the captured
     generation, and a revalidated contract -- and uses ``_append_state_event`` instead.
     """
+    missing = _missing_contract(task_dir)
+    if missing is not None:
+        return missing
     lease_path = task_dir / "lease.json"
     if not lease_path.exists():
         return Decision(False, "task has no lease")
@@ -1336,6 +1305,7 @@ class WorkerCommand:
     isolated_cwd: bool = False
     env: dict[str, str] = field(default_factory=dict)
     result_file: Path | None = None
+    bash_allowed: bool = False
 
 
 def _codex_cli(
@@ -1383,13 +1353,10 @@ def _claude_cli(
     the process -- a settings-level hook could act outside it -- so it is not
     labelled as a sandbox.
 
-    No role gets ``Bash`` here, including ``verifier``. Granting it would buy test
-    execution at the price of an uncontained write path in the target repository,
-    which is the containment this command exists to provide. The consequence is
-    real and must not be papered over: a CLI-dispatched Claude verifier can read
-    and reason about tests but cannot run them. Route executable verification to
-    a Codex verifier, whose read-only sandbox blocks writes rather than commands,
-    or to a natively-spawned Claude subagent under the PreToolUse hook.
+    No role gets ``Bash`` here. The one exception is a ``--write --exec`` dispatch, which
+    ``build_worker_command`` extends with Bash and a named allowlist; everything else can read
+    tests but not run them. A Codex reviewer's read-only sandbox blocks temporary files too,
+    so it usually cannot run a suite either (measured 2026-09-29).
     """
     # ``--output-format json`` gives the result envelope (``is_error``,
     # ``api_error_status``) the dispatcher classifies; only the result text is
@@ -1417,43 +1384,11 @@ def _claude_cli(
     )
 
 
-def _agy_cli(
-    backend: dict[str, Any], role: str | None = None, capture_result: bool = False
-) -> WorkerCommand:
-    """Build the Gemini worker command.
-
-    Headless ``agy`` takes its prompt as one argument, not on stdin, and times
-    out when told to walk a directory -- so it runs in a throwaway directory
-    with no ``--add-dir``, and the brief must inline whatever it needs to read.
-
-    **This builder is deliberately unreachable**: ``agy`` is absent from every
-    adapter's ``dispatch_hosts`` until two things are established, neither of
-    which a throwaway cwd provides on its own. First, containment: ``--sandbox``
-    restricts the terminal but is not a filesystem boundary, so an absolute path
-    still escapes the temporary directory -- which is why
-    ``--dangerously-skip-permissions`` is *not* passed here, even though System A
-    passes it. Second, a successful completion has never been observed through
-    this path. Re-add ``agy`` to ``dispatch_hosts`` only after both hold, and note
-    the argv limit before doing so: Windows caps a command line at 32,767
-    characters, so an inlined brief must move to stdin or a file in the cwd.
-    """
-    return WorkerCommand(
-        "agy",
-        [
-            "--model", str(backend["model"]), "--effort", str(backend["effort"]),
-            "--sandbox", "--prompt",
-        ],
-        "isolated-cwd-containment-unverified",
-        prompt_via="argv",
-        isolated_cwd=True,
-    )
-
-
 #: Hosts the engine can actually launch, keyed by backend ``host``. Both
 #: `validate_policy` and `resolve_binding`'s dispatchability filter read this, so
 #: a `dispatch_hosts` entry with no builder here is a policy error caught at
 #: validation rather than a ValueError raised mid-dispatch.
-WORKER_CLI = {"codex": _codex_cli, "claude-code": _claude_cli, "agy": _agy_cli}
+WORKER_CLI = {"codex": _codex_cli, "claude-code": _claude_cli}
 
 
 def worker_cli_args(
@@ -1474,9 +1409,12 @@ def worker_cli_args(
 def build_worker_command(
     backend: dict[str, Any], host_mode: str, target_repo: Path, role: str | None = None,
     capture_result: bool = False, write_settings: Path | None = None,
-    read_roots: list[str] | None = None,
+    read_roots: list[str] | None = None, exec_bash: bool = False,
 ) -> tuple[list[str], WorkerCommand]:
-    """Resolve a worker launch specification into a native or WSL argv.
+    """Resolve a worker launch specification into a native argv.
+
+    ``exec_bash`` (``--exec``) adds ``Bash`` to a write-mode worker; the generated settings
+    file carries the command allowlist. It is refused without ``write_settings``.
 
     ``write_settings`` turns on ``--write`` mode for a Claude worker: the file tools join the
     tool surface, ``--restricted`` drops every inherited settings source so the generated file
@@ -1504,12 +1442,17 @@ def build_worker_command(
                 "generated permission file"
             )
         args = list(spec.args)
-        args[args.index("Read,Grep,Glob")] = "Read,Grep,Glob,Write,Edit,NotebookEdit"
+        args[args.index("Read,Grep,Glob")] = (
+            "Read,Grep,Glob,Write,Edit,NotebookEdit" + (",Bash" if exec_bash else "")
+        )
         spec = dataclasses.replace(
             spec,
             args=["--settings", str(write_settings), *args],
-            enforcement="restricted-tool-surface + single-destination write allowlist",
+            enforcement=EXEC_ENFORCEMENT if exec_bash else WRITE_ENFORCEMENT,
+            bash_allowed=exec_bash,
         )
+    elif exec_bash:
+        raise ValueError("--exec needs --write: Bash is granted only to a write-mode worker")
     if host_mode == "native":
         executable = (
             shutil.which(f"{spec.program}.cmd") or shutil.which(spec.program)
@@ -1519,42 +1462,6 @@ def build_worker_command(
         if executable is None:
             raise FileNotFoundError(f"{spec.program} executable is not on PATH")
         return [executable, *spec.args], spec
-    if host_mode == "wsl":
-        if spec.isolated_cwd:
-            # `wsl --cd` fixes the working directory here, before the caller's
-            # temporary-directory branch can apply. Silently ignoring that would
-            # start an "isolated" worker inside the target repository while the
-            # dry run still claimed isolation, so refuse instead.
-            raise NotImplementedError(
-                f"{spec.program} requires an isolated working directory, which the WSL "
-                "launcher cannot provide; dispatch it natively"
-            )
-        if spec.env:
-            raise NotImplementedError(
-                f"{spec.program} is account-bound (CLAUDE_CONFIG_DIR) and the WSL launcher "
-                "does not forward environment; dispatch it natively from inside WSL"
-            )
-        if spec.result_file is not None:
-            # Only reachable when the engine asked for a result file, which today means
-            # `--out`. The path is a host path and only `target_repo` is translated below,
-            # so handing it across the boundary would leave the engine reading a file
-            # nothing ever wrote -- silently, and looking exactly like a worker that
-            # returned nothing. A `text` dispatch has no result file and is unaffected.
-            raise NotImplementedError(
-                f"{spec.program} must write its result to a host-side file to publish, "
-                "which the WSL launcher cannot translate; dispatch it natively from "
-                "inside WSL"
-            )
-        wsl = shutil.which("wsl.exe")
-        if wsl is None:
-            raise FileNotFoundError("wsl.exe is not on PATH")
-        converted = subprocess.run(
-            [wsl, "wslpath", "-a", str(target_repo)],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        return [wsl, "--cd", converted, "--exec", spec.program, *spec.args], spec
     raise ValueError(f"unsupported worker host mode: {host_mode}")
 
 
@@ -1657,9 +1564,7 @@ def record_asserted_family(contract_dir: Path, family: str, source: str) -> None
         )
 
 
-def record_contributing_family(
-    contract_dir: Path, family: str, source: str, admission: dict[str, Any] | None = None
-) -> None:
+def record_contributing_family(contract_dir: Path, family: str, source: str) -> None:
     """Add one family to the authorship record, keeping whoever was already there.
 
     Read-modify-write under the task lock, because the point is accumulation: overwriting is
@@ -1705,11 +1610,9 @@ def record_contributing_family(
         }
         if damaged is not None:
             payload["damaged"] = damaged
-        # Assertions and admissions are separate histories; an observation landing later must
-        # not erase them. Drop the assertions and a family a reviewer had to differ from
-        # quietly stops counting; drop the admissions and the reason that justified an earlier
-        # native producer is gone the moment the next producer is recorded -- `source` keeps
-        # only the latest, which is all it is for.
+        # Assertions are a separate history; an observation landing later must not erase them,
+        # or a family a reviewer had to differ from quietly stops counting. `admissions` is the
+        # retired native_reason history (1.4.0): no longer written, kept where it exists.
         try:
             prior = json.loads((contract_dir / OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8"))
             if isinstance(prior, dict):
@@ -1718,35 +1621,9 @@ def record_contributing_family(
                         payload[key] = prior[key]
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             pass
-        if admission is not None:
-            payload.setdefault("admissions", [])
-            payload["admissions"].append({"family": family, "at": utc_now(), **admission})
         _state_file(contract_dir, OBSERVED_AUTHOR_FILE).write_text(
             json.dumps(payload, indent=2) + "\n", encoding="utf-8"
         )
-
-
-def observed_author_family(contract_dir: Path) -> str | None:
-    """Return the family recorded as producing this task's artifact.
-
-    ``None`` means genuinely no record -- no producing worker ran. A record that
-    exists but is corrupt, unreadable, or names an unknown family raises instead:
-    collapsing that into ``None`` would make damaged evidence indistinguishable
-    from honest absence, and the caller would wave the review through.
-    """
-    sidecar = contract_dir / OBSERVED_AUTHOR_FILE
-    if not sidecar.exists():
-        return None
-    try:
-        payload = json.loads(sidecar.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise UnreadableAuthorRecord(f"{sidecar} cannot be read: {error}") from error
-    family = payload.get("family") if isinstance(payload, dict) else None
-    # isinstance first: an unhashable value (a list, a dict) would raise TypeError
-    # on the set lookup instead of reaching the structured denial.
-    if not isinstance(family, str) or family not in KNOWN_FAMILIES:
-        raise UnreadableAuthorRecord(f"{sidecar} records an unknown family: {family!r}")
-    return family
 
 
 def _resolve_with_account(bundle: PolicyBundle, role: str, dry_run: bool, **kwargs: Any) -> tuple[Decision, str]:
@@ -1779,6 +1656,28 @@ def _emit_attempt(attempt: accounts.Attempt) -> None:
     sys.stderr.write(attempt.stderr)
 
 
+#: Codex prints its run's token total on stderr as ``tokens used`` then the number.
+CODEX_TOKENS_USED = re.compile(r"tokens used\s*\n?\s*([\d,]+)")
+
+
+def attempt_cost(attempt: accounts.Attempt) -> dict[str, Any]:
+    """Return what an attempt cost, as far as its CLI reports it.
+
+    Claude: the envelope's ``usage`` and ``total_cost_usd``. Codex: the ``tokens used`` total
+    from stderr. Absent fields are omitted, never guessed.
+    """
+    cost: dict[str, Any] = {}
+    envelope = attempt.envelope if isinstance(attempt.envelope, dict) else {}
+    if isinstance(envelope.get("usage"), dict):
+        cost["usage"] = envelope["usage"]
+    if isinstance(envelope.get("total_cost_usd"), (int, float)):
+        cost["total_cost_usd"] = envelope["total_cost_usd"]
+    found = CODEX_TOKENS_USED.findall(attempt.stderr or "")
+    if found:
+        cost["tokens_used"] = int(found[-1].replace(",", ""))
+    return cost
+
+
 def _record_attempt(
     bundle: PolicyBundle, task_dir: Path, owner: str, generation: str | None,
     contract_path: Path, role: str, backend: dict[str, Any], number: int,
@@ -1798,7 +1697,7 @@ def _record_attempt(
     recorded = _append_state_event(bundle, task_dir, owner, generation, contract_path, {
         "type": "worker_attempt", "dispatch_id": dispatch_id, "role": role,
         "backend": backend["backend"], "attempt": number, "reason": reason,
-        **attempt.as_event(),
+        **attempt.as_event(), **attempt_cost(attempt),
     })
     if not recorded.allowed:
         print(f"warning: attempt not recorded: {recorded.reason}", file=sys.stderr)
@@ -2035,8 +1934,12 @@ def managed_settings_present() -> Path | None:
     return None
 
 
-def write_permission_settings(destination: str | Path, kind: str) -> dict[str, Any]:
+def write_permission_settings(
+    destination: str | Path, kind: str, bash: bool = False
+) -> dict[str, Any]:
     """Build the settings document that authorizes exactly one destination.
+
+    ``bash`` adds ``Bash(<command>:*)`` for each ``EXEC_BASH_ALLOW`` entry (``--exec``).
 
     Every rule is an ``Edit`` rule. Measured 2026-09-18: with an allowlist naming only
     ``Write(...)`` a file creation is **refused**, and with the same path named as ``Edit(...)``
@@ -2058,6 +1961,8 @@ def write_permission_settings(destination: str | Path, kind: str) -> dict[str, A
             f"Edit(//{root}/{prefix}{pattern})"
             for pattern in RESERVED_WRITE_DENY for prefix in ("", "**/")
         ]
+    if bash:
+        allow += [f"Bash({command}:*)" for command in EXEC_BASH_ALLOW]
     return {"permissions": {"allow": allow, "deny": deny}}
 
 
@@ -2475,6 +2380,7 @@ def dispatch_worker(
     contract_path: Path | None = None,
     min_publish_bytes: int = MIN_PUBLISH_BYTES,
     write_path: str | None = None,
+    exec_bash: bool = False,
 ) -> int:
     """Dispatch one bounded worker as a subprocess.
 
@@ -2492,16 +2398,11 @@ def dispatch_worker(
     returned, once, after checking that it may. Publication needs ``contract_path`` so the
     guards can reload the contract from disk rather than trust the copy in memory.
     """
-    # The contract's declared role and the dispatched role must agree. The hook
-    # reads `current_role` while this command reads `--role`, so a mismatch means
-    # the two enforcement paths disagree about what is running -- and the one
-    # that checks independence is the one being told a different story.
-    declared_role = task.get("dispatch", {}).get("current_role")
-    if declared_role != role:
+    # `--role` names the dispatched role; `dispatch.current_role` is not consulted here (1.4.0).
+    # The hook still reads it, because a native spawn carries no role of its own.
+    if exec_bash and write_path is None:
         print(json.dumps(Decision(
-            False,
-            f"dispatch.current_role is {declared_role!r} but --role is {role!r}; "
-            "set the contract's current_role before dispatching",
+            False, "--exec needs --write: Bash is granted only to a write-mode worker"
         ).as_dict(), indent=2), file=sys.stderr)
         return 2
     if role == "critic":
@@ -2557,12 +2458,6 @@ def dispatch_worker(
         print(json.dumps(read_scope.as_dict(), indent=2), file=sys.stderr)
         return 2
     read_roots: list[str] = (read_scope.details or {})["roots"]
-    if read_roots and host_mode != "native":
-        print(json.dumps(Decision(
-            False, f"read_scope is not implemented for --host {host_mode}: the launcher "
-                   "translates only target_repo, so these paths would not resolve"
-        ).as_dict(), indent=2), file=sys.stderr)
-        return 2
     destination: Path | None = None
     write_target: Path | None = None
     write_kind: str | None = None
@@ -2572,12 +2467,6 @@ def dispatch_worker(
         if out_path is not None:
             print(json.dumps(Decision(
                 False, "--write and --out cannot be combined: a dispatch lands its result one way"
-            ).as_dict(), indent=2), file=sys.stderr)
-            return 2
-        if host_mode != "native":
-            print(json.dumps(Decision(
-                False, f"--write is not implemented for --host {host_mode}: the generated "
-                       "permission file's path does not translate"
             ).as_dict(), indent=2), file=sys.stderr)
             return 2
         if not bundle.roles.get(role, {}).get("may_write"):
@@ -2747,7 +2636,7 @@ def dispatch_worker(
                 # that showed the read-only argv would preview something that never runs.
                 "write": None if write_target is None else {
                     "destination": str(write_target), "kind": write_kind,
-                    "enforcement": "restricted-tool-surface + single-destination write allowlist",
+                    "enforcement": EXEC_ENFORCEMENT if exec_bash else WRITE_ENFORCEMENT,
                 },
             },
             indent=2,
@@ -2759,10 +2648,7 @@ def dispatch_worker(
     limit = worker_limit(bundle, task["conductor"]["host"])
     owner = task["conductor"]["lease_owner"]
     slots = task_dir if task_dir is not None else Path(".")
-    # Natively-spawned workers never reach this engine, so the contract's count
-    # of them is charged against the same ceiling as this one.
-    reserved = int(task.get("dispatch", {}).get("active_workers", 0))
-    claimed = claim_worker_slot(slots, owner, limit, reserved)
+    claimed = claim_worker_slot(slots, owner, limit)
     if not claimed.allowed:
         print(json.dumps(claimed.as_dict(), indent=2), file=sys.stderr)
         return 2
@@ -2788,7 +2674,9 @@ def dispatch_worker(
             baseline = captured.details
             write_settings_path = _state_path(task_dir, "writes", dispatch_id, ".settings.json")
             write_settings_path.write_text(
-                json.dumps(write_permission_settings(write_target, write_kind), indent=2),
+                json.dumps(
+                    write_permission_settings(write_target, write_kind, bash=exec_bash), indent=2
+                ),
                 encoding="utf-8",
             )
             # Written *before* the worker starts, for two reasons. A dispatcher killed
@@ -2816,7 +2704,7 @@ def dispatch_worker(
                 staging.replace(reservation)
             command, spec = build_worker_command(
                 backend, host_mode, target_repo, role, capture_result=False,
-                write_settings=write_settings_path, read_roots=read_roots,
+                write_settings=write_settings_path, read_roots=read_roots, exec_bash=exec_bash,
             )
         attempt = _run_worker(
             command, spec, task, role, brief_path, target_repo, backend,
@@ -2974,8 +2862,8 @@ def dispatch_worker(
             # followed told the conductor to "correct" the declaration to match,
             # handing the untouched artifact to a same-family reviewer.
             #
-            # ponytail: last successful producer wins. Mixed-family artifacts
-            # collapse to one family; record a list if that ever matters.
+            # The record accumulates (record_contributing_family): every family that produced
+            # part of the artifact stays, so mixed authorship is visible to the reviewer gate.
             #
             # Guarded like every other state write, and for a sharper reason than most:
             # this file decides which family may review the artifact. Unguarded, a
@@ -3065,6 +2953,11 @@ def _run_worker(
         f"Role: {role}\nTask: {task['task_id']}\n"
         "You are a bounded worker, not a conductor. Do not spawn agents or change scope. "
         + (
+            f"You may write only inside {write_destination}. Your file tools are refused "
+            "everywhere else, but Bash is not: it is limited to "
+            f"{', '.join(EXEC_BASH_ALLOW)}, and only this instruction keeps it inside the "
+            "destination. Use it to run and inspect; write nothing outside the destination. "
+            if write_destination is not None and spec.bash_allowed else
             f"You may write only inside {write_destination}; every other path is refused, so "
             "nothing you write elsewhere will land. "
             if write_destination is not None else
@@ -3084,20 +2977,27 @@ def _run_worker(
 
     def run(working_directory: str | Path) -> accounts.Attempt:
         """Launch the worker, feeding the prompt the way its CLI expects."""
+        # A Codex run keeps stdout streaming but has stderr captured: its token total is
+        # printed there ("tokens used"), and `--ephemeral` leaves no other record of it.
+        # `_emit_attempt` re-emits the captured stderr.
+        streams: dict[str, Any] = (
+            {"capture_output": True} if capture else {"stderr": subprocess.PIPE}
+        )
         if spec.prompt_via == "argv":
             completed = subprocess.run(
                 command, cwd=working_directory, env=env, stdin=subprocess.DEVNULL,
-                text=True, check=False, capture_output=capture,
+                text=True, check=False, **streams,
             )
         else:
             completed = subprocess.run(
                 command, cwd=working_directory, env=env, input=prompt,
-                text=True, check=False, capture_output=capture,
+                text=True, check=False, **streams,
             )
         if not capture:
             classification = "ok" if completed.returncode == 0 else "error"
             return accounts.Attempt(
-                account, config_dir, model, completed.returncode, classification, None, "", "",
+                account, config_dir, model, completed.returncode, classification, None, "",
+                completed.stderr or "",
                 result_text=_read_result_file(spec.result_file),
             )
         envelope = accounts.parse_envelope(completed.stdout)
@@ -3167,7 +3067,7 @@ def self_test(root: Path) -> Decision:
             "schema_version": 1, "task_id": "self-test-reach", "status": "active",
             "conductor": {"host": "codex", "backend": "codex-frontier", "lease_owner": "o"},
             "target_repo": str(root), "write_scope": [], "roles_plan": ["runner"],
-            "approvals": {"user": []}, "dispatch": {"current_role": None, "active_workers": 0},
+            "approvals": {"user": []}, "dispatch": {"current_role": None},
         }
         if not validate_task(bundle, unreachable_task)[0]:
             return Decision(False, "validate_task admitted a conductor that can dispatch nothing")
@@ -3183,9 +3083,8 @@ def self_test(root: Path) -> Decision:
         "write_scope": ["docs/"],
         "roles_plan": ["implementer", "critic", "verifier"],
         "approvals": {"user": []},
-        "dispatch": {"current_role": "critic", "active_workers": 0},
+        "dispatch": {"current_role": "critic"},
         "author_family": "claude",
-        "direct_code_files": 0,
         "audit_cycles": 1,
     }
     task_errors, _ = validate_task(bundle, task)
@@ -3204,15 +3103,13 @@ def self_test(root: Path) -> Decision:
     try:
         routing["defaults"]["max_fanout"] = 2
         adapters["claude-code"]["max_active_children"] = 1
-        task["dispatch"]["active_workers"] = 0
         if not authorize_action(bundle, task, spawn).allowed:
             return Decision(False, "adapter limit denied a dispatch below capacity")
-        task["dispatch"]["active_workers"] = 1
-        if authorize_action(bundle, task, spawn).allowed:
+        if worker_limit(bundle, "claude-code") != 1:
             return Decision(False, "adapter limit did not cap max_fanout")
         # A declared adapter with an unmeasured capacity falls back to max_fanout.
         adapters["claude-code"]["max_active_children"] = None
-        if not authorize_action(bundle, task, spawn).allowed:
+        if worker_limit(bundle, "claude-code") != 2:
             return Decision(False, "null max_active_children did not fall back to max_fanout")
         # An undeclared host has no enforceable dispatch contract: deny, never fall back.
         adapters.pop("claude-code")
@@ -3231,9 +3128,13 @@ def self_test(root: Path) -> Decision:
         adapters.update(saved_adapters)
         if "claude-code" in adapters:
             adapters["claude-code"]["max_active_children"] = saved_children
-        task["dispatch"]["active_workers"] = 0
     with tempfile.TemporaryDirectory(prefix="multiagent-self-test-") as directory:
         task_dir = Path(directory) / "task"
+        # A lease is refused where no contract lives, and nothing is created there.
+        if acquire_lease(task_dir, "alpha", ttl_seconds=60).allowed or task_dir.exists():
+            return Decision(False, "a lease was taken in a folder with no task.yaml")
+        task_dir.mkdir()
+        (task_dir / "task.yaml").write_text(json.dumps(task), encoding="utf-8")
         first = acquire_lease(task_dir, "alpha", ttl_seconds=60)
         second = acquire_lease(task_dir, "beta", ttl_seconds=60)
         event = append_event(task_dir, "alpha", {"kind": "self_test"})
@@ -3256,9 +3157,6 @@ def self_test(root: Path) -> Decision:
             release_worker_slot(task_dir, "alpha", era)
         if load_document(task_dir / "lease.json")["active_workers"] != 0:
             return Decision(False, "excess releases drove the worker count below zero")
-        # Native and CLI workers share one ceiling, not one each.
-        if claim_worker_slot(task_dir, "alpha", 2, reserved=2).allowed:
-            return Decision(False, "contract-declared workers were not charged against the ceiling")
         # Concurrent claims must not lose an increment; without the lock both of
         # these read the same count and write the same value.
         generation = load_document(task_dir / "lease.json").get("acquired_at")
@@ -3282,16 +3180,13 @@ def self_test(root: Path) -> Decision:
             return Decision(False, "matching-generation releases did not drain the count")
         # The native path must see slots the CLI path holds, or each fills the
         # ceiling on its own and the total is double.
+        routing["defaults"]["max_fanout"] = 1
         claim_worker_slot(task_dir, "alpha", 2)
-        native = {**task, "dispatch": {"current_role": "critic", "active_workers": 1}}
-        routing["defaults"]["max_fanout"] = 2
         try:
-            # One native worker declared plus one slot held on the lease fills a
-            # ceiling of two; counting either alone would let it through.
-            if authorize_action(bundle, native, spawn, task_dir=task_dir).allowed:
+            if authorize_action(bundle, task, spawn, task_dir=task_dir).allowed:
                 return Decision(False, "a native spawn ignored the slots held on the lease")
-            if not authorize_action(bundle, native, spawn).allowed:
-                return Decision(False, "the contract-only count changed meaning without a task_dir")
+            if not authorize_action(bundle, task, spawn).allowed:
+                return Decision(False, "a spawn with no lease in view was refused")
         finally:
             routing["defaults"]["max_fanout"] = saved_fanout
         # A lease may not be dropped while it still accounts for running workers.
@@ -3314,55 +3209,54 @@ def _print_decision(decision: Decision) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the policy-engine command-line interface."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: `acquire-lease --task <id>` once passed as `--task-dir` (2026-09-27).
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("validate-policy")
-    validate_task_parser = subparsers.add_parser("validate-task")
+    subparsers.add_parser("validate-policy", allow_abbrev=False)
+    validate_task_parser = subparsers.add_parser("validate-task", allow_abbrev=False)
     validate_task_parser.add_argument("--task", type=Path, required=True)
-    resolve_parser = subparsers.add_parser("resolve")
+    resolve_parser = subparsers.add_parser("resolve", allow_abbrev=False)
     resolve_parser.add_argument("--role", required=True)
-    resolve_parser.add_argument("--author-family", choices=("claude", "codex", "gemini"))
+    resolve_parser.add_argument("--author-family", choices=sorted(KNOWN_FAMILIES))
     # Required: an unfiltered resolution answers a question nobody can act on,
     # and reads as an endorsement of a backend the caller may not be able to reach.
     resolve_parser.add_argument("--conductor-host", required=True)
-    authorize_parser = subparsers.add_parser("authorize")
+    authorize_parser = subparsers.add_parser("authorize", allow_abbrev=False)
     authorize_parser.add_argument("--task", type=Path, required=True)
     authorize_parser.add_argument("--action", required=True, help="JSON object")
     # This is the Codex conductor's only pre-flight check, so it must see the same
-    # numbers the hook does; without the lease it counts natively-spawned workers
-    # alone and clears a spawn that CLI slots have already filled the ceiling for.
+    # numbers the hook does: the worker slots held on the lease.
     authorize_parser.add_argument(
         "--task-dir", type=Path, help="lease location; defaults to the task file's directory"
     )
     for name in ("acquire-lease", "heartbeat-lease", "release-lease"):
-        lease_parser = subparsers.add_parser(name)
+        lease_parser = subparsers.add_parser(name, allow_abbrev=False)
         lease_parser.add_argument("--task-dir", type=Path, required=True)
         lease_parser.add_argument("--owner", required=True)
         lease_parser.add_argument("--ttl", type=int, default=300)
-    author_parser = subparsers.add_parser("record-author")
+    author_parser = subparsers.add_parser("record-author", allow_abbrev=False)
     author_parser.add_argument("--task-dir", type=Path, required=True)
     author_parser.add_argument("--family", required=True, choices=sorted(KNOWN_FAMILIES))
     author_parser.add_argument(
         "--source", required=True,
         help="what produced the artifact, e.g. 'implementer via native Task, hook not loaded'",
     )
-    restore_parser = subparsers.add_parser("restore-write")
+    restore_parser = subparsers.add_parser("restore-write", allow_abbrev=False)
     restore_parser.add_argument("--task-dir", type=Path, required=True)
     restore_parser.add_argument("--dispatch-id", required=True)
     restore_parser.add_argument(
         "--assume-stopped", action="store_true",
         help="restore a dispatch that never recorded an outcome; assert its worker has stopped",
     )
-    event_parser = subparsers.add_parser("append-event")
+    event_parser = subparsers.add_parser("append-event", allow_abbrev=False)
     event_parser.add_argument("--task-dir", type=Path, required=True)
     event_parser.add_argument("--owner", required=True)
     event_parser.add_argument("--event", required=True, help="JSON object")
-    dispatch_parser = subparsers.add_parser("dispatch-worker")
+    dispatch_parser = subparsers.add_parser("dispatch-worker", allow_abbrev=False)
     dispatch_parser.add_argument("--task", type=Path, required=True)
     dispatch_parser.add_argument("--role", required=True)
     dispatch_parser.add_argument("--brief", type=Path, required=True)
-    dispatch_parser.add_argument("--host", choices=("native", "wsl"), default="native")
     dispatch_parser.add_argument("--required-family", choices=sorted(KNOWN_FAMILIES))
     dispatch_parser.add_argument(
         "--task-dir", type=Path, help="lease location; defaults to the task file's directory"
@@ -3382,8 +3276,13 @@ def main(argv: list[str] | None = None) -> int:
         help="publish the worker's returned text to this path inside target_repo; "
              "the worker stays read-only and the engine performs the write",
     )
+    dispatch_parser.add_argument(
+        "--exec", action="store_true",
+        help="with --write, also give the worker Bash limited to a named command allowlist "
+             "(for code with tests to run); Bash writes are not confined to the destination",
+    )
     dispatch_parser.add_argument("--dry-run", action="store_true")
-    subparsers.add_parser("self-test")
+    subparsers.add_parser("self-test", allow_abbrev=False)
     args = parser.parse_args(argv)
     bundle = load_policy(args.root)
 
@@ -3428,9 +3327,9 @@ def main(argv: list[str] | None = None) -> int:
         return _print_decision(append_event(args.task_dir, args.owner, json.loads(args.event)))
     if args.command == "dispatch-worker":
         return dispatch_worker(
-            bundle, load_document(args.task), args.role, args.brief, args.host, args.dry_run,
+            bundle, load_document(args.task), args.role, args.brief, "native", args.dry_run,
             args.required_family, args.task_dir or args.task.parent, args.task.parent,
-            args.out, args.task, args.min_bytes, args.write,
+            args.out, args.task, args.min_bytes, args.write, args.exec,
         )
     if args.command == "self-test":
         return _print_decision(self_test(args.root))

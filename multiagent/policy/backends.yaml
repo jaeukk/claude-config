@@ -178,35 +178,6 @@
       "supports_subagents": false,
       "write_mode": "result-only"
     },
-    "agy-multimodal": {
-      "host": "agy",
-      "family": "gemini",
-      "model": "gemini-3.1-pro-high",
-      "capabilities": [
-        "multimodal",
-        "review",
-        "verification",
-        "structured_result"
-      ],
-      "sandbox": "containment-unverified",
-      "writes_mediated": false,
-      "write_mode": "result-only",
-      "supports_subagents": false
-    },
-    "agy-fast": {
-      "host": "agy",
-      "family": "gemini",
-      "model": "gemini-3.6-flash-low",
-      "capabilities": [
-        "bulk",
-        "mechanical",
-        "structured_result"
-      ],
-      "sandbox": "containment-unverified",
-      "writes_mediated": false,
-      "write_mode": "result-only",
-      "supports_subagents": false
-    },
     "claude-mid-team": {
       "host": "claude-code",
       "family": "claude",

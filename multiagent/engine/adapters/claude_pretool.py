@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "engine"))
 
 from policy_engine import (  # noqa: E402
-    OBSERVED_AUTHOR_FILE,
     _unresolved_write_reservations,
     asserted_author_families,
     observed_author_families,
@@ -76,9 +75,7 @@ def active_task_path() -> Path | None:
     return ROOT / "tasks" / task_id / "task.yaml"
 
 
-def record_observed_author(
-    task_path: Path, family: str, source: str, admission: dict[str, Any] | None = None
-) -> None:
+def record_observed_author(task_path: Path, family: str, source: str) -> None:
     """Record which family actually produced the artifact.
 
     Parameters
@@ -94,7 +91,7 @@ def record_observed_author(
     # Accumulates. A native worker of one family writing over another family's retained
     # output leaves both in the artifact, and keeping only the latest would erase the earlier
     # contributor -- after which a reviewer of that family looks independent and is not.
-    record_contributing_family(task_path.parent, family, source, admission=admission)
+    record_contributing_family(task_path.parent, family, source)
 
 
 def observed_author(task_path: Path, task: dict[str, Any], bundle: Any) -> str | None:
@@ -284,14 +281,10 @@ def main() -> int:
                 deny(f"current role {role} has no compatible {family} backend")
                 return 0
             if role in PRODUCING_ROLES:
-                # Snapshot the reason as it read at this spawn. The contract field is
-                # task-wide and mutable, so without this a later reader would see only
-                # whatever the field says now, not what justified this particular producer.
-                reason = str(task.get("dispatch", {}).get("native_reason", "")).strip()
-                record_observed_author(
-                    task_path, family, f"{role} via {tool}; native_reason: {reason}",
-                    admission={"role": str(role), "tool": tool, "native_reason": reason},
-                )
+                # Recorded before the call runs: a PreToolUse hook cannot see the outcome. A
+                # native producer needs no stated reason since 1.4.0 (single session is the
+                # default), but its family is still evidence a later reviewer must differ from.
+                record_observed_author(task_path, family, f"{role} via {tool}")
             return 0
         return 0
     except Exception as error:  # Claude must fail closed when a task is active or malformed.

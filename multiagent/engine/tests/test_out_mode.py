@@ -357,23 +357,6 @@ class CodexResultFileTest(unittest.TestCase):
                     pe._claude_cli({"model": "m", "effort": "low"}, capture_result=capture).result_file
                 )
 
-    def test_wsl_refuses_codex_only_when_a_result_file_is_needed(self):
-        backend = {"host": "codex", "model": "m", "effort": "low"}
-        with self.assertRaises(NotImplementedError):
-            pe.build_worker_command(backend, "wsl", Path("."), capture_result=True)
-
-    def test_wsl_text_mode_codex_still_builds(self):
-        # The regression this guards: `-o` on every dispatch broke `--host wsl` text mode,
-        # which has no result file to translate and previously worked.
-        backend = {"host": "codex", "model": "m", "effort": "low"}
-        converted = subprocess.CompletedProcess([], 0, stdout="/mnt/c/repo\n", stderr="")
-        with mock.patch.object(pe.shutil, "which", return_value="/usr/bin/wsl.exe"), \
-                mock.patch.object(pe.subprocess, "run", return_value=converted):
-            command, spec = pe.build_worker_command(backend, "wsl", Path("/repo"), "runner")
-        self.assertIsNone(spec.result_file)
-        self.assertNotIn("-o", command)
-        self.assertIn("--exec", command)
-
     def test_read_result_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "absent.txt"
@@ -1094,8 +1077,8 @@ class OutDispatchTest(unittest.TestCase):
         errors, warnings = check(audit_cycles=2)
         self.assertEqual(errors, [])
         self.assertTrue(any("no critic" in w for w in warnings))
-        _, warnings = check(direct_code_files=1)
-        self.assertTrue(any("direct conductor code edits" in w for w in warnings))
+        # Retired in 1.4.0: accepted and ignored.
+        self.assertEqual(check(direct_code_files=1)[0], [])
 
 
 class ObservedAuthorGuardTest(unittest.TestCase):
@@ -1701,19 +1684,23 @@ class HookObservedAuthorTest(unittest.TestCase):
         self.assertIn("mixed", reason)
         self.assertNotIn("declares author_family", reason)
 
-    def test_a_native_producer_is_refused_by_the_hook_without_a_reason(self):
+    def test_a_native_producer_needs_no_reason_and_is_recorded(self):
         # Under BOTH tool names. Current Claude Code calls the subagent tool `Agent`; the
         # hook matched only `Task`, so every native spawn bypassed it -- found by the
-        # post-merge smoke test, 2026-09-21.
+        # post-merge smoke test, 2026-09-21. Since 1.4.0 no `native_reason` is needed, but
+        # the producer's family is still recorded for the reviewer gate.
         for tool in ("Task", "Agent"):
             with self.subTest(tool):
                 self.setUp()
                 task = self.full_task(("implementer", "critic"))
                 task["dispatch"]["current_role"] = "implementer"
-                reason = self.run_handler(task, tool=tool)
-                self.assertIsNotNone(reason, tool)
-                self.assertIn("native_reason", reason)
-                self.assertFalse((self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).exists())
+                self.assertIsNone(self.run_handler(task, tool=tool))
+                record = json.loads(
+                    (self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8")
+                )
+                self.assertEqual(record["families"], ["claude"])
+                self.assertEqual(record["source"], f"implementer via {tool}")
+                self.assertNotIn("admissions", record)
 
     def test_the_settings_matcher_names_both_spawn_tools(self):
         # The hook code and the settings matcher must agree, or one CLI version goes dark.
@@ -1723,44 +1710,17 @@ class HookObservedAuthorTest(unittest.TestCase):
             with self.subTest(name):
                 self.assertTrue(any(name in m.split("|") for m in matchers), (name, matchers))
 
-    def test_the_hook_snapshots_the_reason_it_admitted(self):
-        # The contract field is mutable and task-wide; the record must carry what it said
-        # at this spawn, not what it says later.
-        task = self.full_task(("implementer", "critic"))
-        task["dispatch"]["current_role"] = "implementer"
-        task["dispatch"]["native_reason"] = "needs Bash for 250-dpi page renders"
-        self.assertIsNone(self.run_handler(task, tool="Task"))  # admitted: no denial emitted
-        record = json.loads(
-            (self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8")
-        )
-        self.assertEqual(record["families"], ["claude"])
-        self.assertIn("native_reason: needs Bash for 250-dpi page renders", record["source"])
-
-    def test_every_native_admission_survives_later_producers(self):
-        # Round 16: `source` keeps only the latest producer, so reason A vanished when B was
-        # recorded, and a managed dispatch afterwards erased the native reason entirely. The
-        # admissions history is what a later reader consults.
-        task = self.full_task(("implementer", "critic"))
-        task["dispatch"]["current_role"] = "implementer"
-        task["dispatch"]["native_reason"] = "reason A: needs Bash for renders"
-        self.assertIsNone(self.run_handler(task, tool="Task"))
-        task["dispatch"]["native_reason"] = "reason B: file set discovered while reading"
-        self.assertIsNone(self.run_handler(task, tool="Task"))
-        pe.record_contributing_family(
-            self.task_path.parent, "codex", "implementer via dispatch-worker"
-        )
-        record = json.loads(
-            (self.task_path.parent / pe.OBSERVED_AUTHOR_FILE).read_text(encoding="utf-8")
-        )
+    def test_an_old_admissions_history_survives_a_later_producer(self):
+        # `admissions` is no longer written (1.4.0), but a record that has one keeps it.
+        sidecar = self.task_path.parent / pe.OBSERVED_AUTHOR_FILE
+        sidecar.write_text(json.dumps({
+            "family": "claude", "families": ["claude"], "source": "implementer via Task",
+            "admissions": [{"family": "claude", "tool": "Task", "native_reason": "old"}],
+        }), encoding="utf-8")
+        pe.record_contributing_family(self.task_path.parent, "codex", "implementer via dispatch-worker")
+        record = json.loads(sidecar.read_text(encoding="utf-8"))
         self.assertEqual(record["families"], ["claude", "codex"])
-        self.assertEqual(record["source"], "implementer via dispatch-worker")
-        reasons = [a["native_reason"] for a in record["admissions"]]
-        self.assertEqual(reasons, ["reason A: needs Bash for renders",
-                                   "reason B: file set discovered while reading"])
-        for entry in record["admissions"]:
-            self.assertEqual(entry["family"], "claude")
-            self.assertEqual(entry["tool"], "Task")
-            self.assertIn("at", entry)
+        self.assertEqual([a["native_reason"] for a in record["admissions"]], ["old"])
 
     def test_a_damaged_sidecar_is_none(self):
         self.task_path.parent.joinpath(pe.OBSERVED_AUTHOR_FILE).write_text("{ nope", encoding="utf-8")
@@ -1768,52 +1728,141 @@ class HookObservedAuthorTest(unittest.TestCase):
                                                     self.bundle))
 
 
-class NativeProducerReasonTest(unittest.TestCase):
-    """A native spawn of a producing role is the exception, and must say why."""
+class NativeProducerTest(unittest.TestCase):
+    """Since 1.4.0 a native producer needs no stated reason, and retired fields are ignored."""
 
     @classmethod
     def setUpClass(cls):
         cls.bundle = pe.load_policy(ROOT)
 
-    def task(self, roles, native_reason=None):
-        dispatch = {"current_role": roles[0], "active_workers": 0}
-        if native_reason is not None:
-            dispatch["native_reason"] = native_reason
+    def task(self, roles, **dispatch):
         return {"schema_version": 1, "task_id": "t", "status": "active",
                 "target_repo": str(ROOT), "write_scope": [], "roles_plan": list(roles),
                 "author_family": "claude", "approvals": {"user": []},
                 "conductor": {"host": "claude-code", "backend": "claude-frontier",
                               "lease_owner": "me"},
-                "dispatch": dispatch}
+                "dispatch": {"current_role": roles[0], **dispatch}}
 
-    def spawn(self, task, role, native):
+    def spawn(self, task, role):
         return pe.authorize_action(
             self.bundle, task, {"kind": "spawn_worker", "actor_role": "conductor",
-                                "role": role, "native": native}
+                                "role": role, "native": True}
         )
 
-    def test_a_native_producer_without_a_reason_is_refused(self):
+    def test_a_native_producer_without_a_reason_is_admitted(self):
         for role in ("implementer", "bulk_worker"):
             with self.subTest(role):
-                decision = self.spawn(self.task((role,)), role, native=True)
-                self.assertFalse(decision.allowed)
-                self.assertIn("native_reason", decision.reason)
+                self.assertTrue(self.spawn(self.task((role,)), role).allowed)
 
-    def test_a_stated_reason_admits_the_native_producer(self):
-        task = self.task(("implementer",), native_reason="needs Bash for 250-dpi page renders")
-        decision = self.spawn(task, "implementer", native=True)
-        self.assertTrue(decision.allowed, decision.reason)
+    def test_retired_fields_are_accepted_and_ignored(self):
+        # A contract written before 1.4.0 still validates, whatever these fields say; a
+        # declared native count no longer charges the ceiling (only lease slots do).
+        task = self.task(("implementer",), native_reason="   ", active_workers=99)
+        task["direct_code_files"] = 7
+        self.assertEqual(pe.validate_task(self.bundle, task)[0], [])
+        self.assertTrue(self.spawn(task, "implementer").allowed)
+        written = pe.authorize_action(self.bundle, {**task, "write_scope": ["engine/**"]}, {
+            "kind": "write", "actor_role": "conductor",
+            "path": str(ROOT / "engine" / "x.py"),
+        })
+        self.assertTrue(written.allowed, written.reason)
 
-    def test_a_blank_reason_does_not_count(self):
-        task = self.task(("implementer",), native_reason="   ")
-        self.assertFalse(self.spawn(task, "implementer", native=True).allowed)
-        errors, _ = pe.validate_task(self.bundle, task)
-        self.assertTrue(any("native_reason" in e for e in errors), errors)
 
-    def test_cli_dispatch_and_non_producing_roles_need_no_reason(self):
-        # The engine path is the default; a runner is not a producer.
-        self.assertTrue(self.spawn(self.task(("implementer",)), "implementer", native=False).allowed)
-        self.assertTrue(self.spawn(self.task(("runner",)), "runner", native=True).allowed)
+class ExecModeTest(unittest.TestCase):
+    """`--write --exec`: Bash plus a named allowlist, and a prompt that does not overclaim."""
+
+    backend = {"backend": "claude-core-team", "host": "claude-code", "family": "claude",
+               "model": "m", "effort": "high", "account": "team"}
+
+    def build(self, exec_bash):
+        return pe.build_worker_command(
+            self.backend, "native", Path("/repo"), "implementer",
+            write_settings=Path("/tmp/generated.json"), exec_bash=exec_bash,
+        )[1]
+
+    def test_bash_joins_the_tools_only_with_exec(self):
+        plain, executing = self.build(False), self.build(True)
+        self.assertIn("Read,Grep,Glob,Write,Edit,NotebookEdit", plain.args)
+        self.assertNotIn("Read,Grep,Glob,Write,Edit,NotebookEdit,Bash", plain.args)
+        self.assertEqual(plain.enforcement, pe.WRITE_ENFORCEMENT)
+        self.assertFalse(plain.bash_allowed)
+        self.assertIn("Read,Grep,Glob,Write,Edit,NotebookEdit,Bash", executing.args)
+        self.assertEqual(executing.enforcement, pe.EXEC_ENFORCEMENT)
+        self.assertIn("not confined to the destination", executing.enforcement)
+        self.assertTrue(executing.bash_allowed)
+
+    def test_exec_without_write_is_refused(self):
+        with self.assertRaises(ValueError):
+            pe.build_worker_command(self.backend, "native", Path("/repo"), exec_bash=True)
+        code = pe.dispatch_worker(pe.load_policy(ROOT), {}, "implementer", Path("brief.md"),
+                                  "native", True, exec_bash=True)
+        self.assertEqual(code, 2)
+
+    def test_the_settings_carry_the_bash_allowlist_only_with_exec(self):
+        plain = pe.write_permission_settings("/repo/x.py", "file")["permissions"]["allow"]
+        executing = pe.write_permission_settings("/repo/x.py", "file", bash=True)["permissions"]["allow"]
+        self.assertFalse([rule for rule in plain if rule.startswith("Bash(")])
+        for command in ("python3", "sed -n", "git diff"):
+            self.assertIn(f"Bash({command}:*)", executing)
+        self.assertNotIn("Bash(rm:*)", executing)
+
+    def prompt_for(self, spec):
+        seen = {}
+
+        def fake_run(command, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(envelope()), stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            brief = Path(tmp) / "brief.md"
+            brief.write_text("the brief", encoding="utf-8")
+            with mock.patch.object(pe.subprocess, "run", side_effect=fake_run):
+                pe._run_worker(["claude"], spec, {"task_id": "t"}, "implementer", brief,
+                               Path(tmp), self.backend, "/repo/x.py")
+        return seen["input"]
+
+    def test_the_prompt_matches_the_containment(self):
+        plain = self.prompt_for(self.build(False))
+        self.assertIn("every other path is refused", plain)
+        executing = self.prompt_for(self.build(True))
+        self.assertNotIn("every other path is refused", executing)
+        self.assertIn("only this instruction keeps it inside the destination", executing)
+        self.assertIn("python3", executing)
+
+
+class AttemptCostTest(unittest.TestCase):
+    """What an attempt cost, as far as its CLI says."""
+
+    def test_claude_usage_and_cost_come_from_the_envelope(self):
+        usage = {"input_tokens": 3, "output_tokens": 5}
+        cost = pe.attempt_cost(claude_attempt(0, envelope(usage=usage, total_cost_usd=1.25)))
+        self.assertEqual(cost, {"usage": usage, "total_cost_usd": 1.25})
+
+    def test_codex_tokens_come_from_stderr(self):
+        attempt = accounts.Attempt("private", "", "m", 0, "ok", None, "",
+                                   "hook: Stop\ntokens used\n58,278\n")
+        self.assertEqual(pe.attempt_cost(attempt), {"tokens_used": 58278})
+
+    def test_nothing_reported_means_nothing_recorded(self):
+        self.assertEqual(pe.attempt_cost(codex_attempt(0, "text")), {})
+
+    def test_codex_stderr_is_captured_and_stdout_is_not(self):
+        seen = {}
+
+        def fake_run(command, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(command, 0, stdout=None, stderr="tokens used\n7\n")
+
+        spec = pe._codex_cli({"model": "m", "effort": "low"})
+        with tempfile.TemporaryDirectory() as tmp:
+            brief = Path(tmp) / "brief.md"
+            brief.write_text("b", encoding="utf-8")
+            with mock.patch.object(pe.subprocess, "run", side_effect=fake_run):
+                attempt = pe._run_worker(["codex"], spec, {"task_id": "t"}, "critic", brief,
+                                         Path(tmp), {"model": "m"})
+        self.assertEqual(seen.get("stderr"), subprocess.PIPE)
+        self.assertNotIn("capture_output", seen)
+        self.assertEqual(pe.attempt_cost(attempt), {"tokens_used": 7})
 
 
 class ReadScopeTest(unittest.TestCase):
