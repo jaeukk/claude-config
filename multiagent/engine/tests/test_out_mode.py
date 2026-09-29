@@ -1027,6 +1027,27 @@ class OutDispatchTest(unittest.TestCase):
                     self.assertEqual(record["enforcement"], pe.WRITE_ENFORCEMENT)
                     self.assertIn("every other path is refused", seen["prompt"])
 
+    def test_a_codex_dispatch_persists_its_token_total(self):
+        # Real command construction and _run_worker; only the process is faked (critic 3b-2).
+        self.write_contract(role="runner")
+        contract = pe.load_document(self.contract_path)
+        codex = {"backend": "codex-fast", "host": "codex", "family": "codex",
+                 "model": "gpt-x", "effort": "low", "account": "private"}
+        done = subprocess.CompletedProcess([], 0, stdout=None, stderr="work\ntokens used\n7\n")
+        with mock.patch.object(pe.subprocess, "run", return_value=done), \
+                mock.patch.object(pe.shutil, "which", return_value="/usr/bin/codex"), \
+                mock.patch.object(pe, "_resolve_with_account",
+                                  return_value=(pe.Decision(True, "resolved", codex), "stub")), \
+                mock.patch.object(pe.sys, "stdout"), mock.patch.object(pe.sys, "stderr"):
+            code = pe.dispatch_worker(
+                self.bundle, contract, "runner", self.brief, "native", False,
+                None, self.task_dir, self.task_dir, None, self.contract_path, 0,
+            )
+        self.assertEqual(code, 0)
+        event = self.attempt_events()[0]
+        self.assertEqual(event["tokens_used"], 7)
+        self.assertNotIn("usage", event)
+
     def test_the_cli_forwards_exec(self):
         self.write_contract(role="implementer")
         out = mock.MagicMock()
