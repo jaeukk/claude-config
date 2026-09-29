@@ -1,5 +1,9 @@
 # System Invariants — 시스템 수정 후 자가 점검
 
+> **2026-09-30:** INV entries that check `CLAUDE.md` content (INV1, INV4, INV10, INV11, INV12)
+> refer to the archived System A file `_archive/system-a/AGENTS.md`; the current `CLAUDE.md` is
+> the maintainer file. INV12g (the karpathy skill file exists) still applies to it.
+
 > **로드 정책**: 평소 미로드. 시스템 파일 수정·검증 작업일 때만 (`orchestrator-rules.md` §2).
 > 목적: 시스템 변경 후 **전면 멀티에이전트 재감사 대신** 이 점검만 돌려 모순 재발을 잡는다.
 > 통과해야 커밋. 깨지면 고치거나, 의도된 변경이면 `design-basis.md` 결정(D*)·이 표를 함께 갱신.

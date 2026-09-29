@@ -20,16 +20,14 @@
     ]
   },
   "dispatch": {
-    "current_role": null,
-    "active_workers": 0
+    "current_role": null
   },
   "author_family": "claude",
   "audit_cycles": 0,
-  "direct_code_files": 0,
   "created_at": "YYYY-MM-DDTHH:MM:SSZ",
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ",
   "deviations": [
-    "implementer chapters run as headless team-account CLI workers (CLAUDE_CONFIG_DIR=~/.claude-team, cwd = the vault, the vault's book-summarizer agent, driver _shared/adapters/book_summarizer_team.py), NOT through dispatch-worker: the engine's CLI worker has no Bash, and a book build needs 300-dpi page renders, figure crops and the vault's gates. Model is the job's (default claude-sonnet-5-5, the agent's own tier), not the implementer binding's claude-core-team/Opus. The shell grant is a named allowlist (PDF tools, python3, curl, read-only file commands), not bare Bash, but containment is still the brief only; nothing intercepts a write. Authorship is recorded per built chapter with record-author, which is an assertion: a critic or verifier needs authorship_assertion under approvals.user before it can be dispatched."
+    "implementer chapters run as headless team-account CLI workers (CLAUDE_CONFIG_DIR=~/.claude-team, cwd = the vault, the vault's book-summarizer agent, driver _shared/adapters/book_summarizer_team.py), NOT through dispatch-worker: its --exec Bash allowlist has no PDF tools, and a book build needs 300-dpi page renders, figure crops and the vault's gates. Model is the job's (default claude-sonnet-5-5, the agent's own tier), not the implementer binding's claude-core-team/Opus. The shell grant is a named allowlist (PDF tools, python3, curl, read-only file commands), not bare Bash, but containment is still the brief only; nothing intercepts a write. Authorship is recorded per built chapter with record-author, which is an assertion: a critic or verifier needs authorship_assertion under approvals.user before it can be dispatched."
   ],
   "notes": "Per chapter the driver writes workers/implementer/ch<N>.attempt<k>.json (the CLI envelope), ch<N>.result.md (the worker's final message with the §8 self-reports) and driver.log. Rerunning the driver skips chapters whose overview note exists with an agent: line. Budget a page-image checker and fixer pass per chapter afterwards: gates check tag presence, not content."
 }

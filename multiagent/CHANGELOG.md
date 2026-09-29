@@ -5,7 +5,27 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-30
+
+Cut program, stages 2–3 (`tasks/2026-09-29-cut-stage2-3/plan.md`; design-basis D17). Stage 1 found
+that a single session matched an implementer → critic → fix loop on test-oracle code within noise
+at 2–3.7× lower cost, so the engine becomes opt-in.
+
 ### Changed
+- **Single session is the default.** `skills/multiagent/SKILL.md` rewritten (7,088 → about 2,600
+  words): the engine is for cross-vendor review of consequential or no-oracle work, team-account
+  routing, and contained writes or publication with a record. Authorship is stated once; the Orca
+  and Gemini sections are gone; stale claims fixed (Codex has PreToolUse hooks but no multiagent
+  adapter yet; the hook matcher covers `Agent` and `Task`; `fork_turns` defaults to `all`; a Codex
+  critic or verifier usually cannot run a suite; Codex-authored work's verifier is
+  `claude-mid-team` first).
+- **`AGENTS.md` / `CLAUDE.md`** are now an English maintainer file (tests, self-test, the
+  edit-in-a-clone rule, where lessons go). The System A rules moved to
+  `_archive/system-a/AGENTS.md`; the remaining System A files are labeled legacy.
+- `docs/task-contract.md` absorbs `references/policy-layout.md` (now a pointer). README fixes: the
+  implementer tier, "an unreadable probe skips team" (it routes to team), and
+  `CLAUDE_TEAM_MAX_PERCENT` (nothing reads it); the WSL paragraph and the picture-book pointer
+  moved in.
 - **Mid tier re-pinned to Sonnet 5.5** — `claude-mid` and `claude-mid-team` now pin
   `claude-sonnet-5-5` (medium), and the book driver defaults to it. Evidence: the 2026-09-29 local check
   (capability profile) and the vendor comparison. Core stays on Opus 5.5.
@@ -14,6 +34,25 @@
 - **Audit budget `audit_cycles`** (design-basis D16) — critic rounds a task may run; absent or 0
   skips audit. Enforced by `dispatch-worker` (zero or spent budget refuses a critic) and
   `validate-task`; the hook refuses a native critic at 0. Templates default to 0.
+- `dispatch-worker --write <dest> --exec`: Bash with a named command allowlist for a Claude write
+  worker. Bash writes are not confined to the destination and are outside the change set; the
+  recorded `enforcement` says so.
+- `worker_attempt` events carry cost: the Claude envelope's `usage` and `total_cost_usd`, and
+  Codex's `tokens used`.
+
+### Removed
+- The `native_reason` gate, the `direct_code_files` cap (`approvals.yaml` `direct_conductor_edit`),
+  the native fan-out count from `dispatch.active_workers`, and `dispatch-worker`'s
+  `current_role == --role` check. Contracts carrying these fields are accepted and ignored; the
+  hook still needs `dispatch.current_role` before a native spawn.
+- `--host wsl`; the agy/Gemini builder, backends and `--required-family gemini` (revive from
+  `8e57af8`); policy keys nothing read. Archived with `git mv`: the Orca adapter,
+  `install_wsl_orchestration.js`, `gemini_api.sh`, `gemini_raw_build.py`, and `docs/final-plan.md`,
+  `docs/architecture.md`, `docs/team-account-routing.md` (to `_archive/`).
+
+### Fixed
+- The CLI no longer accepts abbreviated options, and `acquire-lease` / `append-event` refuse a
+  folder with no `task.yaml` (the 2026-09-27 stray task folder).
 
 ## [1.3.1] - 2026-09-29
 

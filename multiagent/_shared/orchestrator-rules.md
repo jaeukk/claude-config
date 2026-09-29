@@ -19,7 +19,7 @@ If either background indicator above is present, stop and request an interactive
 
 **적용 조건 (게이트)**: 이번 작업이 시스템 파일 — `CLAUDE.md`·`_shared/*`·`_templates/*`·외부 매뉴얼(`<매뉴얼-경로>/`) — 을 **수정하거나 검증**하는 작업일 때만 이 절을 적용한다. 일반 작업에서는 아래 파일들을 읽지 않는다 (progressive disclosure — 상시 로드 금지).
 
-**Working directory**: Perform system maintenance from the installation directory using its bound conductor adapter (`claude-code` or `codex`). Load the applicable `CLAUDE.md` or matching `AGENTS.md`, read design-basis, and complete the checks below. Work performed outside that instruction context must stop for review before continuing. Adapter eligibility does not grant additional write permissions or bypass the current enforcement and conductor-handoff requirements in `docs/architecture.md`.
+**Working directory**: Perform system maintenance from the installation directory using its bound conductor adapter (`claude-code` or `codex`). Load the applicable `CLAUDE.md` or matching `AGENTS.md`, read design-basis, and complete the checks below. Work performed outside that instruction context must stop for review before continuing. Adapter eligibility does not grant additional write permissions or bypass the current enforcement and conductor-handoff requirements in `../skills/multiagent/SKILL.md`.
 
 **절차**:
 1. `_shared/design-basis.md` 를 읽는다 — 개념↔규칙 매핑·권위 우선순위·기존 결정(D*). GitHub 레퍼런스부터 재분석하지 말 것. design-basis로 충분.

@@ -161,6 +161,40 @@
   direct conductor code edits still require critic review (`approvals.yaml`), surfaced as a
   `validate-task` warning when the budget is 0. (2026-09-29)
 
+- **D17 a single session by default; the engine is opt-in** = the skill's default is one producer
+  and no review loop: this session, a native subagent (no contract), or one team worker with
+  `dispatch-worker --write --exec`. The engine is for (a) cross-vendor review of consequential or
+  no-oracle work (`audit_cycles` ≥ 1), (b) team-account routing, (c) contained writes and
+  publication with a record. **Why**: on two code tasks with a test oracle (n = 4 per arm;
+  `tasks/2026-09-29-cut-stage1/results.md`, `tasks/2026-09-29-cut-stage1-repeats/results.md`) the
+  critic → fix loop changed the planted-bug score in 0 of 4 runs, and the implementer → critic →
+  fix arm scored within noise of a single session (8/8, 12, 12, 12 of 12 vs 8/8, 12, 12, 11) at
+  2.0–3.7× its cost, almost all of it the implementer having no Bash (2× output tokens, 2.2× wall
+  time). Both graders saturated, so this means "no advantage detectable on test-oracle code", not
+  "equal on hard work"; review stays opt-in for work with no oracle. Critic dispatch remains the
+  most-used engine feature (68 of 128 dispatches), which is why review is kept at all.
+  **Cut** (C1–C9 in `tasks/2026-09-29-cut-stage2-3/plan.md`): the `native_reason` gate, which
+  enforced "dispatch by default", the default the evidence reversed; the `direct_code_files` cap
+  and `approvals.yaml` `direct_conductor_edit`, which nothing incremented (this withdraws D16's
+  "Kept" clause: nothing now forces review of conductor code edits, and `audit_cycles` is the only
+  lever); the native count in `dispatch.active_workers` (withdraws the contract-side counter of
+  D13(a); the lease's CLI slot count stays); `dispatch-worker`'s `current_role == --role` check of
+  D13(b) (the hook still requires `current_role` before a native spawn, since it authorizes and
+  binds the spawn by it); `--host wsl`; the agy builder, `agy-*` backends and
+  `--required-family gemini` (withdraws D14's "kept so re-enabling is configuration"; revive from
+  `8e57af8`, and D14's single-outage gap remains); the Orca adapter, moved to `_archive/` (one
+  development run, its own authorship store). Contracts carrying the dropped fields are accepted
+  and ignored. **Added**: `--exec`, a named Bash allowlist for a Claude `--write` worker. Its trade
+  is stated rather than hidden: Bash writes fall outside the destination's permission rules and the
+  change set and are contained only by the brief, the same trade the headless team driver already
+  makes. **Rationale moved out of SKILL.md**: the measurements behind retained rules live beside
+  the code (a `Write(...)` permission rule authorizes nothing, `write_permission_settings`;
+  `--restricted` ignores user and project grants, the note above `PROTECTED_READ_LOCATIONS`;
+  `--allowedTools` grants without removing tools, `_claude_cli`). Fan-out counting bounds
+  accidental fan-out by one cooperating conductor and is not a security boundary (D13). Codex's
+  approval prompts ask about side effects, not about which vendor reviews whom, so they do not
+  substitute for the independence check. (2026-09-30)
+
 ## 4. 불변식
 
 구체 항목·검증 명령은 `_shared/system-invariants.md`. 시스템 수정 후 그 자가점검을 돌린다.

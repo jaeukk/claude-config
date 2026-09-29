@@ -165,7 +165,7 @@ claude-ceiling=fable-5-1 high(Codex 산출물 1라운드 감사), Orca 워커 ru
 **worker**: orchestrator(환경 진단·CLI 폴백 발견·과호출 방지 판단)
 
 
-> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
+> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `_archive/docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
 
 
 > Historical import, preserved verbatim from /home/jaeukk/_shared/learnings.md; snapshot: A.tgz.
@@ -176,7 +176,7 @@ claude-ceiling=fable-5-1 high(Codex 산출물 1라운드 감사), Orca 워커 ru
 **부수 교훈(운영)**: 외부 CLI를 `subprocess`로 부르는 코드의 **실패 경로**를 단위 테스트할 땐 반드시 `PATH`를 격리하고 돌릴 것. "실행파일 부재" 분기를 시험하려다 PATH를 그대로 둔 채 호출해 미승인 워커(agy)를 3회 실기동시키고 쿼터를 소모했다(승인 게이트 위반, log.md 09:23 자진 신고).
 **worker**: orchestrator(설계·구현·정정), codex-critic(독립 검증 — Blocking 7건 중 6건 인정)
 
-> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
+> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `_archive/docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
 
 ## 2026-09-16 codex exec under the Claude Code Bash tool needs `</dev/null`
 

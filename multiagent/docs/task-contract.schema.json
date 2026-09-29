@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local.invalid/multiagent/docs/task-contract.schema.json",
   "title": "Multi-agent task contract (documentation, not enforcement)",
-  "$comment": "DESCRIPTIVE ONLY. Nothing loads this file. The authority is validate_task() in engine/policy_engine.py, which hand-checks a subset of what is written here -- approvals.user, for instance, is required below but never inspected there. It lives in docs/ rather than policy/ so that its status is visible from its path: editing it changes no behaviour. Change validate_task() instead, then update this file to match.",
+  "$comment": "DESCRIPTIVE ONLY. Nothing loads this file. The authority is validate_task() in engine/policy_engine.py, which hand-checks a subset of what is written here -- approvals.user, for instance, is required below but never inspected there. It lives in docs/ rather than policy/ so that its status is visible from its path: editing it changes no behavior. Change validate_task() instead, then update this file to match. direct_code_files is no longer read; old contracts carrying it are accepted and ignored.",
   "type": "object",
   "required": ["schema_version", "task_id", "status", "conductor", "target_repo", "write_scope", "roles_plan", "approvals", "dispatch"],
   "properties": {
@@ -29,14 +29,12 @@
     },
     "dispatch": {
       "type": "object",
-      "required": ["current_role", "active_workers"],
+      "$comment": "native_reason and active_workers are no longer read; old contracts carrying them are accepted and ignored.",
       "properties": {
-        "current_role": {"type": ["string", "null"]},
-        "active_workers": {"type": "integer", "minimum": 0}
+        "current_role": {"type": ["string", "null"], "description": "Null or a planned role. The Claude Code hook needs it set to the requested role before a native spawn under an active contract."}
       }
     },
-    "author_family": {"enum": ["claude", "codex", "gemini", null]},
-    "direct_code_files": {"type": "integer", "minimum": 0},
+    "author_family": {"enum": ["claude", "codex", null]},
     "audit_cycles": {"type": "integer", "minimum": 0, "default": 0, "description": "Critic rounds the task may run; 0, the default, skips audit."},
     "created_at": {"type": "string"},
     "updated_at": {"type": "string"}

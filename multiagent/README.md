@@ -1,6 +1,12 @@
-# MultiAgent — Claude · Codex · Gemini Orchestration Starter
+# MultiAgent — Claude · Codex Orchestration
 
-Claude Code를 오케스트레이터로 두고 Claude·Codex·Gemini를 워커로 호출하는 **파일 기반 멀티에이전트 시스템**.
+The current procedure is [`../skills/multiagent/SKILL.md`](../skills/multiagent/SKILL.md); maintainer
+notes (tests, the edit-in-a-clone rule) are in [`AGENTS.md`](./AGENTS.md). For a first look,
+[`../skills/multiagent/references/picture-book.html`](../skills/multiagent/references/picture-book.html)
+shows the procedure in seven pictures; it is for humans, so open it in a browser. The Korean sections
+below describe the legacy System A layout and are kept for reference.
+
+Claude Code를 오케스트레이터로 두고 Claude·Codex를 워커로 호출하는 **파일 기반 멀티에이전트 시스템**.
 
 ## 핵심 아이디어
 
@@ -17,20 +23,29 @@ Claude Code를 오케스트레이터로 두고 Claude·Codex·Gemini를 워커�
 
 Two Claude logins: private (`~/.claude`, Max, Fable; the conductor, unrestricted) and team
 (`~/.claude-team`, KAIST, no Fable). A Claude backend may carry `account` (`private`|`team`) and
-`config_dir`. A team backend leads wherever nothing argues against it: `claude-fast-team`
-heads `bulk_worker`, and `claude-mid-team` precedes `claude-mid` in `verifier`. `runner`
-keeps `codex-fast` first (recorded benchmark: equal accuracy at 26x fewer tokens, and a
-Claude CLI worker cannot run commands); team is its Claude-side second choice.
-`implementer` (claude-core, Opus) and `critic` (claude-ceiling, Fable) stay private — Fable
-does not exist on the team plan, and the Opus implementer tier was left private for now.
+`config_dir`. A team backend leads wherever nothing argues against it: `claude-core-team`
+heads `implementer` (a native spawn skips account-bound backends and gets `claude-core`),
+`claude-fast-team` heads `bulk_worker`, and `claude-mid-team` precedes `claude-mid` in
+`verifier`. `runner` keeps `codex-fast` first (recorded benchmark: equal accuracy at 26x fewer
+tokens, and a Claude CLI runner cannot run commands); team is its Claude-side second choice.
+`critic` (claude-ceiling, Fable) stays private: Fable does not exist on the team plan.
 `dispatch-worker` probes the team quota once per dispatch (`engine/accounts.py`, usage API,
-cutoff `CLAUDE_TEAM_MAX_PERCENT`=95, 60 s cache), skips team candidates when exhausted or
-unreadable, launches the CLI worker with `CLAUDE_CONFIG_DIR`, and retries exactly once on
-private after a positively classified rate limit (HTTP 429). Every attempt is an
-`events.ndjson` record (`type: worker_attempt`, account, model, reason, exit). Native Task-tool
-children and Orca launches never use team (they run under the session login). Manual use:
+cutoff 95%, 60 s cache), skips team candidates only when that probe says exhausted (an
+unreadable probe routes to team anyway), launches the CLI worker with `CLAUDE_CONFIG_DIR`, and
+retries exactly once on private after a positively classified rate limit (HTTP 429), never in
+write mode. Every attempt is an `events.ndjson` record (`type: worker_attempt`, account, model,
+reason, exit, and the usage or token count the CLI reports). Native subagents never use team
+(they run under the session login). Manual use:
 `claude-worker -p "$(cat brief.md)"` (team first, private backup) or `claude-team` (forced).
 `bindings.yaml` is JSON-parsed, so this rule lives here, not as a comment there.
+
+## Windows and WSL
+
+The workspace is shared through the Windows-mounted project path. The Node launchers in
+`engine/adapters/` select the installed Windows Python 3.14 and `codex.cmd` on Windows, or
+`python3` and native `codex` inside WSL. The policy engine itself requires only the standard
+library and runs on WSL's `python3`. Native WSL Codex is therefore a worker host, not a
+Windows-command compatibility shim.
 
 ## 폴더 구조
 
@@ -107,7 +122,7 @@ MAT_ROOT=<설치한-폴더> mat
 | 최소 worker set | `routing.md` decision tree로 강제 |
 | codex-main 외부 repo 쓰기 4-조건 | `target_repo` + `write_scope` + 승인 + log [APPROVAL] |
 
-자세한 규칙은 [`CLAUDE.md`](./CLAUDE.md) 참고.
+System A's full rules are archived at [`_archive/system-a/AGENTS.md`](./_archive/system-a/AGENTS.md).
 
 ## 라이선스
 

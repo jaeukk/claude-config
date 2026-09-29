@@ -1,666 +1,284 @@
 ---
 name: multiagent
-description: Conductor mode, runnable from Claude Code or Codex, for routing model-independent roles across Claude and Codex backends with task contracts, approval tiers, independent review, bounded fan-out, and validated write scopes. Use when invoked as /multiagent (formerly /orchestration, a name that now belongs to Orca's skill), when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
+description: Conductor mode for Claude Code or Codex. The default is a single session; this skill adds the multiagent engine (task contracts, leases, independent review within an audit budget) only for cross-vendor review of consequential or untestable work, team-account routing, and contained writes or publication with a record. Use when invoked as /multiagent (formerly /orchestration, a name that now belongs to Orca's skill), when the user asks for conductor or orchestration mode, or when Claude and Codex should collaborate without recursively spawning conductors.
 ---
 
-# Orchestration
+# Multiagent
 
-Operate as the conductor on any host declared in the `conductor` binding — today Claude Code
-(`claude-frontier`, currently Opus 5.5) and Codex (`codex-frontier`, currently Astra). The invariant being
-protected is not "Claude conducts": it is that **a host may conduct only if it can actually
-reach a different-family critic and verifier**. That is a property of the host's dispatch
-adapter, not of its vendor, and the engine checks it directly instead of trusting a hard-coded
-name. On a host with no conductor adapter, operate advisory and do not acquire the lease.
+## Scope: a single session first
 
-Say **policy-validated**, not policy-enforced. The contract is validated on every host; it is
-*enforced* only on Claude Code, where a PreToolUse hook can actually refuse a tool call. On
-Codex nothing intercepts you — see "Conductor host support".
+The default is **one producer and no review loop**: this session, a native subagent (Claude
+`Agent`, Codex `spawn_agent`; no contract), or one team-account worker with Bash
+(`dispatch-worker --write <dest> --exec`). On two code tasks with a test oracle (2026-09-29,
+four runs per arm), the critic → fix loop changed the score in 0 of 4 runs, and the multiagent arm
+cost 2–3.7× a single session for scores within noise; most of that was the implementer lacking
+Bash.
 
-Within that, define work in model-independent roles, so backends and models can be swapped
-without rewriting the procedure.
+Reach for the engine only for:
+
+- **(a) cross-vendor review** of consequential work, or of work with no test oracle
+  (`audit_cycles` ≥ 1);
+- **(b) team-account routing**: `dispatch-worker` is how a producer bills the team login with a
+  record;
+- **(c) contained writes or publication with a record**: `--write` (baseline, change set, restore)
+  and `--out`.
+
+On Claude Code a PreToolUse hook enforces the contract, but only in sessions launched from
+`multiagent/`. Elsewhere, and on Codex, the contract is validated and kept, not enforced: say
+**policy-validated**.
 
 ## Load the local authority
 
-Find the nearest `_multiagent/` installation. If present, read all of these before
-dispatching work:
-
-- `policy/roles.yaml`
-- `policy/bindings.yaml`
-- `policy/backends.yaml`
-- `policy/routing.yaml`
-- `policy/approvals.yaml`
-- the active `tasks/<task-id>/task.yaml`
-
-The machine-readable policy wins when it is stricter than prose. If no project policy
-exists, use the global `~/.multiagent/policy` fallback (a deployed copy; the canonical
-source is `~/.claude/multiagent/policy` in the config repo — fix things there and
-redeploy, never edit the deployed copy). Keep task runtime files in a
-project installation unless the user explicitly chooses a global task root. See
-`references/policy-layout.md` for the portable fallback and task lifecycle.
+Policy is `multiagent/policy/{roles,bindings,backends,routing,approvals}.yaml` (JSON syntax). The
+engine reads it from its own tree (`--root`, default: the installation holding
+`policy_engine.py`), never from `~/.multiagent`. Machine-readable policy wins over prose. Fix it in
+a clone of `~/.claude`, never in a deployed copy (`multiagent/AGENTS.md`). Contract fields and
+lifecycle: `multiagent/docs/task-contract.md`.
 
 ## Conductor procedure
 
-**Before step 1, check you are allowed to conduct at all** — see "Conductor host support" below.
-Run `policy_engine.py validate-policy` **and** `validate-task` on your draft contract — the two
-answer different questions and neither calls the other. `validate-policy` checks the
-installation (can each declared conductor reach an independent critic at all?); `validate-task`
-checks your contract (is this host a declared conductor, can it dispatch every role you
-planned?). Do not reach step 3 and take a lease you cannot validly hold.
+Run from `multiagent/`, with `E=engine/policy_engine.py`.
 
-One thing neither command checks: `claude-frontier`'s `model` pin must equal the model your
-session is actually running. The conductor binding is a session assertion — the pin
-*describes*, it does not select — so after `/model` changes the session, the contract asserts
-something false until the pin and the two session levers (D10) follow it.
+1. `python3 $E validate-policy`; draft `tasks/<id>/task.yaml` from `_templates/task.yaml`;
+   `python3 $E validate-task --task tasks/<id>/task.yaml`. Neither calls the other: the first
+   checks the installation, the second whether this host may conduct and dispatch every planned
+   role.
+2. The contract names an absolute `target_repo`, `write_scope`, `roles_plan`, `audit_cycles`,
+   `author_family` when review is planned, and `conductor.lease_owner`.
+3. `python3 $E acquire-lease --task-dir tasks/<id> --owner <lease_owner>`. One conductor per
+   task. Options cannot be abbreviated, and lease and event commands refuse a folder with no
+   `task.yaml`.
+4. For the hook to enforce the task, put its ID in `tasks/.active-task`.
+5. `python3 $E dispatch-worker --task tasks/<id>/task.yaml --role <role> --brief <file>`, plus
+   `--write` or `--out` (below). `--dry-run` prints the resolved command, account and
+   `enforcement` without launching. Before a native spawn under an active contract, set
+   `dispatch.current_role` to that role: the hook authorizes the spawn against it. Workers do not
+   spawn workers, widen scope, or synthesize the final answer.
+6. Critic and verifier differ in family from the artifact's author (see "Authorship").
+7. Retry only transport, timeout and rate-limit failures; surface the rest; never drop a shard
+   silently. Synthesize once, `release-lease`, remove `.active-task`, mark the task complete.
 
-1. Decompose the request into the smallest useful role set: `implementer`, `critic`,
-   `bulk_worker`, `verifier`, or `runner`. **Shape every producing shard around one
-   destination** — one file, or one existing directory — so it can go through
-   `dispatch-worker --write` (or `--out` for a returned document). That is the default, not an
-   option: it is the only shape that reaches the team account, that gets a baseline and a change
-   set, and that leaves an observed author. A shard that needs Bash, or whose file set is
-   discovered while working rather than declared up front, is a native spawn — the exception —
-   and the contract must say why in `dispatch.native_reason` before it is spawned. Where the
-   hook loads, a producing spawn without that field is refused.
-2. Create and validate a task contract with explicit `target_repo`, `write_scope`, the audit
-   budget `audit_cycles` (below),
-   planned roles, approval state, and lease owner.
-3. Acquire the task lease. Never run two conductors for one task.
-4. Resolve each role through `bindings.yaml`; do not encode model names in a role or
-   routing rule.
-5. Set `dispatch.current_role` before each worker call, and choose how the result comes back:
-   stdout for the conductor to use, or `--out <path>` for the engine to publish it (see
-   "Accounts"). Workers must not spawn workers, widen scope, or synthesize the final answer.
-6. Require critic and verifier families to differ from the artifact author.
-7. Collect structured evidence, apply the retry classification, synthesize once, and
-   release the lease.
+**Audit budget.** `audit_cycles` is how many critic rounds the task may run. Absent means 0, and
+0 means no audit: the default. Set it from the user's instruction ("up to three audit cycles" is
+3), never above it; raising it is the user's call. A round is one critic dispatch whose attempt
+succeeded; a failed or rate-limited attempt spends nothing. `dispatch-worker` refuses a critic,
+dry runs included, while the budget is 0 or spent, and `validate-task` rejects a planned critic
+with a zero budget. The hook refuses a native critic at 0 but cannot count native rounds, so keep
+a native loop within budget yourself. The verifier is not budgeted. Nothing forces review of
+conductor code edits; set `audit_cycles` when they need it.
 
-**Audit budget.** `audit_cycles` in the contract is how many critic rounds the task may run.
-Absent means 0, and 0 means the task skips audit: the default for simple or bulk work, where a
-review costs more than it catches. Set it from the user's instruction ("up to three audit
-cycles" is 3), never above it; raising it mid-task is the user's call. One round is one critic
-dispatch that returned a result; a failed or rate-limited attempt spends nothing. The engine
-refuses a critic dispatch, dry runs included, while the budget is 0 or spent, and
-`validate-task` rejects a plan that names a critic with a zero budget. The hook refuses a
-native critic spawn at 0 but cannot count native rounds, so keep a native audit loop within the
-budget yourself. The verifier is not an audit and is not budgeted. Direct conductor code edits
-still require critic review (`approvals.yaml`), so a task that makes them needs
-`audit_cycles` of at least 1; `validate-task` warns otherwise.
+## Tiers and bindings
 
-## Tiers and required bindings
-
-Backends are named `<family>-<tier>` for Claude and Codex, and each tier carries one role on
-both families — except `fast`, which carries both `bulk_worker` and `runner`.
-A tier names a routing role rather than a reasoning effort: `codex-frontier` runs at medium
-while `codex-core` runs at high. Tier order is a routing preference, not a measured
-cross-model ranking.
+Backends are named `<family>-<tier>`. A tier is a routing role, not an effort level, and tier
+order is a preference, not a measured ranking.
 
 | Tier | Role | Claude | Codex | Team backend |
 |---|---|---|---|---|
 | ceiling | critic | Fable 5.1, high | Astra, medium | — |
-| frontier | conductor | Opus 5.5 (session assertion) | Astra, medium | — |
+| frontier | conductor | Opus 5.5, high (session assertion) | Astra, medium | — |
 | core | implementer | Opus 5.5, high | GPT-6 Sol, high | `claude-core-team` |
 | mid | verifier | Sonnet 5.5, medium | Terra, medium | `claude-mid-team` |
 | fast | bulk_worker, runner | Haiku 4.5, low | Terra, low | `claude-fast-team` |
 
-The team column is a *separate registry entry*, not a variant of the private one: nothing links
-`claude-core` and `claude-core-team` but the naming convention, so a model change edits both.
-`account` is orthogonal to tier — the tier is still the capability rank.
+- `implementer`: `claude-core-team`, `claude-core`, `codex-core`, all at high effort (the
+  validator enforces it). A native spawn skips account-bound candidates, so it gets `claude-core`.
+- `critic`: the other family's ceiling. `verifier`: `codex-mid` for Claude-authored work;
+  `claude-mid-team`, then `claude-mid`, for Codex-authored work.
+- `bulk_worker`: one pool led by `claude-fast-team`; the validator requires both families in it.
+- `runner`: `codex-fast` first (equal accuracy at 26× fewer tokens on the recorded benchmark,
+  `_shared/capability-profile.md`), then `claude-fast-team`, then `claude-fast`.
 
-- `implementer`: every candidate at high effort (the validator enforces this). `claude-core-team`
-  is rank 1 and a native spawn *cannot select it* — account-bound candidates are skipped for
-  native spawns — so the ranking splits the two cases by construction: a native subagent gets
-  `claude-core` and writes code under the hook, while a CLI dispatch gets Opus on the team
-  account. That costs nothing, because a CLI-dispatched implementer was already text-only:
-  `codex-core` and `claude-core-team` alike are read-only workers that return a patch nobody can
-  land — see "What cannot land" below. Dispatch document production as `implementer`, not
-  `bulk_worker`, when the writing quality matters — and dispatch it, with `--write`, rather than
-  spawning it: a native implementer is the exception that needs `dispatch.native_reason`.
-- `critic`: ceiling tier, different family from the author. Claude-authored work gets
-  `codex-ceiling`; Codex-authored work gets `claude-ceiling`.
-- `verifier`: mid tier, different family from the author. Mind the CLI asymmetry under "What
-  cannot execute".
-- `bulk_worker`: both fast tiers in one pool; the validator requires both families present.
-  `claude-fast-team` leads it — see "Accounts".
-- `runner`: `codex-fast` first — on the recorded benchmark (`_shared/capability-profile.md`) it
-  matched Claude's accuracy at 26× fewer tokens (9× fewer than Gemini) — then `claude-fast-team`,
-  then `claude-fast`.
+"First, then" is preference, not failover: `resolve_binding` returns the first compatible
+candidate without a health check, and a failed worker is reported, not retried on the next one.
+During a Codex outage, pass `--required-family claude`.
 
-"First, then" is an ordered preference, not failover. `resolve_binding` returns the first
-compatible candidate without probing health, and a worker that fails is reported, not retried
-on the next candidate. During a Codex outage, reach the Claude fallback explicitly with
-`--required-family claude`; retrying without it selects Codex again.
-
-Effort belongs to the binding, not the backend registry, and `dispatch-worker` transmits it on
-every CLI path: `-c model_reasoning_effort` for Codex, `--effort` for Claude. The one
-place it is *not* transmitted is a Claude worker spawned natively as a subagent, which takes
-effort from its agent frontmatter. Neither is the **model**: the hook checks only that a
-compatible same-family binding exists, so a native spawn runs whatever the agent frontmatter or
-session selects. Resolving `claude-ceiling` does not make a native subagent Fable 5.1 — only
-its frontmatter does. Keep both model and effort in the frontmatter in sync with the binding,
-and never report the resolved backend as the model that ran unless the frontmatter says so.
-
-## Model refresh evidence
-
-The September 27, 2026 refresh pins `codex-core` to `gpt-6-sol` and Claude
-core/team/frontier to `claude-opus-5-5`. Keep implementer effort at high and preserve
-team-first routing. Model upgrades do not route native children to the team account.
-See [the brief benchmark comparison](references/model-refresh-2026-09-27.md) when
-assessing these choices; distinguish published scores, prior local measurements, and
-unmeasured claims. Changing the conductor pin does not switch an already running session.
+`dispatch-worker` transmits effort on every CLI path (`-c model_reasoning_effort` for Codex,
+`--effort` for Claude). A native Claude spawn takes model and effort from its agent frontmatter,
+not from the binding; the hook checks only that a compatible binding exists. Keep the frontmatter
+in sync, and never report the resolved backend as the model that ran unless the frontmatter says
+so. Model evidence: `references/model-refresh-2026-09-27.md`.
 
 ## Accounts
 
-Two Claude logins exist here: **private** (`~/.claude`, the account this session runs on, the only
-one with Fable) and **team** (`~/.claude-team`). The account is fixed per process, so:
+Two Claude logins: **private** (`~/.claude`, this session's, the only one with Fable) and
+**team** (`~/.claude-team`). The account is fixed per process:
 
-- **A natively-spawned subagent always bills the session's own login.** There is no per-subagent
-  account selector, and the hook's binding check does not change that. A native spawn is never
-  team, whatever the binding resolves.
-- **`dispatch-worker` is the only route to the team account.** It sets `CLAUDE_CONFIG_DIR` on the
-  worker process. `claude-core-team`, `claude-mid-team` and `claude-fast-team` are the team-bound backends;
-  `config_dir` in `backends.yaml` is what binds them. A backend in no binding is unreachable:
-  `--required-family` filters a role's candidate list, it cannot summon a backend from outside it.
-- **Dispatch producing work; spawn it natively only with a stated reason.** A native
-  `implementer` or `bulk_worker` bills the session login, leaves no observed author unless the
-  hook happens to be loaded, and gets no baseline. So the default for any producing shard is
-  `dispatch-worker --write <one destination>` (or `--out`), and a native spawn of a producing role
-  requires `dispatch.native_reason` in the contract. Three things make that reason legitimate:
-  the shard runs commands ("needs Bash for 250-dpi page renders"); its destinations cannot be
-  declared before it starts ("file set is discovered while reading"); or managed dispatch cannot
-  perform this bounded work — a destination `--write` refuses (a path carrying `*?[]{}!`, a
-  managed-settings host), or a tightly coupled edit across known files whose only common
-  directory is one `--write` refuses, such as the repository root. "It touches several known
-  files" is not by itself a reason: independent files are independent `--write` dispatches. The
-  reason should say which of the three it is and for what — "Bash" alone is accepted by the gate
-  and useless to whoever reads the contract later. `runner`, `critic` and `verifier` are not
-  producing roles and need no reason. Writing *code* natively is still private-only, and still
-  needs the reason.
-
-  Be clear about what the gate guarantees: that a producing spawn was made against a contract
-  carrying *some* stated reason. It does not check the reason is true, or that it belongs to one
-  of the three kinds, or that it was written for this shard rather than an earlier one — the
-  field is task-wide and the conductor writes it. It turns an unexamined default into a recorded
-  exception; it is not a boundary against a conductor that wants to lie.
-- **Quota routing is not a health check.** Before selecting a team backend the engine probes that
-  account: `available` routes there, `exhausted` (a window at or past 95%) falls to the private
-  backend, and `unknown` — an unreadable probe, a rate-limited usage endpoint — **routes to team
-  anyway**, because absence of evidence is not exhaustion and the real run reports the truth. One
-  private retry follows a team run that comes back rate-limited; nothing else is retried.
+- A native subagent always bills the session's login; no binding changes that.
+- The routes to team are `dispatch-worker` (it sets `CLAUDE_CONFIG_DIR` for the `*-team`
+  backends), the `claude-worker` CLI (`~/.local/bin/claude-worker`, no contract or record), and
+  the headless team driver (below).
+- Quota routing is not a health check. Before selecting a team backend the engine probes that
+  account: `available` routes there, `exhausted` (a window at or past 95%) falls to private, and
+  `unknown` (an unreadable or rate-limited probe) routes to team anyway. A team run that comes
+  back rate-limited gets one private retry, never in write mode; nothing else is retried.
+  `claude-worker` routes the same way.
 
 ### Publishing a worker's text: `--out`
 
-A dispatched worker is read-only and always will be on this path. When its result is the
-deliverable — a note, a summary, a review write-up — `dispatch-worker --out <path>` has the
-**engine** write it, so the conductor never re-emits a long document through its own Write tool:
+When a worker's returned text is the deliverable (a note, a summary, a review), `--out <path>`
+has the engine write it instead of the conductor:
 
-    policy_engine.py dispatch-worker --task … --role bulk_worker --brief … --out notes/paper-x.md
+    python3 $E dispatch-worker --task … --role bulk_worker --brief … --out notes/paper-x.md
 
-It refuses before launching anything (so a bad destination costs no tokens) when the suffix is
-code, when the destination is reserved — engine state of any task, any `.git*` component,
-`.claude`/`.codex`/`.vscode`, `.mcp.json` — when `authorize_action` denies it, or when the dispatch would be a
-workspace dispatch — a role that may write, resolving to a Claude backend that is not
-`result-only`. An account-bound backend is always `result-only` (the validator requires it), so
-`implementer` on `claude-core-team` publishes normally while `implementer` on `claude-core`
-is refused. On success it writes an immutable snapshot beside the
-record, then the destination, then `outputs/<dispatch_id>.json` carrying account, backend, model,
-attempt, sha256 and lease generation. A failed attempt records `status: failed` with a named reason
-and writes nothing. Code never goes through `--out`; it needs a reviewed patch, which does not
-exist yet.
+It refuses before launch when the suffix is code, the destination is reserved
+(engine state of any task, any `.git*` component, `.claude`, `.codex`, `.vscode`, `.mcp.json`),
+`authorize_action` denies the path, or `--write` is also given. On success the engine writes an
+immutable snapshot, then the destination, then `outputs/<dispatch_id>.json` (account, backend,
+model, attempt, sha256, lease generation). A failure records `status: failed` with a reason and
+writes nothing. A result under 200 bytes of non-whitespace is `below_min_bytes` and is not
+published, because a one-word refusal also exits 0; pass `--min-bytes` for genuinely short output
+(`0` disables it).
 
-A clean exit is not evidence of a usable document: a worker that declines a brief in one word
-exits 0 with a well-formed envelope, and publishing that would overwrite a real note. So a
-result under 200 bytes of non-whitespace is recorded as `below_min_bytes` and not published;
-the text is still on stdout. Pass `--min-bytes` when the expected output is genuinely short
-(`0` disables the floor).
+### Landing files: `--write` and `--exec`
 
-### Landing a worker's files: `--write`
+`--write <path>` gives a worker one destination (a file, or an existing directory) inside
+`target_repo` and `write_scope`:
 
-When the deliverable is files rather than one document, `dispatch-worker --write <path>` gives the
-worker a real write path to **one** destination — a file, or an existing directory — inside
-`target_repo` and inside the contract's `write_scope`:
+    python3 $E dispatch-worker --task … --role implementer --brief … --write src/parser.py --exec
 
-    policy_engine.py dispatch-worker --task … --role implementer --brief … --write src/parser.py
+- Only a role with `may_write` (today `implementer`), only a Claude backend, never with `--out`.
+  The worker runs `--restricted` with the file tools and a generated permission file whose `Edit`
+  rules name the destination; any other path has no rule and is refused. Paths containing
+  `*?[]{}!` are refused, not escaped. `--write` is refused while a managed-settings file exists.
+  Nothing under `~/.claude` works as a destination (the CLI asks a human for those paths).
+- Before launch the engine copies the destination to `writes/<dispatch_id>.before`;
+  `restore-write --task-dir … --dispatch-id <id>` puts it back, and refuses if the destination
+  changed after the run was recorded. `outputs/<dispatch_id>.json` carries the change set and one
+  of `succeeded`, `succeeded_no_change`, `partial` (failed but changed files), `failed`, or
+  `unknown` (not inspectable; never success). A rate-limited write is not retried. Where git is
+  blind, as in a vault that ignores `40_Resources/`, the baseline is the complete record.
+- `--exec` (requires `--write`) adds `Bash` with a named allowlist: `python3`, `python`, `ls`,
+  `cat`, `head`, `tail`, `sed -n`, `grep`, `wc`, `find`, `git diff`, `git status`, `git log`.
+  **Bash writes are not confined to the destination and are outside the change set**; the brief
+  is their only containment, and the recorded `enforcement` says so. Use it for code with a test
+  oracle: on 2026-09-29 the same argv matched a no-Bash implementer's catches within noise at
+  about half the tokens and time.
+- A brief for summary notes must carry the note's frontmatter schema (`citekey`, `zotero_key`,
+  `tags`, …); a worker infers none of it.
 
-Only a role with `may_write` may use it (today `implementer`), it cannot be combined with `--out`,
-and it is native-host only. The worker runs `--restricted` with the file tools added and a
-generated permission file naming that one destination: an unmatched path has no rule to approve it
-and no handler to ask, so it is refused. Every generated rule is an `Edit` rule — measured
-2026-09-18, a `Write(...)` rule authorizes nothing, so emitting one would read like a guard while
-enforcing nothing. That is the boundary — not the prompt, and not the
-conductor's trust. A malformed pattern would fail *open*, so destinations containing `*?[]{}!` are
-refused rather than escaped.
+### Agent workers needing other tools: the headless team driver
 
-Nothing under `~/.claude` can be a `--write` destination: the CLI gates those paths as
-sensitive and asks a human, whatever the allowlist says, so a worker cannot edit this
-installation. `--write` is also refused outright while a managed-settings file exists, because
-managed settings merge into the worker's permissions and the generated allowlist would no longer
-be the whole authority. User- and project-scope settings do not merge under `--restricted`
-(measured 2026-09-18, with a control that applied the same grant without the flag).
-
-**Reading outside the repository.** A worker's cwd is `target_repo` and nothing else is readable,
-so a brief pointing at a PDF beside the task fails and the worker reports that as its own refusal.
-A contract may declare `read_scope`, a list of absolute existing directories, which the engine
-passes as `--add-dir`. Entries are canonicalized, must not be `$HOME` or a filesystem root, and are
-refused if they are, contain, or sit inside a credential or agent-configuration directory. It is
-Claude-only — a Codex worker's sandbox already reads the filesystem — and refused under
-`--host wsl`. Note that `--add-dir` grants **write** as well as read, so a read root is writable
-by a worker that also has `--write`.
-
-Recovery is the engine's baseline, not git. A vault may gitignore the very layer the builds
-write — `20_Notes/.gitignore` ignores `40_Resources/`, so `git status` and `git diff HEAD` see
-nothing there and a retained-change test built on them is inert, not merely awkward. Where git is
-blind, `find <dir> -newermt '<launch time>'` is a discovery aid — it misses deletions and anything
-written with a preserved timestamp — and the engine's baseline comparison is the complete answer.
-
-Before launch the engine copies the destination into `writes/<dispatch_id>.before` and verifies the
-copy, so `restore-write --dispatch-id <id>` can put it back; a destination that changed after the
-run was recorded refuses to restore rather than overwriting whoever changed it. Afterwards
-`outputs/<dispatch_id>.json` carries the change set and one of `succeeded`, `succeeded_no_change`,
-`partial` (the worker failed but files changed), `failed`, or `unknown` (the destination could not
-be inspected — never reported as success). A rate-limited write attempt is **not** retried: the
-retry rule assumes a repeat duplicates computation and never side effects, which stops being true
-once files exist. Authorship is recorded whenever the change set is non-empty, including after a
-failure — a failed attempt that changed files still authored those changes.
-
-When `--write` produces a summary note, the brief must carry the note's frontmatter schema
-(`citekey`, `zotero_key`, `tags`, `type`, `status`, `creator`, `Created`, …). A worker infers
-none of it, and a batch of shards each guessing produces the per-note variance a critic then has
-to find one field at a time.
-
-`--out` changes nothing about the worker: same `--tools Read,Grep,Glob --strict-mcp-config`, same
-prompt, and the worker is never told the destination.
-
-### Agent-defined workers that need a shell: the headless team driver
-
-`paper-reviewer` and `book-summarizer` cannot run through `dispatch-worker`: they render pages
-with `pdftoppm`, crop figures, and run the vault's gate scripts, and a CLI worker has no Bash by
-design (A2). The sanctioned substitute is a headless `claude -p --agent <name>` process per
-paper or chapter under `CLAUDE_CONFIG_DIR=~/.claude-team`, cwd = the vault, launched by a driver
-*under* a contract rather than by hand:
+`paper-reviewer` and `book-summarizer` render pages, crop figures and run the vault's gates, which
+are outside `--exec`'s allowlist. The sanctioned route is one headless `claude -p --agent <name>`
+process per chapter under `CLAUDE_CONFIG_DIR=~/.claude-team`, cwd the vault, launched by a driver
+under a contract:
 
     python3 _shared/adapters/book_summarizer_team.py --task-dir tasks/<id> --job tasks/<id>/job.json
 
-Start from `_templates/book-summarizer-team/` (contract with the deviation pre-written, the
-brief, the job file). The driver resolves nothing about the book: the conductor supplies the
-PDF path, page offset and per-chapter page ranges in the job, as the agent's own orchestration
-section asks. One chapter at a time by default; `--jobs N` only when the user authorized
-parallel chapters. A chapter counts as built when its `x.00` overview note carries an `agent:`
-line, so a rerun skips it. After each built chapter the driver runs `record-author`, which is an
-**assertion**: a later critic or verifier still needs `authorship_assertion` under
-`approvals.user`. The shell grant is a named allowlist (the PDF tools, `python3`, `curl`,
-read-only file commands), not bare Bash, but nothing intercepts a write — containment is the
-brief, and the contract's `deviations` must say so. The model is the job's (`claude-sonnet-5-5`,
-the agent's own tier), not the implementer binding's Opus. The paper-reviewer precedent
-(16 papers, 2026-09-20) lives in `tasks/2026-09-18-plasmon-litsearch-campaign/workers/
-implementer/wave3/`.
+Start from `_templates/book-summarizer-team/`. The conductor supplies the PDF path, page offset and
+per-chapter page ranges in the job. One chapter at a time; `--jobs N` only when the user authorized
+parallel chapters. A chapter whose `x.00` overview note carries an `agent:` line is skipped on
+rerun. After each chapter the driver runs `record-author`, an assertion (see "Authorship"). The
+shell grant is a named allowlist, but nothing intercepts a write: containment is the brief, and the
+contract's `deviations` must say so. The model is the job's (default `claude-sonnet-5-5`).
 
 ### What a dispatched worker inherits
 
-Nothing from your profile. Every CLI-dispatched Claude worker runs `--restricted`, which drops
-user, project and local settings — so plugins, hooks and permission entries stay out of a worker
-that never asked for them, and the input cost of a trivial dispatch roughly halves. It also drops
-the global `CLAUDE.md`, which is replaced deliberately: the engine appends a composed baseline
-(identity, American spelling, and that a one-shot worker states assumptions in its result instead
-of asking). Everything else the old inheritance carried — vault layout, HPC schedulers, Zotero —
-belongs in the brief that needs it. A worker cannot *run* `qsub`, but it can write a job script,
-so "unreachable to execute" is not "irrelevant to author".
+A Claude worker inherits nothing from your profile: `--restricted` drops user, project and local
+settings, including plugins, hooks and the global `CLAUDE.md`. The engine appends a baseline (identity, American
+spelling, state assumptions instead of asking, code conventions); vault layout, HPC or Zotero
+details belong in the brief. The worker's cwd is `target_repo`. To read elsewhere, declare
+`read_scope`: absolute existing directories, never `$HOME`, a filesystem root, or anything holding
+credentials or agent configuration. The engine passes them to Claude as `--add-dir`, which also
+grants write, so under `--write` every read root must equal or sit inside the destination.
 
-### Authorship must be evidenced, not assumed
+## Authorship
 
-A reviewer is cleared against what was *observed* producing the artifact. Two things record that:
-the PreToolUse hook for a native producer, and `dispatch-worker` for a CLI one. The hook is wired
-in `multiagent/.claude/settings.json` and loads only for a session launched from the installation
-root — a session conducting from a vault never loads it, so its native producers leave no record.
-The engine no longer papers over that: if the contract's `roles_plan` includes a producing role
-and no authorship was *observed*, `critic` and `verifier` are **refused**, because "nothing was
-recorded" and "the conductor wrote it" cannot be told apart otherwise. The conductor-is-author
-fallback survives only for contracts that planned no producer at all.
+A reviewer is cleared against what was **observed** producing the artifact, recorded in
+`observed-author.json` beside the contract. `dispatch-worker` records a CLI producer
+(`implementer`, `bulk_worker`) after exit 0, or under `--write` whenever the change set is
+non-empty, failure included. The hook records a
+native producer before the call runs, since PreToolUse cannot see the outcome; a session that did
+not load the hook records nothing. The record accumulates every family that produced part of the
+artifact.
 
-A conductor's own account does not fill the gap. `record-author --task-dir … --family <family>
---source <what produced it>` stores an **assertion**, kept apart from observations: it can only
-*add* families a reviewer must differ from, never stand in for the missing observation —
-trusting it would reopen the bypass that rejecting `author_family` closed. Review is cleared on
-assertions alone only when the user records `authorship_assertion` under `approvals.user`, the
-same channel every other escalation uses, and every family that produced anything is asserted.
-Be clear about what that channel is: the engine trusts `approvals.user` as the user's recorded
-word everywhere, and it authenticates nobody — a conductor willing to fabricate an approval is
-outside this model, as it is for every other escalation. Whether or not review is unblocked,
-asserted families always *add* to the set a reviewer must differ from.
-Remaining gaps, recorded rather than fixed: a native producer that was never named in
-`roles_plan`, or removed from it afterwards, still reaches the fallback; the check reads the plan
-as it stands, not as it ever was.
+`critic` and `verifier` are refused when the record is unreadable or names an unknown family; when
+it names more than one family (mixed: split the artifact or review by hand); when it contradicts
+`author_family` (fix the contract, not the sidecar); when a `--write` reservation recorded no
+outcome; and when `roles_plan` includes a producer but nothing was observed. The conductor's family
+stands in only for a contract that planned no producer.
 
-### Authorship accumulates
+`record-author --task-dir … --family … --source …` stores an **assertion**. It only adds families a
+reviewer must differ from. It stands in for a missing observation only when the user has
+recorded `authorship_assertion` under `approvals.user`; then assert every producing family. The
+engine trusts `approvals.user` as the user's word; it authenticates nobody.
 
-The sidecar records every family that produced part of the artifact, not just the last one. A
-Claude `--write` over retained Codex output leaves both in the file, and a record that kept only
-the latest writer would let a Codex critic review work its own family partly wrote. When more than
-one family contributed, `critic` and `verifier` are **refused**: no candidate is independent of all
-of it, so the artifact has to be split or reviewed by hand. Older single-family sidecars read as a
-one-element list and mean exactly what they meant.
+A `--out` publication also records its producer in `outputs/<dispatch_id>.json`; a `runner`
+publication is attributed only there.
 
-## Host adapter contract
+## Host adapters
 
-Roles and bindings are model-independent; **dispatch is not**. Concurrency, batching, context
-forking, and model-override syntax are properties of the host the conductor runs on, not of the
-role being filled. Resolve the role and backend first, then hand the call to the current host's
-dispatch adapter. Never encode one host's API shape in a role, a binding, or this procedure.
+- **Claude Code:** several spawns in one message run concurrently.
+- **Codex:** no batch spawn; one `spawn_agent` at a time, at most three live
+  (`max_active_children: 3`). `fork_turns` defaults to `all`, and a full-history fork accepts no
+  `model` or `reasoning_effort`; when setting either, pass `fork_turns: "none"` or a positive
+  integer string.
+- Codex's child API reaches Codex models only. Fill a cross-family role with `dispatch-worker`,
+  which runs the resolved backend's CLI with the brief on stdin, never with `spawn_agent`.
 
-Adapters declare their limits in `routing.yaml` under `conductor_adapters`. The number of
-children that may be live at once is:
+The engine counts CLI workers on the lease against `min(max_fanout, max_active_children)`, so a
+real dispatch needs a live lease you own. That bounds accidental fan-out by a cooperating
+conductor; it is not a security boundary. A process killed mid-update leaves
+`tasks/<id>/lease.lock`: every later lease operation times out naming it, and expiry does not clear
+it. Stop the task's processes and delete it by hand.
 
-    min(of whichever of these are known)
-      defaults.max_fanout
-      adapter.max_active_children     -- omit when null
-      slots the runtime reports free  -- omit when unreported
+The dry run reports `enforcement`:
 
-An unmeasured limit is **absent, not zero**: drop it from the comparison. Never pass `null`
-into the `min` as a literal — it raises in Python and silently becomes `0` in JavaScript, which
-would stall every dispatch.
-
-`max_fanout` is a **policy ceiling** on simultaneous workers — it is not a statement of host
-capacity and must not be lowered to describe one. It is counted in two places, and only one of
-them is trustworthy:
-
-- **`dispatch-worker` counts on the lease.** The engine claims a slot before launching and
-  releases it in a `finally`. Every lease mutation — acquire, heartbeat, claim, release —
-  runs under one lock file and writes atomically, so parallel dispatches cannot lose an
-  increment or read a half-written lease. This is why a real dispatch requires a live lease
-  you own: no lease, no place to keep the count. The lease is heartbeaten for the worker's
-  lifetime, bound to the lease generation so an abandoned dispatcher cannot prop up a lease
-  it no longer belongs to.
-- **Native spawns count on the contract.** A Claude `Task` or Codex `spawn_agent` goes nowhere
-  near the engine, so the hook can only read `dispatch.active_workers` — which the conductor
-  writes itself. Keep it accurate; nothing else can.
-- **Both counts charge one ceiling**, from whichever side asks: a CLI claim adds the
-  contract's native count, and the hook's native check adds the lease's held slots.
-
-A `bulk_worker` job may hold more logical shards than the host can run at once; the adapter
-schedules them in waves. `max_active_children: null` means unmeasured on that host — fall back
-to `max_fanout` alone rather than guessing.
-
-What this does **not** do, so nobody mistakes it for more: it bounds *accidental* fan-out for
-one cooperating conductor on one machine. It is not a security boundary. A `SIGKILL`ed
-dispatcher leaves its child running and its slot held — until the lease expires unrenewed, at
-which point the count is lost while the orphan may still be alive. A natively-spawned worker
-is counted only because the conductor says so, and nothing stops a native spawn that never
-took a lease at all. A process killed mid-update leaves `lease.lock` behind and wedges the
-task: every later lease operation times out with a message naming the file, and lease expiry
-will not clear it — stop the task's processes and remove it by hand. Anything needing to
-survive a crashed or hostile participant needs a supervisor, not a JSON counter.
-
-**Claude Code** — batch spawn is available: several dispatches in one message run concurrently.
-
-**Codex** — no batch-spawn call exists; children go out one `spawn_agent` at a time, at most
-three live (the conductor holds one of four slots), so "dispatch all in a single message" is not
-implementable there. When passing `model` or `reasoning_effort`, a full-history fork is
-rejected: use `fork_turns: "none"` (the deterministic default) or a bounded positive turn count
-when the child genuinely needs recent context.
-
-The Codex **child API** exposes Codex-family models only. That is a limit of one dispatch
-mechanism, not of the host: `codex`, `claude`, and `agy` are all ordinary CLIs, so a Codex
-conductor dispatches a Claude critic as a subprocess instead. Use
-`policy_engine.py dispatch-worker --task … --role critic --brief …`, which resolves the binding
-under your host, refuses anything your adapter cannot reach, and runs the resolved backend's CLI
-with the brief on stdin. Never fill a cross-family role with `spawn_agent`; it cannot do it.
-
-The dispatchers do **not** contain a worker equally well, and the dry run reports which you get
-as `enforcement`:
-
-| Host | Enforcement | What that actually means |
+| Host | Enforcement | Meaning |
 |---|---|---|
-| `codex` | `os-sandbox-read-only` | The OS refuses the write. A real guarantee. |
-| `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops inherited MCP servers. Binds the agent, not the process — a settings-level hook could still act. |
-| `agy` | — | Disabled; not dispatchable. See "The Gemini family" below. |
+| `codex` | `os-sandbox-read-only` | The OS refuses writes. |
+| `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops MCP servers. Binds the agent, not the process. `--write` and `--exec` extend the string with what they grant. |
 
-An allowlist is not a substitute for `--tools`: `--allowedTools` only grants permissions and
-leaves every other tool present. Never claim a Claude-hosted worker is sandboxed.
+Never claim a Claude-hosted worker is sandboxed.
 
-### Orca as transport
+## Conductor host support
 
-Orca's `/orchestration` launches workers as visible, persistent terminals but chooses
-`--agent/--model/--effort` by hand and applies no policy. To keep the tier map and the
-independence rule while using Orca's terminals, launch through the adapter instead of calling
-`worker-start` directly:
+A host may conduct when all three hold, each machine-checked:
 
-    python3 engine/adapters/orca_worker_start.py --role critic --task <orca_task_id>
-
-Run that command from the multi-agent installation root, or use the adapter's absolute path.
-It attests the conductor from the current Orca terminal, rejects a contradictory
-`--conductor-host` assertion, runs `resolve_binding` (family independence, tier, pinned model,
-effort), and invokes `worker-start` with exactly that selection. Anything after `--` passes
-through (`--name`, `--setup`, `--on`) except the flags the policy or recovery flow owns.
-`--required-family` selects the outage fallback. The conductor role is session-only and is
-refused here.
-
-**What you lose crossing over — say it in every brief.** The engine's containment does not
-apply: Orca launches Codex under *your* `~/.codex/config.toml` sandbox (`workspace-write`) and
-Claude with *your* settings. A reviewer launched here can edit the thing it is reviewing. Tell
-it not to, snapshot the target diff or hashes before launch, and compare them when it finishes;
-`git status` alone cannot reliably detect edits to files that were already dirty.
-
-**Authorship is a separate state store.** `tasks/orca/<run_id>/observed-author.json` is not
-the engine contract's sidecar: nothing maps an Orca run to an engine task, so switching
-transports carries no authorship automatically. The adapter serializes transitions with a
-per-run lock and stores one bounded settled-author snapshot plus one active attempt:
-
-- A producing or review launch reserves the run *before* `worker-start`, under a per-run
-  lock, so adapter-launched attempts cannot overlap: a second tracked launch is refused until
-  the exact task and dispatch are settled. The lock is per machine and covers only the
-  adapter; a hand-typed `worker-start` is outside it.
-- A successful producer is `--settle succeeded`. A failed producer that left changes is
-  `--settle retained-output`, because failure does not erase authorship. Use
-  `--settle no-output --confirm-no-output` only after verifying that no output remains.
-- A completed critic or verifier is `--settle reviewed`. If the conductor then edits, use
-  `--settle conductor-edited`; its family comes from Orca's attested terminal identity.
-- A start Orca definitively **rejects** (`ok: false`, no dispatch — a bad flag, say) created
-  nothing, so its reservation is released and the run is free again. A **lost or malformed**
-  response is different: a worker may be live, so the attempt stays `outcome_unknown` and the
-  run stays reserved. Inspect the saved request/dispatch; if the receipt preserved a request
-  ID, `--resume-start --task <id>` replays the same Orca request instead of launching a
-  duplicate; a *rejected* retry leaves the original attempt reserved, since its worker may
-  be live. Otherwise an `outcome_unknown` attempt follows the no-recorded-dispatch rule
-  below.
-- An attempt with **no recorded dispatch** — `starting` (Orca never answered) or
-  `outcome_unknown` (it answered unreadably) — is settled by the same rule either way. The
-  reservation records, under the run lock, which dispatch the task already had. Such an attempt
-  is settled only by the dispatch Orca reports as the task's *current* one — read under the
-  same lock — and only if that differs from the baseline: the lock admits one adapter attempt
-  at a time, so barring a hand-typed start or the residual below, nothing else could have
-  created it. Settle it with that `--dispatch-id`, any outcome. The baseline itself is an
-  earlier attempt's and is refused; so is any id that is not the current dispatch, however
-  it was obtained. If nothing new appears and the
-  reservation is over 600 s old, `--settle abandoned --task <id> --confirm-no-output` drops the
-  attempt and keeps the settled author. 600 s is the adapter's own cap on its `worker-start`
-  call, so an adapter-launched start older than that has returned or been killed; it is not a
-  claim about Orca's internals. Every Orca query the adapter makes is capped at 60 s, so a hung
-  Orca cannot hold the run lock. The residual none of this rules out: an Orca-side mutation
-  still completing after its client died — Orca gives no way to ask about a request whose id
-  was never received. Never delete the record by hand: that erases the
-  settled author, and the next critic is then chosen against the conductor's family instead
-  of the real producer's.
-- With no producer record, the attested conductor is the author. An `--author-family` claim
-  that disagrees with stored or attested evidence is refused.
-
-**Audit-cycle procedure.** A procedural template: capture IDs from JSON rather than copying
-placeholders. A Run must exist first (`run-create`, or the current terminal's bound Run); create a
-fresh task for each cycle, since a completed task is already settled.
-
-    <ORCA> orchestration task-create --spec <review-brief> --json
-    python3 engine/adapters/orca_worker_start.py --role critic --task <task_id>
-    # save <dispatch_id> from the start receipt (result.dispatchId), then loop:
-    <ORCA> orchestration check --wait \
-        --types worker_done,escalation,question --timeout-ms 900000 --json
-    #   for EVERY message in the batch: answer a `question` with `orchestration reply`,
-    #   handle an `escalation`. If a worker_done matches BOTH payload.taskId == <task_id>
-    #   AND payload.dispatchId == <dispatch_id>, settle and release it BEFORE the ack --
-    #   Orca's contract: decide each completed worker's fate before acknowledging, or a
-    #   conductor that dies after the ack leaves the worker live with nothing to prompt
-    #   its cleanup:
-    python3 engine/adapters/orca_worker_start.py --settle reviewed \
-        --task <task_id> --dispatch-id <dispatch_id>
-    <ORCA> orchestration worker-release --dispatch <dispatch_id> --json
-    #   then acknowledge the batch, matched or not -- an unacknowledged batch replays on
-    #   the next wait, so a loop that acks only after the match stalls on any question:
-    <ORCA> orchestration check --ack <delivery_id> --json
-    #   repeat the wait until the matching worker_done was seen; a timeout or an
-    #   unrelated batch is a checkpoint, not a failure.
-    # apply findings; if the conductor edits, record it before the next cycle:
-    python3 engine/adapters/orca_worker_start.py --settle conductor-edited --task <task_id>
-
-Use the one Orca executable selected for the session (`ORCA_CLI_COMMAND`, then `orca-dev` in a
-dev checkout, then `orca-ide` on Linux or `orca` elsewhere) everywhere `<ORCA>` appears. Orca
-still checks none of this—a hand-typed `worker-start` silently bypasses policy—so the adapter
-is the only sanctioned start path for a policy role. `--model/--effort` remain fresh-terminal
-options and cannot combine with `--terminal`; the conductor is never launched.
-
-### Conductor host support
-
-A host may conduct when three things hold, all machine-checked:
-
-1. Its backend is a declared candidate of the `conductor` binding (`claude-frontier`,
-   `codex-frontier`).
+1. Its backend is a candidate of the `conductor` binding (`claude-frontier`, `codex-frontier`).
 2. Its host has a `conductor_adapters` entry in `routing.yaml`.
-3. That entry's `dispatch_hosts` reaches an independent `critic` and `verifier` for **every**
-   author family — `validate_policy` rejects a conductor candidate that cannot, and
-   `resolve_binding` skips any candidate the conducting adapter cannot invoke.
+3. That entry's `dispatch_hosts` reaches an independent `critic` and `verifier` for every author
+   family. `dispatch_hosts` fails closed: omit it and the adapter dispatches nothing.
 
-`dispatch_hosts` is required and **fails closed**: an adapter that omits it dispatches nothing.
-So the way to keep a host out of the conductor seat is to withhold reachability, not to hard-code
-a name — and the way to add one is to give it a genuine cross-family dispatch path, not to widen
-an enum.
+**Codex.** Codex 0.159 has PreToolUse hooks, but no multiagent adapter is wired to them yet. Until
+one is, nothing stops a Codex conductor from filling `critic` with `spawn_agent`: call
+`python3 $E authorize --task … --action '<json>'` before acting and `dispatch-worker` for every
+cross-family worker, and describe the result as a contract kept, not enforced.
 
-Two asymmetries remain real on Codex, and neither blocks conducting:
+**Claude Code.** The hook sees tool calls only. It denies what looks like a worker CLI typed into
+Bash, but that match is a heuristic; an absolute path or a variable defeats it.
 
-- **Nothing intercepts a Codex conductor.** `claude_pretool.py` gives Claude Code a
-  PreToolUse gate on writes and on family independence; Codex has no equivalent adapter, so
-  there **is no enforcement on Codex** — only what you choose to ask. Nothing stops a Codex
-  conductor from filling `critic` with `spawn_agent` and reviewing its own artifact, and the
-  Codex host's approval prompts do not help: they ask about side effects, not about which
-  vendor is reviewing whom. So on Codex, call `policy_engine.py authorize` before acting and
-  `dispatch-worker` for every worker, and describe the result as a contract you kept, never as
-  a contract that was enforced. (Claude Code's gate is narrower than it sounds too: it sees
-  tool calls, so a worker CLI launched from `Bash` bypasses the independence check. The hook
-  denies what looks like one and redirects you to `dispatch-worker`, but that match is a
-  **heuristic** — an absolute path, a variable, or any interpreter defeats it. It catches the slip, not an
-  adversary; do not grow the regex into something that looks authoritative.)
-- **Fan-out of three.** `max_active_children: 3` caps simultaneous workers; schedule larger
-  `bulk_worker` jobs in waves.
+A host with no conductor adapter takes no lease and operates advisory.
 
-On a host with no conductor adapter at all, do **not** acquire a lease or claim enforced
-orchestration. Say plainly which hosts are declared and why yours is not, then operate advisory.
+`agy` (Gemini) is not wired; revive it from commit `8e57af8`. With two families, one vendor's
+outage leaves `critic` and `verifier` with no independent candidate.
 
-## The Gemini family (`agy`) — disabled
+## Two gaps
 
-`agy` is **off**. It holds no binding candidate and appears in no adapter's `dispatch_hosts`,
-so no role can resolve to it and `--required-family gemini` returns "no compatible backend".
-System A's `call_worker.sh` no longer defines `gemini` or `gemini-reader` either.
+**What cannot land.** A Codex implementer returns a patch, and nothing applies one:
+`apply-worker-patch` does not exist, and the hook denies `git apply` during an active task. Apply
+it by hand with file tools, or use a Claude implementer with `--write`.
 
-What remains, unreferenced: the `agy-multimodal` / `agy-fast` entries in `backends.yaml`, the
-`_agy_cli` builder, and the engine's check that a `host: agy` backend must declare a Gemini
-model. They are kept so re-enabling is a configuration change rather than a rewrite. Nothing
-reaches them.
-
-Know what turning it off costs, because it was registered for a reason. With two families,
-`critic` and `verifier` each have exactly **one** different-family candidate, so a single
-vendor outage leaves independent review with no eligible backend at all. Gemini was the third
-candidate that closed that gap. It is now gone, and the gap is back.
-
-Re-enabling needs all of: restore the binding candidates, add `agy` to `dispatch_hosts`, and
-restore the System A workers — plus the two preconditions `_agy_cli` records (containment
-actually established, a completion actually observed) and the argv-length work its docstring
-names. Do not re-add it halfway.
-
-## Two gaps the bindings do not tell you about
-
-**What cannot land.** Still true for a *patch*; text lands through `--out` and files land through `--write`, since `--out` publishes a
-worker's returned text through the engine (see "Accounts"). Every CLI-dispatched implementer —
-either family — returns a patch.
-`git apply` is denied by the hook's shell-mutation rule, so the only route is the conductor
-applying it by hand with the file tools, and that is capped at two **code** files
-(`CODE_SUFFIXES`; docs and config do not count). A patch touching three or more code files has
-no route that honours the cap. On **Claude Code**, implementation that must write files goes to
-a natively-spawned Claude subagent under the hook; use `codex-core` only when a patch *is* the
-deliverable. On **Codex** there is no native Claude spawn, so such work is blocked: stop, say
-so, and request a conductor handoff (user approval; `approvals.yaml`). Do not close this by
-relaxing the hook or zeroing the counter; the fix is a
-narrow `apply-worker-patch` operation (recorded dispatch, patch digest, live lease, every path
-checked against `write_scope`), which does not exist yet.
-
-**What cannot execute.** A CLI-dispatched Claude worker has no `Bash`, on purpose — granting it
-would reopen the write path the tool restriction exists to close. So `claude-mid` as a verifier
-can read tests but not run them, and that is exactly the verifier Codex-authored work resolves
-to. When verification means running something: on Claude Code, spawn the verifier natively as a
-Claude subagent under the hook. On Codex that route does not exist — either arrange for Claude
-to be the author so the verifier is Codex (whose sandbox blocks writes but not commands), or
-stop, report verification as blocked, and request a conductor handoff (user approval;
-`approvals.yaml`). Never report a read-only review as executed verification.
-
-## Authorship is observed, not declared
-
-Independence is checked against `observed-author.json` beside the contract, and the record
-**accumulates**: every family observed producing part of the artifact stays in `families`, so a
-later producer adds to the record and never replaces it (see "Authorship accumulates" above).
-`dispatch-worker` records a CLI producer after the worker exits 0, or — under `--write` — whenever
-the change set is non-empty, since a failed attempt that changed files still authored those
-changes. That write is guarded like every other engine state write — lease generation and
-contract ownership rechecked under the lock, destination resolved so a symlink cannot stand where
-the sidecar belongs — and it is skipped with a warning rather than forced if the lease moved
-mid-run. A `--out` publication additionally records its own producer in
-`outputs/<dispatch_id>.json`, so an artifact's author is known per artifact. A `runner`
-publication is attributed *only* there — `runner` is not a producing role and never touches the
-task-wide sidecar — while a `bulk_worker` publication reaches both, since `bulk_worker` is. The hook records a native
-producer **before the call runs** — a PreToolUse hook cannot see the outcome — together with the
-`native_reason` it admitted, appended to an `admissions` history that survives later producers. A
-reviewer dispatch is refused when the sidecar contradicts `author_family`, when it is unreadable,
-malformed, or names an unknown family, when it records more than one family, and when the plan
-names a producing role but nothing was observed — unless the user has recorded
-`authorship_assertion` under `approvals.user` and every producing family was asserted (see
-"Authorship must be evidenced, not assumed"). A missing sidecar falls back to the conductor's
-family **only** for a contract that planned no producer. The lease check and the authorship write
-are two separate lock acquisitions, not one atomic step: the check can pass and the lease move
-before the write, in which case the write is skipped with a warning rather than forced. Fix the contract, not the sidecar. Because the record accumulates, a failed
-native producer no longer overwrites the real author; what it leaves behind is a family a
-reviewer must now differ from, which is the correct consequence of having run it.
+**What cannot execute.** Only a `--write --exec` producer runs commands. A CLI-dispatched critic or
+verifier has no Bash, and the Codex read-only sandbox blocks temp-file writes, so a Codex critic or
+verifier usually cannot run a test suite and reviews statically. Codex-authored work's verifier is
+`claude-mid-team` first, which reads tests but cannot run them. For executed evidence, run the
+suite yourself or, for Codex-authored work, spawn a native Claude verifier under the hook. Never
+report a read-only review as executed verification.
 
 ## Approval and enforcement
 
-The conductor may approve bounded worker calls and transient retries inside the task
-contract. Obtain explicit user approval for conductor handoff, scope expansion,
+The conductor may approve bounded worker calls and transient retries inside the contract. Get
+explicit user approval, recorded under `approvals.user`, for conductor handoff, scope expansion,
 destructive actions, external side effects, credentials, or policy overrides.
 
-Two things the hook does not cover, so do not lean on it for them. It is wired in
-`multiagent/.claude/settings.json`, which means it gates a session **launched from the
-installation root** and nothing else — not a session in another project, and not any worker
-process. And engine-mediated writes (`--out`, the state records) never reach it: they are
-authorized inside the engine against the reloaded contract and recorded there.
+The hook is wired in `multiagent/.claude/settings.json` (matcher
+`Edit|Write|NotebookEdit|Bash|Task|Agent|mcp__codex__.*`). It loads only in a session launched from
+`multiagent/`, acts only while `tasks/.active-task` exists, and fails closed. It checks writes
+against `write_scope`, denies shell mutation, requires approval for destructive commands, and checks
+native spawns (planned role, family, audit budget). It gates no worker process, and
+engine-mediated writes never reach it; the engine authorizes those itself.
 
-During an active task, use hook-visible file tools for writes. Do not mutate through
-shell redirection or bulk shell commands. On a host without a PreToolUse adapter (Codex), the
-same rule holds without a hook to catch you: call `policy_engine.py authorize` with the write
-before making it, and keep every mutation inside `write_scope`. Keep direct conductor code edits to at most
-two small files and send them through independent critic review. The cap reads
-`direct_code_files` from the contract, and nothing increments it for you: bump it yourself
-after each new code file, or the cap never fires. It is a bare count, not a file list — once it
-reaches two, every further code-file edit is refused, including re-edits of a file already
-counted, so finish each file before bumping. Write authority is decided
-per selected backend and enforcement adapter, **not by product family**: a worker whose backend
-declares `writes_mediated: false` returns results or patches even when its host is capable of
-`workspace-write`. Direct writes need both an approved scope and an adapter that validates
-mediated writes.
-
-Treat that as the contract you must honour, not as something the engine checks for you.
-`authorize_action()` currently keys on role and path only — it does not consult the selected
-backend's `writes_mediated` / `write_mode`, and the validator merely *warns* for a read-only
-backend. Today the registered Codex backends are safe only because their dispatcher is
-hard-coded read-only. A future backend that advertises mediated writes would pass validation
-without that protection, so the conductor, not the engine, is the thing keeping this true.
-
-When no policy installation or enforcement adapter is available, apply the same rules
-as advice and choose the more restrictive action.
-
-## Picture book
-
-`references/picture-book.html` — the whole procedure in seven pictures for someone who has
-never seen it: request, contract, baton, four helpers, no self-review, tiers by brain size,
-synthesis. Open it in a browser. For humans, not for you.
+During an active task, write with file tools, not shell redirection or bulk shell commands. Without
+a hook (Codex), call `authorize` before a write and keep every mutation inside `write_scope`.
+Without a policy installation, apply these rules as advice and take the more restrictive action.
