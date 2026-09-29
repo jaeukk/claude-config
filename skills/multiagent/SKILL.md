@@ -9,10 +9,9 @@ description: Conductor mode for Claude Code or Codex. The default is a single se
 
 The default is **one producer and no review loop**: this session, a native subagent (Claude
 `Agent`, Codex `spawn_agent`; no contract), or one team-account worker with Bash
-(`dispatch-worker --write <dest> --exec`). On two code tasks with a test oracle (2026-09-29,
-four runs per arm), the critic → fix loop changed the score in 0 of 4 runs, and the multiagent arm
-cost 2–3.7× a single session for scores within noise; most of that was the implementer lacking
-Bash.
+(`dispatch-worker --write <dest> --exec`). Measured 2026-09-29 on two test-oracle code tasks (four
+runs per arm): the critic → fix loop changed no score, and the multiagent arm cost 2–3.7× a single
+session, mostly because its implementer lacked Bash.
 
 Reach for the engine only for:
 
@@ -69,8 +68,7 @@ conductor code edits; set `audit_cycles` when they need it.
 
 ## Tiers and bindings
 
-Backends are named `<family>-<tier>`. A tier is a routing role, not an effort level, and tier
-order is a preference, not a measured ranking.
+Backends are named `<family>-<tier>`. A tier is a routing role, not an effort level.
 
 | Tier | Role | Claude | Codex | Team backend |
 |---|---|---|---|---|
@@ -125,9 +123,9 @@ It refuses before launch when the suffix is code, the destination is reserved
 `authorize_action` denies the path, or `--write` is also given. On success the engine writes an
 immutable snapshot, then the destination, then `outputs/<dispatch_id>.json` (account, backend,
 model, attempt, sha256, lease generation). A failed worker attempt records `status: failed` with a
-reason and publishes nothing. Publication itself is not atomic: if a guard fails partway (a lost
-lease, a scope narrowed mid-run), a snapshot or even the destination may already be written with no
-record, so inspect both before retrying. A result under 200 bytes of non-whitespace is `below_min_bytes` and is not
+reason and publishes nothing. Publication is not atomic: a guard failing partway (lost lease,
+narrowed scope) can leave a snapshot or the destination written with no record; inspect both
+before retrying. A result under 200 bytes of non-whitespace is `below_min_bytes` and is not
 published, because a one-word refusal also exits 0; pass `--min-bytes` for genuinely short output
 (`0` disables it).
 
@@ -284,4 +282,3 @@ engine-mediated writes never reach it; the engine authorizes those itself.
 
 During an active task, write with file tools, not shell redirection or bulk shell commands. Without
 a hook (Codex), call `authorize` before a write and keep every mutation inside `write_scope`.
-Without a policy installation, apply these rules as advice and take the more restrictive action.
