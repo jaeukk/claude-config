@@ -129,8 +129,6 @@ the groups they were found in:
 
 ## C. Housekeeping
 
-- `~/.multiagent` (the deployed global copy) was last deployed at `ab608a0` (2026-09-27). Run
-  `scripts/deploy-multiagent.sh global` once this cut is merged into `~/.claude`. Whether anything
-  on the Windows side still reads that copy is unverified; retiring `global` mode is a later
-  decision.
+- Whether anything on the Windows side still reads `~/.multiagent` (redeployed 2026-09-30 with
+  1.4.0) is unverified; retiring `global` mode is a later decision.
 - The System A files listed in `AGENTS.md` are legacy, kept pending their own retirement decision.
