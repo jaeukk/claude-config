@@ -90,8 +90,7 @@ Backends are named `<family>-<tier>`. A tier is a routing role, not an effort le
 candidate without a health check, and a failed worker is reported, not retried on the next one.
 During a Codex outage, pass `--required-family claude`.
 
-`dispatch-worker` transmits effort on every CLI path (`-c model_reasoning_effort` for Codex,
-`--effort` for Claude). A native Claude spawn takes model and effort from its agent frontmatter,
+`dispatch-worker` transmits effort on every CLI path. A native Claude spawn takes model and effort from its agent frontmatter,
 not from the binding; the hook checks only that a compatible binding exists. Keep the frontmatter
 in sync, and never report the resolved backend as the model that ran unless the frontmatter says
 so. Model evidence: `references/model-refresh-2026-09-27.md`.
@@ -217,8 +216,8 @@ publication is attributed only there.
   which runs the resolved backend's CLI with the brief on stdin, never with `spawn_agent`.
 
 The engine counts CLI workers on the lease against `min(max_fanout, max_active_children)`, so a
-real dispatch needs a live lease you own. That bounds accidental fan-out by a cooperating
-conductor; it is not a security boundary. A process killed mid-update leaves
+real dispatch needs a live lease you own. It bounds accidental fan-out; it is not a
+security boundary. A process killed mid-update leaves
 `tasks/<id>/lease.lock`: every later lease operation times out naming it, and expiry does not clear
 it. Stop the task's processes and delete it by hand.
 
