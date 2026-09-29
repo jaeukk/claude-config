@@ -124,8 +124,10 @@ It refuses before launch when the suffix is code, the destination is reserved
 (engine state of any task, any `.git*` component, `.claude`, `.codex`, `.vscode`, `.mcp.json`),
 `authorize_action` denies the path, or `--write` is also given. On success the engine writes an
 immutable snapshot, then the destination, then `outputs/<dispatch_id>.json` (account, backend,
-model, attempt, sha256, lease generation). A failure records `status: failed` with a reason and
-writes nothing. A result under 200 bytes of non-whitespace is `below_min_bytes` and is not
+model, attempt, sha256, lease generation). A failed worker attempt records `status: failed` with a
+reason and publishes nothing. Publication itself is not atomic: if a guard fails partway (a lost
+lease, a scope narrowed mid-run), a snapshot or even the destination may already be written with no
+record, so inspect both before retrying. A result under 200 bytes of non-whitespace is `below_min_bytes` and is not
 published, because a one-word refusal also exits 0; pass `--min-bytes` for genuinely short output
 (`0` disables it).
 
@@ -259,12 +261,13 @@ outage leaves `critic` and `verifier` with no independent candidate.
 `apply-worker-patch` does not exist, and the hook denies `git apply` during an active task. Apply
 it by hand with file tools, or use a Claude implementer with `--write`.
 
-**What cannot execute.** Only a `--write --exec` producer runs commands. A CLI-dispatched critic or
-verifier has no Bash, and the Codex read-only sandbox blocks temp-file writes, so a Codex critic or
-verifier usually cannot run a test suite and reviews statically. Codex-authored work's verifier is
-`claude-mid-team` first, which reads tests but cannot run them. For executed evidence, run the
-suite yourself or, for Codex-authored work, spawn a native Claude verifier under the hook. Never
-report a read-only review as executed verification.
+**What cannot execute.** Among CLI-dispatched Claude workers, only a `--write --exec` producer gets
+Bash; a Claude critic or verifier reads tests but cannot run them. A Codex worker can run commands,
+but its read-only sandbox blocks every write, temp files included, so a suite that needs a temporary
+directory errors (4 of 4 Stage 1 critic runs) and the review falls back to static reading.
+Codex-authored work's verifier is `claude-mid-team` first. For executed evidence, run the suite
+yourself or, for Codex-authored work, spawn a native Claude verifier under the hook. Report executed
+verification only for checks that actually ran.
 
 ## Approval and enforcement
 
