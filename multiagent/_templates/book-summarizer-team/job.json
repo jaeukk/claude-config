@@ -5,7 +5,7 @@
   "pdf": "/mnt/c/Users/<WINDOWS_USER>/My Drive/_WORKSPACE/40_Resources/ZoteroStorage/Torquato_2002_Random Heterogeneous Materials/Torquato - 2002 - Random Heterogeneous Materials Microstructure and Macroscopic Properties 1.pdf",
   "book_root": "40_Resources/20_LongForms/10_Books/Torquato_RandomHeterogeneousMaterials_2002",
   "offset": 18,
-  "model": "claude-sonnet-5",
+  "model": "claude-sonnet-5-5",
   "chapters": [
     {
       "chapter": 20,

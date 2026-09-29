@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Changed
+- **Mid tier re-pinned to Sonnet 5.5** — `claude-mid` and `claude-mid-team` now pin
+  `claude-sonnet-5-5` (medium), and the book driver defaults to it. Evidence: the 2026-09-29 local check
+  (capability profile) and the vendor comparison. Core stays on Opus 5.5.
+
 ### Added
 - **Audit budget `audit_cycles`** (design-basis D16) — critic rounds a task may run; absent or 0
   skips audit. Enforced by `dispatch-worker` (zero or spent budget refuses a critic) and

@@ -67,7 +67,7 @@ Backends are named `<family>-<tier>`; one role per tier on both families (fast c
 | ceiling | `critic` (different family from author) | Fable 5.1, high | Astra, medium |
 | frontier | `conductor` (session assertion) | Opus 5.5, high | Astra, medium |
 | core | `implementer` (Claude first; both high) | Opus 5.5 | GPT-6 Sol |
-| mid | `verifier` (different family from author) | Sonnet 5, medium | Terra, medium |
+| mid | `verifier` (different family from author) | Sonnet 5.5, medium | Terra, medium |
 | fast | `bulk_worker` pool; `runner` (Codex first) | Haiku 4.5, low | Terra, low |
 
 `runner` prefers `codex-fast` on the recorded benchmark (`capability-profile.md`): equal

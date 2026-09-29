@@ -9,7 +9,7 @@ A registry entry in `policy/backends.yaml` is account-bound when it carries an `
 Three team backends exist, all on `host: claude-code`, all with `config_dir: ~/.claude-team`:
 
 - `claude-core-team` — `claude-opus-5-5`, capabilities `implementation, review, verification, structured_result`
-- `claude-mid-team` — `claude-sonnet-5`, capabilities `verification, structured_result`
+- `claude-mid-team` — `claude-sonnet-5-5`, capabilities `verification, structured_result`
 - `claude-fast-team` — `claude-haiku-4-5`, capabilities `bulk, mechanical, verification, structured_result`
 
 Every other backend is either `account: private` (the five non-team Claude entries) or carries no account key at all (all `codex-*` and `agy-*`).

@@ -50,7 +50,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(outside[outside.index("--add-dir") + 1], str(self.tmp / "elsewhere"))
         self.assertNotIn("Bash", outside)  # the shell grant is a named allowlist, never bare
         self.assertIn("Bash(pdftoppm:*)", outside)
-        self.assertIn("BUILDER_ID: claude-sonnet-5", outside[outside.index("-p") + 1])
+        self.assertIn("BUILDER_ID: claude-sonnet-5-5", outside[outside.index("-p") + 1])
 
     def test_reset_regex_reads_the_cli_wording(self) -> None:
         match = MODULE.RESET.search("You've hit your limit · resets 11:30pm (Asia/Seoul)")

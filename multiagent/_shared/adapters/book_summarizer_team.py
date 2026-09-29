@@ -80,7 +80,7 @@ class Driver:
         contract = json.loads((task_dir / "task.yaml").read_text(encoding="utf-8"))
         self.vault = pathlib.Path(contract["target_repo"]).expanduser().resolve()
         self.job = job
-        self.model = job.get("model", "claude-sonnet-5")
+        self.model = job.get("model", "claude-sonnet-5-5")
         root = pathlib.Path(job["book_root"])
         self.book_root = root if root.is_absolute() else self.vault / root
         self.timeout = timeout_min * 60

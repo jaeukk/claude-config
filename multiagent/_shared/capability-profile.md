@@ -111,3 +111,14 @@
   are unchanged. This supersedes the September 23 pending-pin decision, not its
   outstanding critic review. Evidence and limitations are recorded in
   `~/.claude/skills/multiagent/references/model-refresh-2026-09-27.md`.
+
+- **2026-09-29**: Sonnet 5.5 check (`tasks/2026-09-29-sonnet-55-check/`, same frozen 10 items and
+  hidden graders as 09-23, team account, 90 calls, 0 failures). `opus55-high`, `sonnet55-high` and
+  `sonnet55-med` all 30/30, contract 100%, spread 0, so both Sonnet arms pass the three pre-registered
+  gates against same-day `opus55-high`. Per call: $0.062 / $0.024 / $0.020; median 27.2 / 12.1 /
+  10.1 s; output 2291 / 1474 / 1099 tokens. Ceiling again: the items cannot separate the models.
+  **Applied by the user's decision**: `claude-mid` and `claude-mid-team` → `claude-sonnet-5-5` at
+  medium, plus the book driver's default job model. Core (`implementer`) stays on Opus 5.5: nothing
+  here separates the two on hard work, and the vendor's hardest coding benchmark (FrontierCode 1.1:
+  Opus 5.5 54.4% vs Sonnet 5.5 46.2% at max effort) favors Opus. The vault agents'
+  `model: sonnet` alias had already floated to Sonnet 5.5 (CLI 2.1.284) before this check.

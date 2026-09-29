@@ -99,7 +99,7 @@ cross-model ranking.
 | ceiling | critic | Fable 5.1, high | Astra, medium | — |
 | frontier | conductor | Opus 5.5 (session assertion) | Astra, medium | — |
 | core | implementer | Opus 5.5, high | GPT-6 Sol, high | `claude-core-team` |
-| mid | verifier | Sonnet 5, medium | Terra, medium | `claude-mid-team` |
+| mid | verifier | Sonnet 5.5, medium | Terra, medium | `claude-mid-team` |
 | fast | bulk_worker, runner | Haiku 4.5, low | Terra, low | `claude-fast-team` |
 
 The team column is a *separate registry entry*, not a variant of the private one: nothing links
@@ -289,7 +289,7 @@ line, so a rerun skips it. After each built chapter the driver runs `record-auth
 **assertion**: a later critic or verifier still needs `authorship_assertion` under
 `approvals.user`. The shell grant is a named allowlist (the PDF tools, `python3`, `curl`,
 read-only file commands), not bare Bash, but nothing intercepts a write — containment is the
-brief, and the contract's `deviations` must say so. The model is the job's (`claude-sonnet-5`,
+brief, and the contract's `deviations` must say so. The model is the job's (`claude-sonnet-5-5`,
 the agent's own tier), not the implementer binding's Opus. The paper-reviewer precedent
 (16 papers, 2026-09-20) lives in `tasks/2026-09-18-plasmon-litsearch-campaign/workers/
 implementer/wave3/`.
