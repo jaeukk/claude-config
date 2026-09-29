@@ -122,8 +122,8 @@ It refuses before launch when the suffix is code, the destination is reserved
 (engine state of any task, any `.git*` component, `.claude`, `.codex`, `.vscode`, `.mcp.json`),
 `authorize_action` denies the path, or `--write` is also given. On success the engine writes an
 immutable snapshot, then the destination, then `outputs/<dispatch_id>.json` (account, backend,
-model, attempt, sha256, lease generation). A failed worker attempt records `status: failed` with a
-reason and publishes nothing. Publication is not atomic: a guard failing partway (lost lease,
+model, attempt, sha256, lease generation). An unsuccessful worker result publishes nothing; its
+`status: failed` record is written only if the lease check and state write succeed. Publication is not atomic: a guard failing partway (lost lease,
 narrowed scope) can leave a snapshot or the destination written with no record; inspect both
 before retrying. A result under 200 bytes of non-whitespace is `below_min_bytes` and is not
 published, because a one-word refusal also exits 0; pass `--min-bytes` for genuinely short output
@@ -167,8 +167,8 @@ under a contract:
 
 Start from `_templates/book-summarizer-team/`. The conductor supplies the PDF path, page offset and
 per-chapter page ranges in the job. One chapter at a time; `--jobs N` only when the user authorized
-parallel chapters. A chapter whose `x.00` overview note carries an `agent:` line is skipped on
-rerun. After each chapter the driver runs `record-author`, an assertion (see "Authorship"). The
+parallel chapters. On rerun, a chapter is skipped when its `x.00` overview note exceeds 2,000
+bytes and carries an `agent:` line. After each chapter the driver runs `record-author`, an assertion (see "Authorship"). The
 shell grant is a named allowlist, but nothing intercepts a write: containment is the brief, and the
 contract's `deviations` must say so. The model is the job's (default `claude-sonnet-5-5`).
 
