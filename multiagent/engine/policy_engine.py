@@ -2698,6 +2698,10 @@ def dispatch_worker(
                         "status": "in_flight", "destination": str(write_target),
                         "role": role, "backend": backend["backend"],
                         "account": backend.get("account", "private"), "baseline": baseline,
+                        # What contained this worker, on the record a later reader consults:
+                        # with --exec, Bash writes fall outside `changes` (critic 3b-1, P1-1).
+                        "exec": exec_bash,
+                        "enforcement": EXEC_ENFORCEMENT if exec_bash else WRITE_ENFORCEMENT,
                     }, indent=2),
                     encoding="utf-8",
                 )
@@ -2805,6 +2809,8 @@ def dispatch_worker(
                 "backend": backend["backend"], "family": backend["family"],
                 "account": backend.get("account", "private"), "model": backend.get("model"),
                 "attempt": attempt_number, "changes": changes, "baseline": baseline,
+                "exec": exec_bash,
+                "enforcement": EXEC_ENFORCEMENT if exec_bash else WRITE_ENFORCEMENT,
             }
             if after.allowed:
                 record["after"] = (after.details or {}).get("files", {})

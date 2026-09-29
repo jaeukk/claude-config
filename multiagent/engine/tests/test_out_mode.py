@@ -936,10 +936,12 @@ class OutDispatchTest(unittest.TestCase):
                 "config_dir": "/tmp/team"}
         limited = accounts.Attempt(
             "team", "/tmp/team", "claude-haiku-5", 1, "rate_limited",
-            {"type": "result", "is_error": True, "api_error_status": 429, "result": "limit"},
+            {"type": "result", "is_error": True, "api_error_status": 429, "result": "limit",
+             "usage": {"output_tokens": 1}, "total_cost_usd": 0.01},
             "", "",
         )
-        final = claude_attempt(0, envelope(result="the second try"), "the second try")
+        final = claude_attempt(0, envelope(result="the second try", usage={"output_tokens": 2},
+                                           total_cost_usd=0.02), "the second try")
         runner = mock.Mock(side_effect=[limited, final])
         seen = []
 
@@ -969,6 +971,72 @@ class OutDispatchTest(unittest.TestCase):
             [(e["attempt"], e["dispatch_id"]) for e in self.attempt_events()],
             [(1, record["dispatch_id"]), (2, record["dispatch_id"])],
         )
+        # Each attempt's own cost, not the survivor's twice.
+        self.assertEqual(
+            [(e["usage"], e["total_cost_usd"]) for e in self.attempt_events()],
+            [({"output_tokens": 1}, 0.01), ({"output_tokens": 2}, 0.02)],
+        )
+
+    def test_a_real_exec_dispatch_wires_bash_through_and_records_it(self):
+        # Real command and settings construction; only the process is faked (critic 3b-1,
+        # P1-1 and P1-3). The control is the same dispatch without --exec.
+        for exec_bash in (False, True):
+            with self.subTest(exec_bash=exec_bash):
+                self.setUp()
+                self.write_contract(role="implementer")
+                contract = pe.load_document(self.contract_path)
+                team = {"backend": "claude-core-team", "host": "claude-code", "family": "claude",
+                        "model": "claude-opus-5", "effort": "high", "account": "team",
+                        "config_dir": "/tmp/team"}
+                seen = {}
+
+                def fake_run(command, **kwargs):
+                    seen["command"], seen["prompt"] = command, kwargs.get("input", "")
+                    (self.repo / "docs" / "x.md").write_text("written", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, stdout=json.dumps(envelope(
+                        usage={"output_tokens": 9}, total_cost_usd=0.5)), stderr="")
+
+                with mock.patch.object(pe.subprocess, "run", side_effect=fake_run), \
+                        mock.patch.object(pe.shutil, "which", return_value="/usr/bin/claude"), \
+                        mock.patch.object(pe, "_resolve_with_account",
+                                          return_value=(pe.Decision(True, "resolved", team), "stub")), \
+                        mock.patch.object(pe.sys, "stdout"), mock.patch.object(pe.sys, "stderr"):
+                    code = pe.dispatch_worker(
+                        self.bundle, contract, "implementer", self.brief, "native", False,
+                        None, self.task_dir, self.task_dir, None, self.contract_path, 0,
+                        "docs/x.md", exec_bash,
+                    )
+                self.assertEqual(code, 0)
+                command = seen["command"]
+                tools = command[command.index("--tools") + 1]
+                settings = json.loads(Path(command[command.index("--settings") + 1]).read_text())
+                bash_rules = [r for r in settings["permissions"]["allow"] if r.startswith("Bash(")]
+                record = json.loads(self.records()[0].read_text(encoding="utf-8"))
+                event = self.attempt_events()[0]
+                self.assertEqual(event["usage"], {"output_tokens": 9})
+                self.assertEqual(event["total_cost_usd"], 0.5)
+                self.assertEqual(record["exec"], exec_bash)
+                if exec_bash:
+                    self.assertTrue(tools.endswith(",Bash"), tools)
+                    self.assertIn("Bash(python3:*)", bash_rules)
+                    self.assertEqual(record["enforcement"], pe.EXEC_ENFORCEMENT)
+                    self.assertIn("only this instruction keeps it", seen["prompt"])
+                else:
+                    self.assertNotIn("Bash", tools)
+                    self.assertEqual(bash_rules, [])
+                    self.assertEqual(record["enforcement"], pe.WRITE_ENFORCEMENT)
+                    self.assertIn("every other path is refused", seen["prompt"])
+
+    def test_the_cli_forwards_exec(self):
+        self.write_contract(role="implementer")
+        out = mock.MagicMock()
+        with mock.patch.object(pe.sys, "stdout", out), mock.patch.object(pe.sys, "stderr"):
+            code = pe.main(["--root", str(ROOT), "dispatch-worker", "--task", str(self.contract_path),
+                            "--role", "implementer", "--brief", str(self.brief),
+                            "--write", "docs/x.md", "--exec", "--dry-run"])
+        self.assertEqual(code, 0)
+        printed = "".join(call.args[0] for call in out.write.call_args_list)
+        self.assertEqual(json.loads(printed)["write"]["enforcement"], pe.EXEC_ENFORCEMENT)
 
     def test_dispatch_without_out_writes_no_records(self):
         code, runner = self.dispatch(None)
