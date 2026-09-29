@@ -175,8 +175,9 @@
   most-used engine feature (68 of 128 dispatches), which is why review is kept at all.
   **Acceptance (2026-09-30, three trimmed runs `T1`–`T3` of the undirected `accounts.py` benchmark,
   `tasks/2026-09-29-cut-stage2-3/results.md`)**: the new default path (one team worker with
-  `--exec`, no review) scored 11, 12, 12 of 12 (single session: 12, 12, 11) at 0.85× the single
-  session's cost; adding one review round gave 12/12 in all three (untrimmed loop: 12/12) at about
+  `--exec`, no review) scored 11, 12, 12 of 12 (single session: 12, 12, 11) at the single session's
+  cost ($1.04–1.55 vs $1.34–1.72: same setup, within run-to-run spread; the saving against the
+  no-Bash implementer, $2.35, is thinking tokens that running the tests replaced); adding one review round gave 12/12 in all three (untrimmed loop: 12/12) at about
   0.7× the untrimmed loop's cost and 0.6× its wall time. Review changed the score in 1 of 3 of these
   runs (T1: the draft missed M10, the same bug the single session missed once), so across both
   benchmarks the loop changed a score in 1 of 7 runs.

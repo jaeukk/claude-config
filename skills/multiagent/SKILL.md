@@ -150,10 +150,9 @@ published, because a one-word refusal also exits 0; pass `--min-bytes` for genui
   `cat`, `head`, `tail`, `sed -n`, `grep`, `wc`, `find`, `git diff`, `git status`, `git log`.
   **Bash writes are not confined to the destination and are outside the change set**; the brief
   is their only containment, and the recorded `enforcement` says so. Use it for code with a test
-  oracle: in three runs (2026-09-30) it matched a single session's catches at 0.85× its cost and
-  half a no-Bash implementer's tokens and time.
-- A brief for summary notes must carry the note's frontmatter schema (`citekey`, `zotero_key`,
-  `tags`, …); a worker infers none of it.
+  oracle: in three runs (2026-09-30) it matched a single session's catches at the same cost (within
+  run-to-run spread) and half a no-Bash implementer's tokens and time.
+- A brief for summary notes must carry the note's frontmatter schema; a worker infers none of it.
 
 ### Agent workers needing other tools: the headless team driver
 
