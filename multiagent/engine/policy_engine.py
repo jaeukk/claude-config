@@ -1373,6 +1373,10 @@ def _codex_cli(
         [
             "exec", "--sandbox", "read-only", "--model", str(backend["model"]),
             "-c", f'model_reasoning_effort="{backend["effort"]}"',
+            # A dispatched worker runs without the user's Codex hooks, as a Claude worker runs
+            # `--restricted`: the multiagent PreToolUse hook would otherwise refuse a critic's
+            # read-only `2>&1` inside an active task, and the OS sandbox already contains it.
+            "-c", "features.hooks=false",
             *(() if result_file is None else ("-o", str(result_file))),
             "--skip-git-repo-check", "--ephemeral", "--color", "never", "-",
         ],

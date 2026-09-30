@@ -45,15 +45,16 @@ class CodexAdapterTest(unittest.TestCase):
             "conductor": {"host": "codex", "backend": "codex-frontier", "lease_owner": "me"},
         }), encoding="utf-8")
 
-    def run_event(self, event, active=True):
+    def run_event(self, event, active=True, raw=None):
         """Drive the adapter's main() with one event; return the denial reason or None."""
         out = io.StringIO()
-        with mock.patch.object(adapter.hook, "ROOT", self.root), \
-                mock.patch.object(adapter.hook, "active_task_path",
+        hook = adapter.load_hook()
+        with mock.patch.object(adapter, "ROOT", self.root), \
+                mock.patch.object(hook, "active_task_path",
                                   return_value=self.task_path if active else None), \
-                mock.patch.object(adapter.hook, "load_policy", return_value=self.bundle), \
-                mock.patch.object(adapter.sys, "stdin", io.StringIO(json.dumps(event))), \
-                mock.patch.object(adapter.hook.sys, "stdout", out):
+                mock.patch.object(hook, "load_policy", return_value=self.bundle), \
+                mock.patch.object(adapter.sys, "stdin", io.StringIO(raw if raw is not None else json.dumps(event))), \
+                mock.patch.object(hook.sys, "stdout", out):
             self.assertEqual(adapter.main(), 0)
         text = out.getvalue().strip()
         if not text:
@@ -111,6 +112,34 @@ class CodexAdapterTest(unittest.TestCase):
     def test_the_adapters_own_errors_deny(self):
         with mock.patch.object(adapter, "translate", side_effect=RuntimeError("boom")):
             self.assertIn("failed closed", self.run_event(self.shell("ls")))
+
+    def test_relative_patch_paths_resolve_against_a_subfolder_cwd(self):
+        sub = self.root / "docs"
+        self.assertIsNone(self.run_event(self.patch("*** Begin Patch\n*** Add File: new.md\n+x\n*** End Patch\n", cwd=sub)))
+        escaped = "*** Begin Patch\n*** Add File: ../engine/x.py\n+x\n*** End Patch\n"
+        self.assertIn("outside target_repo/write_scope", self.run_event(self.patch(escaped, cwd=sub)))
+
+    def test_a_sub_agent_edit_is_checked_as_its_role(self):
+        # agent_id marks a sub-agent's call; its actor is the contract's current role.
+        self.write_contract(("implementer", "critic"), role="critic", author="codex")
+        event = {**self.patch("*** Begin Patch\n*** Add File: docs/new.md\n+x\n*** End Patch\n"),
+                 "agent_id": "child-1"}
+        self.assertIn("may not write", self.run_event(event))
+
+    def test_list_form_and_cmd_shell_commands_are_checked(self):
+        listed = {**self.shell(""), "tool_input": {"command": ["rm", "-rf", "docs"]}}
+        self.assertIn("destructive_action", self.run_event(listed))
+        cmd_form = {"tool_name": "exec_command", "tool_input": {"cmd": "echo x > f"}, "cwd": str(self.root)}
+        self.assertIn("shell-based mutation", self.run_event(cmd_form))
+
+    def test_unreadable_input_is_never_refused(self):
+        self.assertIsNone(self.run_event(None, raw="{ not json"))
+
+    def test_any_spawn_agent_namespace_is_a_spawn(self):
+        pe.record_contributing_family(self.task_dir, "codex", "implementer via spawn_agent")
+        self.write_contract(("implementer", "critic"), role="critic", author="codex")
+        reason = self.run_event({"tool_name": "agents.spawn_agent", "tool_input": {}, "cwd": str(self.root)})
+        self.assertIn("codex cannot review", reason)
 
     def test_other_collaboration_tools_pass(self):
         self.assertIsNone(self.run_event({"tool_name": "collaborationwait_agent", "tool_input": {},

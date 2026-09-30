@@ -24,7 +24,8 @@ Reach for the engine only for:
   and `--out`.
 
 A PreToolUse hook enforces the contract on Claude Code (sessions launched from `multiagent/`) and
-on Codex (sessions whose working directory is inside `multiagent/`), only while a task is active.
+on Codex (WSL `~/.codex`; sessions whose working directory is inside `multiagent/`), only while a
+task is active.
 Elsewhere the contract is validated and kept, not enforced: say **policy-validated**.
 
 ## Load the local authority

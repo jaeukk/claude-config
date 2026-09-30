@@ -28,18 +28,34 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_SPEC = importlib.util.spec_from_file_location(
-    "claude_pretool", Path(__file__).resolve().parent / "claude_pretool.py"
-)
-hook = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(hook)
+#: This installation (the directory holding ``engine/``), computed without importing the engine:
+#: the hook runs before every tool call of every Codex session, so an out-of-scope call must stay
+#: as cheap as a bare interpreter start.
+ROOT = Path(__file__).resolve().parents[2]
+_hook: Any = None
 
-#: Codex's names for a shell command; the command is ``tool_input.command``.
+
+def load_hook() -> Any:
+    """The Claude hook module (and with it the engine), imported on first use only."""
+    global _hook
+    if _hook is None:
+        spec = importlib.util.spec_from_file_location(
+            "claude_pretool", Path(__file__).resolve().parent / "claude_pretool.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _hook = module
+    return _hook
+
+
+#: Codex's names for a shell command; the command is ``tool_input.command`` (``cmd`` for some).
 SHELL_TOOLS = frozenset({"Bash", "shell", "local_shell", "exec_command"})
 #: The patch headers that name a file ``apply_patch`` will create, change, delete or move to.
 PATCH_PATH = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+?)\s*$", re.MULTILINE)
-#: Codex's sub-agent spawn; the other collaboration tools (wait, send, list) start nothing.
-CODEX_SPAWN_TOOLS = frozenset({"collaborationspawn_agent", "spawn_agent"})
+#: Codex's sub-agent spawn, under whatever namespace prefix the version uses
+#: (``collaborationspawn_agent`` in 0.159). The other collaboration tools start nothing new;
+#: re-tasking an existing child is not checked (OPEN_ITEMS A3).
+SPAWN_SUFFIX = "spawn_agent"
 
 
 def in_scope(event: dict[str, Any]) -> bool:
@@ -51,7 +67,7 @@ def in_scope(event: dict[str, Any]) -> bool:
         where = Path(cwd).resolve()
     except (OSError, RuntimeError):
         return False
-    return where == hook.ROOT or hook.ROOT in where.parents
+    return where == ROOT or ROOT in where.parents
 
 
 def patch_paths(patch: str, cwd: Path) -> list[str]:
@@ -73,7 +89,7 @@ def translate(event: dict[str, Any]) -> list[tuple[dict[str, Any], str | None]]:
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     base = {key: event[key] for key in ("agent_id",) if event.get(key)}
     if tool in SHELL_TOOLS:
-        command = tool_input.get("command", "")
+        command = tool_input.get("command") or tool_input.get("cmd") or ""
         if isinstance(command, list):
             command = " ".join(str(part) for part in command)
         return [({**base, "tool_name": "Bash", "tool_input": {"command": str(command)}}, None)]
@@ -84,7 +100,7 @@ def translate(event: dict[str, Any]) -> list[tuple[dict[str, Any], str | None]]:
             raise ValueError("apply_patch names no file this adapter can check")
         return [({**base, "tool_name": "Edit", "tool_input": {"file_path": path}}, None)
                 for path in paths]
-    if tool in CODEX_SPAWN_TOOLS:
+    if tool.endswith(SPAWN_SUFFIX):
         return [({**base, "tool_name": "Agent", "tool_input": {}}, "codex")]
     return []
 
@@ -93,8 +109,12 @@ def main() -> int:
     """Evaluate one Codex hook event from standard input."""
     try:
         event = json.load(sys.stdin)
-        if not isinstance(event, dict) or not in_scope(event):
-            return 0
+    except ValueError:
+        return 0  # unreadable input: whose session it is cannot be told, so it is not refused
+    if not isinstance(event, dict) or not in_scope(event):
+        return 0
+    try:
+        hook = load_hook()
         if hook.active_task_path() is None:
             return 0  # no task is active: nothing to enforce (an invalid pointer raises and denies)
         for claude_event, family in translate(event):
@@ -104,7 +124,7 @@ def main() -> int:
                 return 0
         return 0
     except Exception as error:  # the adapter's own errors deny; Codex would otherwise allow
-        hook.deny(f"multi-agent policy hook (Codex) failed closed: {error}")
+        load_hook().deny(f"multi-agent policy hook (Codex) failed closed: {error}")
         return 0
 
 

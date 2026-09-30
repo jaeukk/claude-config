@@ -874,6 +874,14 @@ class ReviewCopyTest(unittest.TestCase):
         self.assertEqual(copied.enforcement, pe.REVIEW_COPY_ENFORCEMENT)
 
 
+class CodexWorkerHooksTest(unittest.TestCase):
+    """A dispatched Codex worker runs without the user's Codex hooks (step 3 self-review N2)."""
+
+    def test_codex_workers_disable_hooks(self):
+        args = pe._codex_cli({"model": "m", "effort": "low"}).args
+        self.assertEqual(args[args.index("features.hooks=false") - 1], "-c")
+
+
 class Round3AccountingTest(unittest.TestCase):
     def test_an_integer_past_the_digit_limit_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as tmp:
