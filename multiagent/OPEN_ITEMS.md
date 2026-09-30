@@ -127,6 +127,15 @@ the groups they were found in:
   attestation refused; exactly one of `--role`/`--settle`/`--resume-start`; settle without
   `--dispatch-id` refused; `--settle` with `--dry-run` writes nothing.
 
+## W. Native Windows not verified (2026-09-30)
+
+The lease lock closes its descriptor before deleting `lease.lock` on native Windows, and compares file identity
+(`st_dev`, `st_ino`) from `os.fstat` and `os.stat`. Both are reasoned, and tested only by simulating `os.name` on
+POSIX (`test_the_windows_release_order_closes_before_deleting`); no native Windows host ran them. To close: on
+native Windows, acquire and re-acquire a lease, exit a `_lease_lock` body with an exception, and check that the
+descriptor is closed and `lease.lock` removed. Recorded as non-blocking by the scoped audit round 13
+(`tasks/2026-09-30-multiagent-150-audit/`).
+
 ## C. Housekeeping
 
 - Whether anything on the Windows side still reads `~/.multiagent` (redeployed 2026-09-30 with
