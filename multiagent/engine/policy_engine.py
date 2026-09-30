@@ -3126,7 +3126,7 @@ def cost_report(roots: list[Path], since: str | None = None) -> dict[str, Any]:
         for line in events.read_text(encoding="utf-8", errors="replace").splitlines():
             try:
                 event = json.loads(line)
-            except json.JSONDecodeError:
+            except ValueError:  # includes an integer past the digit limit
                 continue
             if not isinstance(event, dict) or event.get("type") != "worker_attempt":
                 continue
@@ -3215,7 +3215,7 @@ def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generati
                 return "skipped: the lease is no longer this run's"
             _rewrite_contract_status(contract_path, status)
             return status
-    except (OSError, ValueError, TimeoutError) as error:
+    except Exception as error:  # noqa: BLE001 -- reported by the caller's summary, never raised
         return f"skipped: {error}"
 
 
@@ -3299,30 +3299,39 @@ def produce(
         code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
                                task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
     finally:
+        # Cleanup must never raise: an exception here would replace the dispatch's own.
         status = "complete" if code == 0 else "failed"
         if generation is None:
-            # No lease was ever held, and the folder was created by this call: nothing else can
-            # own it, so the contract is marked failed directly rather than left looking active.
+            # This run never held a lease. Mark the contract failed rather than leave it looking
+            # active, but only under the lock and only while no other lease holds the task: a
+            # competing caller that acquired first owns it now.
             try:
-                _rewrite_contract_status(contract_path, status)
-                finalized = status
-            except (OSError, ValueError) as error:
+                with _lease_lock(task_dir):
+                    if (task_dir / "lease.json").exists():
+                        finalized = "skipped: another lease holds this task"
+                    else:
+                        _rewrite_contract_status(contract_path, status)
+                        finalized = status
+            except Exception as error:  # noqa: BLE001 -- reported, never raised
                 finalized = f"skipped: {error}"
             released = Decision(False, lease_note)
         else:
             finalized = _finalize_produced(task_dir, contract_path, owner, generation, status)
             try:
                 released = release_lease(task_dir, owner, generation)
-            except (OSError, ValueError) as error:
+            except Exception as error:  # noqa: BLE001 -- reported, never raised
                 released = Decision(False, f"release failed: {error}")
-        attempts = []
-        for event in _read_events(task_dir):
-            if event.get("type") != "worker_attempt":
-                continue
-            usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
-            attempts.append({key: event.get(key) for key in (
-                "account", "backend", "model", "classification", "total_cost_usd", "tokens_used")}
-                | {"output_tokens": usage.get("output_tokens")})
+        attempts: list[dict[str, Any]] | str = []
+        try:
+            for event in _read_events(task_dir):
+                if event.get("type") != "worker_attempt":
+                    continue
+                usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+                attempts.append({key: event.get(key) for key in (
+                    "account", "backend", "model", "classification", "total_cost_usd", "tokens_used")}
+                    | {"output_tokens": usage.get("output_tokens")})
+        except Exception as error:  # noqa: BLE001 -- reported, never raised
+            attempts = f"events unreadable: {error}"
         print("produce: " + json.dumps({
             "task_dir": str(task_dir), "exit": code, "status": finalized,
             "lease_released": released.allowed, "lease": released.reason, "attempts": attempts,
@@ -3339,7 +3348,7 @@ def _read_events(task_dir: Path) -> list[dict[str, Any]]:
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             event = json.loads(line)
-        except json.JSONDecodeError:
+        except ValueError:  # includes an integer past the digit limit
             continue
         if isinstance(event, dict):
             events.append(event)
@@ -3678,7 +3687,11 @@ def main(argv: list[str] | None = None) -> int:
             restore_write(args.task_dir, args.dispatch_id, args.assume_stopped)
         )
     if args.command == "record-attempt":
-        return _print_decision(record_attempt(args.task_dir, json.loads(args.event)))
+        try:
+            fields = json.loads(args.event)
+        except ValueError as error:
+            return _print_decision(Decision(False, f"--event is not valid JSON: {error}"))
+        return _print_decision(record_attempt(args.task_dir, fields))
     if args.command == "cost-report":
         try:
             report = cost_report(args.tasks_root or [args.root / "tasks"], args.since)

@@ -245,9 +245,12 @@ class Driver:
             limited = bool(LIMIT.search(text[:400])) and not self.done(chapter)
             built = not limited and self.done(chapter)
             # The CLI run's own outcome, independent of whether the chapter got built.
+            # Text and stderr count only for a run that failed: a successful summary may well
+            # mention "429" (a page number) or "rate limit".
+            failed = timed_out or bool(err) or exit_code not in (0, None)
             limit_signal = bool(
                 (isinstance(envelope, dict) and envelope.get("api_error_status") == 429)
-                or LIMIT.search(text[:400]) or LIMIT.search(stderr[:2000])
+                or (failed and (LIMIT.search(text[:400]) or LIMIT.search(stderr[:2000])))
             )
             run_class = ("timeout" if timed_out else "rate_limited" if limit_signal
                          else "ok" if exit_code == 0 and not err else "error")

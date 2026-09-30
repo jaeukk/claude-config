@@ -373,6 +373,74 @@ class ProduceRound2Test(ProduceFixture):
         self.assertEqual(self.contract()["status"], "failed")
 
 
+class ProduceRound3Test(ProduceFixture):
+    """Audit round 3: a competing owner's contract, and cleanup that must never raise."""
+
+    def run_capturing(self, dispatch, **patches):
+        import io
+        err = io.StringIO()
+        with mock.patch.object(pe, "dispatch_worker", side_effect=dispatch), \
+                mock.patch.object(pe.sys, "stderr", err):
+            try:
+                code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                                  owner="me", task_id="t1", write="src/x.py")
+            except RuntimeError as error:
+                code = error
+        line = [l for l in err.getvalue().splitlines() if l.startswith("produce: ")][-1]
+        return code, json.loads(line[len("produce: "):])
+
+    def test_a_competing_owner_that_acquired_first_keeps_its_contract(self):
+        real_acquire = pe.acquire_lease
+
+        def competitor_first(task_dir, owner, ttl):
+            real_acquire(task_dir, "other", 600)
+            return real_acquire(task_dir, owner, ttl)  # refused: leased by other
+
+        with mock.patch.object(pe, "acquire_lease", side_effect=competitor_first):
+            code, summary = self.run_capturing(lambda *a, **k: 0)
+        self.assertEqual(code, 2)
+        self.assertIn("another lease", summary["status"])
+        self.assertEqual(self.contract()["status"], "active")
+        self.assertEqual(json.loads((self.task_dir / "lease.json").read_text())["owner"], "other")
+
+    def test_a_malformed_lease_counter_does_not_escape_cleanup(self):
+        def null_counter(*args, **kwargs):
+            lease = json.loads((self.task_dir / "lease.json").read_text(encoding="utf-8"))
+            lease["active_workers"] = None
+            (self.task_dir / "lease.json").write_text(json.dumps(lease), encoding="utf-8")
+            return 0
+
+        code, summary = self.run_capturing(null_counter)
+        self.assertEqual(code, 0)
+        self.assertFalse(summary["lease_released"])
+
+    def test_unreadable_events_keep_the_dispatch_exception_and_the_summary(self):
+        def boom(*args, **kwargs):
+            (self.task_dir / "events.ndjson").mkdir()  # reading it now raises
+            raise RuntimeError("the worker launcher exploded")
+
+        error, summary = self.run_capturing(boom)
+        self.assertIsInstance(error, RuntimeError)
+        self.assertIn("events unreadable", summary["attempts"])
+
+
+class Round3AccountingTest(unittest.TestCase):
+    def test_an_integer_past_the_digit_limit_is_skipped_not_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            (task_dir / "task.yaml").write_text("{}", encoding="utf-8")
+            (task_dir / "events.ndjson").write_text(
+                '{"type": "worker_attempt", "account": "team", "model": "m", "classification": "ok", '
+                '"total_cost_usd": ' + "9" * 5000 + '}\n'
+                '{"type": "worker_attempt", "account": "team", "model": "m", "classification": "ok"}\n',
+                encoding="utf-8")
+            self.assertEqual(pe.cost_report([task_dir])["totals"]["attempts"], 1)
+            self.assertEqual(len(pe._read_events(task_dir)), 1)
+            with mock.patch.object(pe.sys, "stdout"):
+                self.assertEqual(pe.main(["record-attempt", "--task-dir", str(task_dir), "--event",
+                                          '{"total_cost_usd": ' + "9" * 5000 + '}']), 2)
+
+
 class Round2AccountingTest(unittest.TestCase):
     def test_huge_numbers_are_refused_and_tolerated_in_history(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -486,6 +554,12 @@ class BookDriverOutcomeTest(unittest.TestCase):
             argv, 1, stdout=json.dumps(envelope(is_error=True, result="failed")),
             stderr="API Error: 429 rate limit"))
         self.assertEqual((by_stderr["classification"], by_stderr["built"]), ("rate_limited", True))
+
+    def test_successful_content_that_mentions_429_is_not_a_rate_limit(self):
+        event = self.run_one(lambda argv: subprocess.CompletedProcess(
+            argv, 0, stdout=json.dumps(envelope(result="Summarized pages 429-450 on rate limits.")),
+            stderr=""))
+        self.assertEqual((event["classification"], event["built"]), ("ok", True))
 
     def test_a_nonzero_exit_after_the_chapter_was_built(self):
         event = self.run_one(lambda argv: subprocess.CompletedProcess(
