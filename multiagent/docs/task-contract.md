@@ -65,7 +65,8 @@ Old contracts carrying them are accepted and ignored.
 7. Run critic and verifier with a family different from the artifact author. A critic runs only
    within `audit_cycles` (N: at most N completed critic rounds), which `dispatch-worker`
    enforces.
-8. Synthesize once, clear `tasks/.active-task`, release the lease, and mark the task complete.
+8. Synthesize once, release the lease (this also clears `tasks/.active-task` when it names the
+   task), and mark the task complete.
 
 A host may conduct only when its backend is a `conductor` binding candidate and its
 `conductor_adapters` entry declares `dispatch_hosts` reaching an independent critic and verifier

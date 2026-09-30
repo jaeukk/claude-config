@@ -20,6 +20,13 @@
   read).
 - SKILL.md: a review round that leaves nothing to fix (no findings, or all deferred or rejected)
   dispatches no fixer (step-7 benchmark: three empty reviews each paid an unchanged $0.41 fix).
+- Conductor defects seen in the bench8 benchmark (8 headless conductor sessions):
+  - `release-lease` also removes `tasks/.active-task` when it names the released installation task; the
+    hook refuses a conductor's own removal, so 6 of 8 left a stale pointer.
+  - A conductor may write ordinary files in its active task's own folder (briefs, notes, results); engine
+    state there stays refused. Before this, a critic brief could not be written mid-task at all.
+  - SKILL.md: never end a turn while a dispatch you started is running (a headless session killed its
+    critic); do not open other tasks' folders as examples; task IDs are lowercase.
 
 ## [1.5.0] - 2026-09-30
 

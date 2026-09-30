@@ -575,6 +575,35 @@ def _scope_root(scope: str) -> str:
     return "/".join(parts)
 
 
+def _own_task_file(path_value: str, target_repo: str, task_dir: Path | None) -> bool:
+    """Whether a write is an ordinary file in the task's own folder, not engine state.
+
+    The conductor keeps its briefs, notes and results next to the contract. Before this rule a
+    conductor could not write them at all during an active task: file tools were limited to
+    ``write_scope`` and the hook refuses shell writes (bench8, 2026-09-30). The rule only widens:
+    engine state -- the reserved files and trees, and the dot-files the engine stages
+    (``.task-initial.*`` is a hard link to the contract) -- and ``lease.*`` records are never
+    matched here and stay under the scope check. The comparison is on real paths, so a symlink
+    in the folder that points elsewhere does not qualify.
+    """
+    if task_dir is None:
+        return False
+    own = Path(os.path.realpath(task_dir))
+    candidate = Path(path_value)
+    if not candidate.is_absolute():
+        candidate = Path(target_repo) / candidate
+    destination = Path(os.path.realpath(candidate))
+    try:
+        inside = destination.relative_to(own).parts
+    except ValueError:
+        return False
+    # Reserved names are compared case-folded: on native Windows `TASK.YAML` is the contract.
+    folded = [part.casefold() for part in inside]
+    if not folded or _task_state_reason(own, own.joinpath(*folded)) is not None:
+        return False
+    return not (any(part.startswith(".") for part in folded) or folded[0].startswith("lease."))
+
+
 def _is_in_scope(path_value: str, target_repo: str, scopes: list[str]) -> bool:
     target = Path(target_repo).resolve()
     candidate = Path(path_value)
@@ -653,6 +682,8 @@ def authorize_action(
             return Decision(False, f"role {actor_role} may not write")
         if actor_role == "implementer" and "implementer" not in task["roles_plan"]:
             return Decision(False, "implementer is not planned")
+        if actor_role == "conductor" and _own_task_file(path_value, task["target_repo"], task_dir):
+            return Decision(True, "write is an ordinary file in the task's own folder")
         if not _is_in_scope(path_value, task["target_repo"], task["write_scope"]):
             return Decision(False, "path is outside target_repo/write_scope")
         return Decision(True, "write is inside the approved task scope")
@@ -931,9 +962,32 @@ def release_lease(task_dir: Path, owner: str, generation: str | None = None) -> 
             if active:
                 return Decision(False, f"{active} worker slot(s) still held; release them first")
             lease_path.unlink()
-            return Decision(True, "lease released")
+            return Decision(True, "lease released", {"active_task_cleared": _clear_active_pointer(task_dir)})
     except TimeoutError as error:
         return Decision(False, str(error))
+
+
+def _clear_active_pointer(task_dir: Path) -> bool:
+    """Remove ``tasks/.active-task`` if it names this installation task; report whether it did.
+
+    The conductor cannot do this itself: while the pointer is set the hook refuses both ``rm``
+    (shell mutation) and a file-tool write to it (engine state), so 6 of 8 bench8 conductors left
+    it behind, and the next session launched from ``multiagent/`` was then held to a finished
+    contract. Only a pointer naming exactly this task, in this installation, is removed; any
+    other content -- another task, a symlink, an unreadable file -- is left alone.
+    """
+    tasks = Path(os.path.realpath(INSTALLATION_ROOT / "tasks"))
+    own = Path(os.path.realpath(task_dir))
+    pointer = tasks / ".active-task"
+    try:
+        if own.parent != tasks or pointer.is_symlink() or not pointer.is_file():
+            return False
+        if pointer.read_text(encoding="utf-8").strip() != own.name:
+            return False
+        pointer.unlink()
+        return True
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def append_event(task_dir: Path, owner: str, event: dict[str, Any]) -> Decision:

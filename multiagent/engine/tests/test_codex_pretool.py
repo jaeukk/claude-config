@@ -146,5 +146,20 @@ class CodexAdapterTest(unittest.TestCase):
                                           "cwd": str(self.root)}))
 
 
+
+    def test_claude_write_and_codex_patch_into_the_own_folder(self):
+        """Both hosts let a conductor write briefs in its own task folder during an active task (bench8)."""
+        self.write_contract(("implementer", "critic"), role=None, author="claude")
+        hook = adapter.load_hook()
+        with mock.patch.object(hook, "active_task_path", return_value=self.task_path), \
+                mock.patch.object(hook, "load_policy", return_value=self.bundle):
+            allowed = hook.evaluate({"tool_name": "Write", "tool_input": {"file_path": str(self.task_dir / "brief.md")}})
+            refused = hook.evaluate({"tool_name": "Write", "tool_input": {"file_path": str(self.task_path)}})
+        self.assertIsNone(allowed)
+        self.assertIsNotNone(refused)
+        self.assertIsNone(self.run_event(self.patch("*** Begin Patch\n*** Add File: tasks/t1/notes.md\n+x\n*** End Patch")))
+        self.assertIsNotNone(self.run_event(self.patch("*** Begin Patch\n*** Update File: tasks/t1/task.yaml\n+x\n*** End Patch")))
+
+
 if __name__ == "__main__":
     unittest.main()

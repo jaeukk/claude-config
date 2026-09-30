@@ -43,7 +43,9 @@ Run from `multiagent/`, with `E=engine/policy_engine.py`.
 1. `python3 $E validate-policy`; draft `tasks/<id>/task.yaml` from `_templates/task.yaml`;
    `python3 $E validate-task --task tasks/<id>/task.yaml`. Neither calls the other: the first
    checks the installation, the second whether this host may conduct and dispatch every planned
-   role.
+   role. The template and `docs/task-contract.md` are the reference: do not open other tasks'
+   folders for examples, since they belong to other work and may hold material this task must not
+   see. A task ID is lowercase (`[a-z0-9][a-z0-9._-]*`).
 2. The contract names an absolute `target_repo`, `write_scope`, `roles_plan`, `audit_cycles`,
    `author_family` when review is planned, and `conductor.lease_owner`.
 3. `python3 $E acquire-lease --task-dir tasks/<id> --owner <lease_owner>`. One conductor per
@@ -55,10 +57,15 @@ Run from `multiagent/`, with `E=engine/policy_engine.py`.
    `enforcement` without launching; for `--write`, read `write.enforcement`, not the
    base argv it shows. Before a native spawn under an active contract, set
    `dispatch.current_role` to that role: the hook authorizes the spawn against it. Workers do not
-   spawn workers, widen scope, or synthesize the final answer.
+   spawn workers, widen scope, or synthesize the final answer. Never end your turn while a dispatch
+   you started is still running: run `dispatch-worker` in the foreground, or wait for a
+   backgrounded one to finish before you answer. A headless session (`claude -p`, `codex exec`)
+   ends with its turn and kills the worker; the review is lost and its usage goes unrecorded.
 6. Critic and verifier differ in family from the artifact's author (see "Authorship").
 7. Retry only transport, timeout and rate-limit failures; surface the rest; never drop a shard
-   silently. Synthesize once, `release-lease`, remove `.active-task`, mark the task complete.
+   silently. Synthesize once, then `release-lease`: it also removes `tasks/.active-task` when that
+   names this task, which you cannot do yourself while the hook enforces it. Then mark the task
+   complete.
 
 **Audit budget.** `audit_cycles` is how many critic rounds the task may run. Absent means 0, and
 0 means no audit: the default. Set it from the user's instruction ("up to three audit cycles" is
@@ -326,5 +333,7 @@ against `write_scope`, denies shell mutation, requires approval for destructive 
 native spawns (planned role, family, audit budget). It gates no worker process, and
 engine-mediated writes never reach it; the engine authorizes those itself.
 
-During an active task, write with file tools, not shell redirection or bulk shell commands. Without
+During an active task, write with file tools, not shell redirection or bulk shell commands: inside
+`write_scope`, or ordinary files in the task's own folder (briefs, notes, results). Engine state
+there (the contract, lease, events, authorship, state trees and dot-files) stays refused. Without
 a hook (Codex), call `authorize` before a write and keep every mutation inside `write_scope`.

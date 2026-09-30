@@ -197,7 +197,8 @@ def _evaluate(event: dict[str, Any], deny: Any, spawn_family: str | None = None)
 
     if tool in {"Edit", "Write", "NotebookEdit"}:
         path_value = normalized_path(tool_input)
-        decision = authorize_action(bundle, task, {"kind": "write", "actor_role": actor, "path": path_value})
+        decision = authorize_action(bundle, task, {"kind": "write", "actor_role": actor, "path": path_value},
+                                    task_dir=task_path.parent)
         if not decision.allowed:
             deny(decision.reason)
         return 0

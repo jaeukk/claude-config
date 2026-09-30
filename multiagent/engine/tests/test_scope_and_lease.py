@@ -170,5 +170,137 @@ class LeaseFilesPreservationTest(unittest.TestCase):
             self.assertEqual(lock.read_text(), "theirs")
             self.assertEqual(order.count("close"), 2)
 
+
+def _contract(target_repo: Path) -> dict:
+    """A minimal active contract whose write_scope is ``docs/**`` in ``target_repo``."""
+    return {
+        "schema_version": 1, "task_id": "t1", "status": "active", "target_repo": str(target_repo),
+        "write_scope": ["docs/**"], "roles_plan": ["implementer", "critic"], "audit_cycles": 1,
+        "author_family": "claude", "approvals": {"user": []}, "dispatch": {"current_role": None},
+        "conductor": {"host": "claude-code", "backend": "claude-frontier", "lease_owner": "me"},
+    }
+
+
+class OwnTaskFolderWriteTest(unittest.TestCase):
+    """A conductor may write ordinary files in its own task folder; engine state stays refused (bench8)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bundle = pe.load_policy(ROOT)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name).resolve()
+        self.repo = base / "repo"
+        self.task_dir = base / "multiagent" / "tasks" / "t1"
+        self.task_dir.mkdir(parents=True)
+        self.repo.mkdir()
+        self.task = _contract(self.repo)
+
+    def write(self, path, actor="conductor", task_dir="own"):
+        """Authorize one write; ``task_dir='own'`` passes this task's folder, as the hook does."""
+        return pe.authorize_action(self.bundle, self.task, {"kind": "write", "actor_role": actor, "path": str(path)},
+                                   task_dir=self.task_dir if task_dir == "own" else task_dir)
+
+    def test_ordinary_files_in_the_own_folder_are_allowed(self):
+        for name in ("critic-brief.md", "workers/critic/brief-round1.md", "notes/result.md"):
+            with self.subTest(name):
+                self.assertTrue(self.write(self.task_dir / name).allowed)
+
+    def test_without_the_task_folder_nothing_changes(self):
+        self.assertFalse(self.write(self.task_dir / "critic-brief.md", task_dir=None).allowed)
+
+    def test_engine_state_in_the_own_folder_stays_refused(self):
+        for name in ("task.yaml", "lease.json", "lease.lock", "lease.stale.123.json", "events.ndjson",
+                     pe.OBSERVED_AUTHOR_FILE, "outputs/r.md", "writes/x", ".task-initial.abc.json",
+                     ".lease.x.tmp", "workers/.hidden", "TASK.YAML", "Lease.Stale.1.json", "OUTPUTS/r.md"):
+            with self.subTest(name):
+                self.assertFalse(self.write(self.task_dir / name).allowed)
+        self.assertFalse(self.write(self.task_dir).allowed)
+
+    def test_another_task_and_non_conductors_are_refused(self):
+        sibling = self.task_dir.parent / "t2"
+        sibling.mkdir()
+        self.assertFalse(self.write(sibling / "brief.md").allowed)
+        self.assertFalse(self.write(self.task_dir / "brief.md", actor="implementer").allowed)
+        self.assertFalse(self.write(self.task_dir / "brief.md", actor="critic").allowed)
+
+    def test_a_symlink_out_of_the_folder_does_not_qualify(self):
+        outside = Path(self.tmp.name).resolve() / "elsewhere"
+        outside.mkdir()
+        try:
+            (self.task_dir / "link").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        self.assertFalse(self.write(self.task_dir / "link" / "brief.md").allowed)
+
+    def test_the_scope_rule_still_applies_elsewhere(self):
+        self.assertTrue(self.write(self.repo / "docs" / "a.md").allowed)
+        self.assertFalse(self.write(self.repo / "src" / "a.py").allowed)
+
+
+class ReleaseClearsActivePointerTest(unittest.TestCase):
+    """``release-lease`` removes ``tasks/.active-task`` only when it names the released task (bench8)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.install = Path(self.tmp.name).resolve() / "multiagent"
+        self.tasks = self.install / "tasks"
+        self.task_dir = self.tasks / "t1"
+        self.task_dir.mkdir(parents=True)
+        (self.task_dir / "task.yaml").write_text("{}", encoding="utf-8")
+        self.pointer = self.tasks / ".active-task"
+        patcher = mock.patch.object(pe, "INSTALLATION_ROOT", self.install)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertTrue(pe.acquire_lease(self.task_dir, "me").allowed)
+
+    def test_a_pointer_naming_this_task_is_removed(self):
+        self.pointer.write_text("t1\n", encoding="utf-8")
+        decision = pe.release_lease(self.task_dir, "me")
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.details, {"active_task_cleared": True})
+        self.assertFalse(self.pointer.exists())
+
+    def test_a_pointer_naming_another_task_or_none_is_left_alone(self):
+        self.pointer.write_text("t2\n", encoding="utf-8")
+        self.assertEqual(pe.release_lease(self.task_dir, "me").details, {"active_task_cleared": False})
+        self.assertEqual(self.pointer.read_text(encoding="utf-8"), "t2\n")
+        self.pointer.unlink()
+        self.assertTrue(pe.acquire_lease(self.task_dir, "me").allowed)
+        self.assertEqual(pe.release_lease(self.task_dir, "me").details, {"active_task_cleared": False})
+
+    def test_a_refused_release_keeps_the_pointer(self):
+        self.pointer.write_text("t1\n", encoding="utf-8")
+        self.assertFalse(pe.release_lease(self.task_dir, "someone-else").allowed)
+        self.assertTrue(self.pointer.exists())
+        lease = pe.load_document(self.task_dir / "lease.json")
+        lease["active_workers"] = 1
+        (self.task_dir / "lease.json").write_text(pe.json.dumps(lease), encoding="utf-8")
+        self.assertFalse(pe.release_lease(self.task_dir, "me").allowed)
+        self.assertTrue(self.pointer.exists())
+
+    def test_a_task_outside_the_installation_never_touches_its_pointer(self):
+        elsewhere = Path(self.tmp.name).resolve() / "other" / "t1"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / "task.yaml").write_text("{}", encoding="utf-8")
+        self.assertTrue(pe.acquire_lease(elsewhere, "me").allowed)
+        self.pointer.write_text("t1\n", encoding="utf-8")
+        self.assertEqual(pe.release_lease(elsewhere, "me").details, {"active_task_cleared": False})
+        self.assertTrue(self.pointer.exists())
+
+    def test_a_symlinked_pointer_is_left_alone(self):
+        target = Path(self.tmp.name).resolve() / "pointer-target"
+        target.write_text("t1\n", encoding="utf-8")
+        try:
+            self.pointer.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        self.assertEqual(pe.release_lease(self.task_dir, "me").details, {"active_task_cleared": False})
+        self.assertTrue(self.pointer.is_symlink() and target.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
