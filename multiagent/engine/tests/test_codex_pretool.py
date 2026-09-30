@@ -173,14 +173,17 @@ class MutatingShellTest(unittest.TestCase):
     def test_writes_are_refused(self):
         for command in ("echo x > f", "cat > f <<'EOF'\nx\nEOF", "rm tasks/.active-task", "sed -i s/a/b/ f",
                         "cp a b", "mv a b", "cmd | tee out", 'bash -c "echo x > f"', '/bin/sh -c "echo x > f"', "echo 'q' >> log",
-                        "cmd &> out.txt", "python3 x.py > out.json 2>&1", "echo x >| f"):
+                        "cmd &> out.txt", "python3 x.py > out.json 2>&1", "echo x >| f", "echo x >& findings.md",
+                        "echo x >&2.log", 'result="$(git apply fix.patch 2>&1)"', 'echo "$(echo x > f)"',
+                        'echo "`echo x > f`"', "(cd sub && rm x)", "echo `rm x`"):
             with self.subTest(command):
                 self.assertTrue(self.hook.mutating_shell(command))
 
     def test_reads_are_allowed(self):
         for command in ("grep -c '^>' f", "cmd 2>&1 | head", "ls x 2>/dev/null", "awk -F: '$1>2500' f",
                         "cmd >/dev/null 2>&1", "diff <(sort a) <(sort b)", "cmd &>/dev/null",
-                        'grep "a > b" f', "cmd >&2", "diff a b | grep '^[<>]'"):
+                        'grep "a > b" f', "cmd >&2", "diff a b | grep '^[<>]'", "exec 3>&-", "cmd 2>&1; echo ok",
+                        "echo '$(x > f)'"):
             with self.subTest(command):
                 self.assertFalse(self.hook.mutating_shell(command))
 

@@ -26,20 +26,28 @@ from policy_engine import (  # noqa: E402
 
 
 MUTATING_SHELL = re.compile(
-    r"(?:^|[;&|\s])(?:rm|mv|cp|tee|sed\s+-i|git\s+apply|patch|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item)(?:\s|$)|(?:>>|(?<![<])>(?!>))",
+    r"(?:^|[;&|\s(`])(?:rm|mv|cp|tee|sed\s+-i|git\s+apply|patch|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item)(?:\s|$)|(?:>>|(?<![<])>(?!>))",
     re.IGNORECASE,
 )
 #: Quoted strings are data, not redirects (`grep -c '^>'`, `awk '$1>9'`), unless the command hands a
 #: string to a shell (`bash -c "... > f"`); fd duplication (`2>&1`), `/dev/null` and output process
 #: substitution write no file. bench8's conductors hit 23 refusals, over half of them these.
 QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"")
-HARMLESS_REDIRECT = re.compile(r"\d*>&\d*-?|(?:\d*|&)>>?\|?\s*/dev/null\b|>\(")
+#: `>&2`, `2>&1`, `>&-` duplicate or close a descriptor; `>& file` and `>&2.log` write a file, so the
+#: target must be all digits (or `-`) up to a token boundary.
+HARMLESS_REDIRECT = re.compile(r"\d*>&(?:\d+|-)(?=[\s;|&)]|$)|(?:\d*|&)>>?\|?\s*/dev/null\b|>\(")
 SHELL_EVAL = re.compile(r"(?:^|[;&|\s(/])(?:bash|sh|zsh|dash|eval)(?:\s|$)")
+
+
+def _literal(match: re.Match[str]) -> str:
+    """A quoted string is data unless it is double-quoted and substitutes a command (``$(``, backtick)."""
+    quoted = match.group(0)
+    return quoted if quoted.startswith('"') and ("$(" in quoted or "`" in quoted) else "''"
 
 
 def mutating_shell(command: str) -> bool:
     """Whether a shell command writes files: ``MUTATING_SHELL`` after removing what writes none."""
-    text = command if SHELL_EVAL.search(command) else QUOTED.sub("''", command)
+    text = command if SHELL_EVAL.search(command) else QUOTED.sub(_literal, command)
     return bool(MUTATING_SHELL.search(HARMLESS_REDIRECT.sub(" ", text)))
 
 

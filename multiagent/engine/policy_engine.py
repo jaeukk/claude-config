@@ -3895,7 +3895,8 @@ def main(argv: list[str] | None = None) -> int:
     review_parser.add_argument("--task-id")
     review_parser.add_argument("--tasks-root", type=Path, help="default: this installation's tasks/")
     review_parser.add_argument("--owner", default=f"review-{os.getpid()}")
-    review_parser.add_argument("--conductor-host", choices=("claude-code", "codex"), default="claude-code")
+    # Required: the author is the conductor's family, so a wrong default would pick a same-family reviewer.
+    review_parser.add_argument("--conductor-host", choices=("claude-code", "codex"), required=True)
     review_parser.add_argument("--read-scope", nargs="+")
     review_parser.add_argument("--min-bytes", type=int, default=MIN_PUBLISH_BYTES)
     review_parser.add_argument("--dry-run", action="store_true")

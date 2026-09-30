@@ -30,7 +30,8 @@ calls per run at audit 0).
 **One review round of work this session produced** (or its family's team workers did) is one call,
 in the foreground:
 
-    python3 $E review --target-repo <abs> --brief <file> --out <findings.md> [--review-copy]
+    python3 $E review --conductor-host claude-code --target-repo <abs> --brief <file> \
+        --out <findings.md> [--review-copy]        # a Codex conductor passes --conductor-host codex
 
 It writes a contract (one critic, `audit_cycles` 1, the author is this session's family), takes the
 lease, runs a reviewer of the other family, publishes its findings to `--out`, and releases the

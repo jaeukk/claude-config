@@ -1069,8 +1069,21 @@ class ReviewCommandTest(ProduceFixture):
 
     def test_the_review_subcommand_runs_a_critic_by_default(self):
         with mock.patch.object(pe, "produce", return_value=0) as produce, mock.patch.object(pe.sys, "stdout"):
-            code = pe.main(["--root", str(ROOT), "review", "--target-repo", str(self.repo),
-                            "--brief", str(self.brief), "--out", "review.md", "--review-copy"])
+            code = pe.main(["--root", str(ROOT), "review", "--conductor-host", "codex", "--target-repo",
+                            str(self.repo), "--brief", str(self.brief), "--out", "review.md", "--review-copy"])
         self.assertEqual(code, 0)
         kwargs = produce.call_args.kwargs
-        self.assertEqual((kwargs["role"], kwargs["out"], kwargs["review_copy"]), ("critic", "review.md", True))
+        self.assertEqual((kwargs["role"], kwargs["out"], kwargs["review_copy"], kwargs["conductor_host"]),
+                         ("critic", "review.md", True, "codex"))
+
+    def test_review_requires_the_conductor_host(self):
+        """Round-1 review: a default host would give a Codex conductor a Codex reviewer of its own work."""
+        with mock.patch.object(pe, "produce", return_value=0) as produce, mock.patch.object(pe.sys, "stderr"), \
+                self.assertRaises(SystemExit):
+            pe.main(["--root", str(ROOT), "review", "--target-repo", str(self.repo), "--brief", str(self.brief),
+                     "--out", "review.md"])
+        produce.assert_not_called()
+
+    def test_a_codex_conductor_gets_a_claude_reviewer(self):
+        code, calls = self.review(lambda *a, **k: 0, conductor_host="codex")
+        self.assertEqual((code, calls[0][0][1]["author_family"]), (0, "codex"))
