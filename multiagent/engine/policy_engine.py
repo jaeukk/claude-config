@@ -3291,33 +3291,33 @@ def produce(
         return refuse(f"produce: {task_dir} cannot be created fresh ({error.strerror or error})")
     contract_path = task_dir / "task.yaml"
     brief_copy = task_dir / "workers" / role / "brief.md"
+    code, generation, lease_note, setup_note = 2, None, "not acquired", ""
+    # One try/finally from the moment the folder exists, so an interrupt anywhere after this
+    # point still reaches the cleanup. The cleanup decides from the disk, not from a flag an
+    # interrupt could skip: no `task.yaml` means the task was never published.
     try:
-        brief_copy.parent.mkdir(parents=True)
-        brief_copy.write_bytes(brief_bytes)
-        # `pending` until this run holds the lease: a contract is written only by whoever owns
-        # the task, and before the lease nobody does. It is written privately and published by
-        # an exclusive hard link as the last setup step, so `task.yaml` appears complete or not
-        # at all -- and until it appears, no lease can be taken here (acquire-lease needs it).
-        handle, staging = tempfile.mkstemp(dir=task_dir, prefix=".task.", suffix=".tmp")
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            stream.write(json.dumps(task, indent=2) + "\n")
-        os.link(staging, contract_path)
-    except OSError as error:
-        # Nothing here was ever visible as a task (the link is the last step and is atomic), so
-        # removing the folder this call just created cannot take anyone else's lease with it.
-        shutil.rmtree(task_dir, ignore_errors=True)
-        return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error})")
-    setup_note = ""
-    try:
-        os.unlink(staging)
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        # The task is published now, so this is reported and never rolled back: a competitor may
-        # already hold it. A leftover staging file is harmless.
-        setup_note = f"staging file {staging} left behind: {error.strerror or error}"
-    code, generation, lease_note = 2, None, "not acquired"
-    try:
+        try:
+            brief_copy.parent.mkdir(parents=True)
+            brief_copy.write_bytes(brief_bytes)
+            # `pending` until this run holds the lease: a contract is written only by whoever
+            # owns the task, and before the lease nobody does. It is written privately and
+            # published by an exclusive hard link as the last setup step, so `task.yaml` appears
+            # complete or not at all -- and until it appears, no lease can be taken here
+            # (acquire-lease needs it).
+            handle, staging = tempfile.mkstemp(dir=task_dir, prefix=".task.", suffix=".tmp")
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(task, indent=2) + "\n")
+            os.link(staging, contract_path)
+        except OSError as error:
+            return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error})")
+        try:
+            os.unlink(staging)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            # The task is published now, so this is reported and never rolled back: a
+            # competitor may already hold it. A leftover staging file is harmless.
+            setup_note = f"staging file {staging} left behind: {error.strerror or error}"
         lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
         if not lease.allowed:
             lease_note = f"not acquired: {lease.reason}"
@@ -3331,36 +3331,42 @@ def produce(
         code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
                                task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
     finally:
-        # Cleanup must never raise: an exception here would replace the dispatch's own.
-        status = "complete" if code == 0 else "failed"
-        if generation is None:
-            # This run never held the lease, so it never owned the task and writes nothing to
-            # the contract: it stays `pending`. A competitor that acquired first -- and may
-            # already have finished and released -- keeps whatever it wrote.
-            finalized = "pending: the lease was never acquired"
-            released = Decision(False, lease_note)
+        if not os.path.lexists(contract_path):
+            # Never published: the folder holds only what this call wrote, and no lease
+            # could be taken without `task.yaml`, so removing it takes nobody else's work
+            # and leaves the ID free for a retry.
+            shutil.rmtree(task_dir, ignore_errors=True)
         else:
-            finalized = _finalize_produced(task_dir, contract_path, owner, generation, status)
+            # Cleanup must never raise: an exception here would replace the dispatch's own.
+            status = "complete" if code == 0 else "failed"
+            if generation is None:
+                # This run never held the lease, so it never owned the task and writes nothing to
+                # the contract: it stays `pending`. A competitor that acquired first -- and may
+                # already have finished and released -- keeps whatever it wrote.
+                finalized = "pending: the lease was never acquired"
+                released = Decision(False, lease_note)
+            else:
+                finalized = _finalize_produced(task_dir, contract_path, owner, generation, status)
+                try:
+                    released = release_lease(task_dir, owner, generation)
+                except Exception as error:  # noqa: BLE001 -- reported, never raised
+                    released = Decision(False, f"release failed: {error}")
+            attempts: list[dict[str, Any]] | str = []
             try:
-                released = release_lease(task_dir, owner, generation)
+                for event in _read_events(task_dir):
+                    if event.get("type") != "worker_attempt":
+                        continue
+                    usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+                    attempts.append({key: event.get(key) for key in (
+                        "account", "backend", "model", "classification", "total_cost_usd", "tokens_used")}
+                        | {"output_tokens": usage.get("output_tokens")})
             except Exception as error:  # noqa: BLE001 -- reported, never raised
-                released = Decision(False, f"release failed: {error}")
-        attempts: list[dict[str, Any]] | str = []
-        try:
-            for event in _read_events(task_dir):
-                if event.get("type") != "worker_attempt":
-                    continue
-                usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
-                attempts.append({key: event.get(key) for key in (
-                    "account", "backend", "model", "classification", "total_cost_usd", "tokens_used")}
-                    | {"output_tokens": usage.get("output_tokens")})
-        except Exception as error:  # noqa: BLE001 -- reported, never raised
-            attempts = f"events unreadable: {error}"
-        print("produce: " + json.dumps({
-            "task_dir": str(task_dir), "exit": code, "status": finalized,
-            "lease_released": released.allowed, "lease": released.reason, "attempts": attempts,
-            **({"setup": setup_note} if setup_note else {}),
-        }, ensure_ascii=False, default=str), file=sys.stderr)
+                attempts = f"events unreadable: {error}"
+            print("produce: " + json.dumps({
+                "task_dir": str(task_dir), "exit": code, "status": finalized,
+                "lease_released": released.allowed, "lease": released.reason, "attempts": attempts,
+                **({"setup": setup_note} if setup_note else {}),
+            }, ensure_ascii=False, default=str), file=sys.stderr)
     return code
 
 

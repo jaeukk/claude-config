@@ -517,6 +517,63 @@ class ProduceRound3Test(ProduceFixture):
         self.assertIn("events unreadable", summary["attempts"])
 
 
+class ProduceInterruptTest(ProduceFixture):
+    """Round 7: an interrupt after publication still ends in a summary; one before it frees the ID."""
+
+    def interrupted(self, **patches):
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(pe, "dispatch_worker", return_value=0))
+            stack.enter_context(mock.patch.object(pe.sys, "stderr", err))
+            for name, value in patches.items():
+                stack.enter_context(mock.patch.object(pe, name, value))
+            with self.assertRaises(KeyboardInterrupt):
+                pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                           owner="me", task_id="t1", write="src/x.py")
+        lines = [l for l in err.getvalue().splitlines() if l.startswith("produce: ")]
+        return json.loads(lines[-1][len("produce: "):]) if lines else None
+
+    def test_after_publication_the_interrupt_propagates_with_a_summary(self):
+        real_unlink = pe.os.unlink
+
+        def unlink(path, *args, **kwargs):
+            if Path(path).name.startswith(".task.") and Path(path).parent == self.task_dir:
+                raise KeyboardInterrupt
+            return real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(pe.os, "unlink", side_effect=unlink):
+            summary = self.interrupted()
+        self.assertIsNotNone(summary)
+        self.assertTrue(summary["status"].startswith("pending"), summary)
+        self.assertEqual(self.contract()["status"], "pending")
+
+    def test_an_interrupted_acquisition_ends_in_a_summary(self):
+        summary = self.interrupted(acquire_lease=mock.Mock(side_effect=KeyboardInterrupt))
+        self.assertTrue(summary["status"].startswith("pending"), summary)
+
+    def test_before_publication_the_folder_is_removed_and_the_id_stays_free(self):
+        with mock.patch.object(pe.os, "link", side_effect=KeyboardInterrupt):
+            summary = self.interrupted()
+        self.assertIsNone(summary)
+        self.assertFalse(self.task_dir.exists())
+
+    def test_a_contract_planted_before_publication_is_left_alone(self):
+        real_link = pe.os.link
+
+        def plant_then_link(src, dst, *args, **kwargs):
+            Path(dst).write_text('{"planted": true}', encoding="utf-8")
+            return real_link(src, dst, *args, **kwargs)  # FileExistsError: exclusive
+
+        with mock.patch.object(pe.os, "link", side_effect=plant_then_link), \
+                mock.patch.object(pe.sys, "stderr"):
+            code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                              owner="me", task_id="t1", write="src/x.py")
+        self.assertEqual(code, 2)
+        self.assertEqual((self.task_dir / "task.yaml").read_text(), '{"planted": true}')
+
+
 class Round3AccountingTest(unittest.TestCase):
     def test_an_integer_past_the_digit_limit_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as tmp:
