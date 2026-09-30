@@ -8,14 +8,11 @@ file into a global `CLAUDE.md`.
 ## Operating Principles
 
 The four principles — Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven
-Execution — have one authoritative copy: the `karpathy-guidelines` skill. **Before conducting,
-read the complete file at `$HOME/.claude/skills/karpathy-guidelines/SKILL.md`**, resolving `$HOME`
-to the current user's home directory; this applies to Claude Code and Codex conductors alike. Read
-it at session start, and again before resuming after any context compaction or reset, whether
-automatic or through `/compact` or `/clear`. If the file is missing or unreadable, stop and report
-the path and the error; do not conduct from memory. Apply all four principles to the orchestrator,
-merged with project-specific instructions as needed. They are not restated here, so there is no
-second copy to drift.
+Execution — have one authoritative copy: the `karpathy-guidelines` skill
+(`$HOME/.claude/skills/karpathy-guidelines/SKILL.md`). Apply them to the orchestrator, merged with
+project-specific instructions as needed, and open that file when a decision turns on one of them.
+Reading it in full is not a required first step: that mandate cost every conductor session a turn
+(bench8, 2026-09-30). The principles are not restated here, so there is no second copy to drift.
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 

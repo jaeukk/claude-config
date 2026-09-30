@@ -685,7 +685,9 @@ def authorize_action(
         if actor_role == "conductor" and _own_task_file(path_value, task["target_repo"], task_dir):
             return Decision(True, "write is an ordinary file in the task's own folder")
         if not _is_in_scope(path_value, task["target_repo"], task["write_scope"]):
-            return Decision(False, "path is outside target_repo/write_scope")
+            return Decision(False, "path is outside target_repo/write_scope (the conductor may also write "
+                                   "ordinary files in its own task folder; tasks/.active-task is cleared "
+                                   "by release-lease)")
         return Decision(True, "write is inside the approved task scope")
 
     if kind in {"conductor_handoff", "scope_expansion", "destructive_action", "external_side_effect", "secret_or_credential_access"}:
@@ -3460,6 +3462,7 @@ def produce(
     read_scope: list[str] | None = None,
     min_publish_bytes: int = MIN_PUBLISH_BYTES,
     dry_run: bool = False,
+    review_copy: bool = False,
 ) -> int:
     """Run one producer with a record, in one call: validate, contract, lease, dispatch, release.
 
@@ -3469,6 +3472,13 @@ def produce(
     link planted where the folder would go, is refused before anything is written. The contract,
     brief copy, events and ``outputs/`` record stay there, so ``cost-report`` and ``restore-write``
     work on it like any other task.
+
+    With ``role`` critic or verifier this is the one-call review (the ``review`` subcommand): the
+    reviewer reads ``target_repo`` and its findings are published with ``--out``. The contract plans
+    no producer, so the artifact's author is the conductor's own family and the binding picks a
+    reviewer of the other family; a critic gets ``audit_cycles`` 1. The call blocks until the
+    reviewer finishes, so a conductor cannot end its turn with the review still running (bench8).
+    Work authored by another family needs the full procedure (see SKILL.md, "Authorship").
     """
     def refuse(reason: str, details: dict[str, Any] | None = None) -> int:
         print(json.dumps(Decision(False, reason, details).as_dict(), indent=2), file=sys.stderr)
@@ -3476,6 +3486,11 @@ def produce(
 
     if (write is None) == (out is None):
         return refuse("produce needs exactly one of --write or --out")
+    reviewer = role in {"critic", "verifier"}
+    if reviewer and (write is not None or exec_bash):
+        return refuse(f"a {role} returns findings with --out; --write and --exec are for producers")
+    if review_copy and not reviewer:
+        return refuse("--review-copy is for a critic or verifier")
     policy_errors, _ = validate_policy(bundle)
     if policy_errors:
         return refuse("produce: policy invalid", {"errors": policy_errors})
@@ -3483,7 +3498,8 @@ def produce(
     target = Path(target_repo).expanduser().resolve()
     if task_id is None:
         slug = re.sub(r"[^a-z0-9]+", "-", Path(str(destination)).stem.lower()).strip("-")[:24] or "job"
-        task_id = f"{datetime.now():%Y-%m-%d}-produce-{slug}-{uuid.uuid4().hex[:6]}"
+        kind = "review" if reviewer else "produce"
+        task_id = f"{datetime.now():%Y-%m-%d}-{kind}-{slug}-{uuid.uuid4().hex[:6]}"
     backend = next((item["backend"] for item in bundle.bindings.get("conductor", {}).get("candidates", [])
                     if bundle.backends.get(item.get("backend"), {}).get("host") == conductor_host), None)
     now = utc_now()
@@ -3491,10 +3507,14 @@ def produce(
         "schema_version": 1, "task_id": task_id, "status": "pending",
         "conductor": {"host": conductor_host, "backend": backend, "lease_owner": owner},
         "target_repo": str(target), "write_scope": [str(destination)], "roles_plan": [role],
-        "audit_cycles": 0, "approvals": {"user": []}, "dispatch": {"current_role": role},
-        "created_at": now, "updated_at": now,
-        "notes": "one-producer route: policy_engine.py produce",
+        "audit_cycles": 1 if role == "critic" else 0, "approvals": {"user": []},
+        "dispatch": {"current_role": role}, "created_at": now, "updated_at": now,
+        "notes": f"one-call route: policy_engine.py {'review' if reviewer else 'produce'}",
     }
+    if reviewer:
+        # No producer is planned, so the conductor authored the artifact (the reviewer gate's
+        # conductor fallback); declaring anything else would be refused as a mismatch.
+        task["author_family"] = bundle.backends.get(backend, {}).get("family")
     if read_scope:
         task["read_scope"] = list(read_scope)
     errors, _ = validate_task(bundle, task)
@@ -3503,7 +3523,7 @@ def produce(
     if dry_run:
         return dispatch_worker(bundle, task, role, brief, "native", True, out_path=out,
                                min_publish_bytes=min_publish_bytes, write_path=write,
-                               exec_bash=exec_bash)
+                               exec_bash=exec_bash, review_copy=review_copy)
     try:
         brief_bytes = Path(brief).read_bytes()  # before anything is reserved
     except OSError as error:
@@ -3554,7 +3574,8 @@ def produce(
             return refuse(f"produce: the contract could not be activated ({activated})")
         task["status"] = "active"
         code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
-                               task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
+                               task_dir, out, contract_path, min_publish_bytes, write, exec_bash,
+                               review_copy)
     finally:
         if published:
             # Cleanup must never raise: an exception here would replace the dispatch's own.
@@ -3862,6 +3883,22 @@ def main(argv: list[str] | None = None) -> int:
     produce_parser.add_argument("--read-scope", nargs="+")
     produce_parser.add_argument("--min-bytes", type=int, default=MIN_PUBLISH_BYTES)
     produce_parser.add_argument("--dry-run", action="store_true")
+    review_parser = subparsers.add_parser(
+        "review", allow_abbrev=False,
+        help="one-call review: contract, lease, a reviewer of the other family, findings to --out")
+    review_parser.add_argument("--target-repo", type=Path, required=True)
+    review_parser.add_argument("--brief", type=Path, required=True)
+    review_parser.add_argument("--out", required=True, help="where the findings go, in target_repo")
+    review_parser.add_argument("--role", choices=("critic", "verifier"), default="critic")
+    review_parser.add_argument("--review-copy", action="store_true",
+                               help="Codex reviewer: run in a disposable writable copy (tests can run)")
+    review_parser.add_argument("--task-id")
+    review_parser.add_argument("--tasks-root", type=Path, help="default: this installation's tasks/")
+    review_parser.add_argument("--owner", default=f"review-{os.getpid()}")
+    review_parser.add_argument("--conductor-host", choices=("claude-code", "codex"), default="claude-code")
+    review_parser.add_argument("--read-scope", nargs="+")
+    review_parser.add_argument("--min-bytes", type=int, default=MIN_PUBLISH_BYTES)
+    review_parser.add_argument("--dry-run", action="store_true")
     event_parser = subparsers.add_parser("append-event", allow_abbrev=False)
     event_parser.add_argument("--task-dir", type=Path, required=True)
     event_parser.add_argument("--owner", required=True)
@@ -3964,6 +4001,13 @@ def main(argv: list[str] | None = None) -> int:
             tasks_root=args.tasks_root or args.root / "tasks", owner=args.owner,
             conductor_host=args.conductor_host, read_scope=args.read_scope,
             min_publish_bytes=args.min_bytes, dry_run=args.dry_run,
+        )
+    if args.command == "review":
+        return produce(
+            bundle, args.target_repo, args.brief.resolve(), out=args.out, role=args.role,
+            task_id=args.task_id, tasks_root=args.tasks_root or args.root / "tasks", owner=args.owner,
+            conductor_host=args.conductor_host, read_scope=args.read_scope,
+            min_publish_bytes=args.min_bytes, dry_run=args.dry_run, review_copy=args.review_copy,
         )
     if args.command == "append-event":
         return _print_decision(append_event(args.task_dir, args.owner, json.loads(args.event)))

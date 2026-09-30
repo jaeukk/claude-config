@@ -29,6 +29,20 @@ MUTATING_SHELL = re.compile(
     r"(?:^|[;&|\s])(?:rm|mv|cp|tee|sed\s+-i|git\s+apply|patch|Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item)(?:\s|$)|(?:>>|(?<![<])>(?!>))",
     re.IGNORECASE,
 )
+#: Quoted strings are data, not redirects (`grep -c '^>'`, `awk '$1>9'`), unless the command hands a
+#: string to a shell (`bash -c "... > f"`); fd duplication (`2>&1`), `/dev/null` and output process
+#: substitution write no file. bench8's conductors hit 23 refusals, over half of them these.
+QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"")
+HARMLESS_REDIRECT = re.compile(r"\d*>&\d*-?|(?:\d*|&)>>?\|?\s*/dev/null\b|>\(")
+SHELL_EVAL = re.compile(r"(?:^|[;&|\s(/])(?:bash|sh|zsh|dash|eval)(?:\s|$)")
+
+
+def mutating_shell(command: str) -> bool:
+    """Whether a shell command writes files: ``MUTATING_SHELL`` after removing what writes none."""
+    text = command if SHELL_EVAL.search(command) else QUOTED.sub("''", command)
+    return bool(MUTATING_SHELL.search(HARMLESS_REDIRECT.sub(" ", text)))
+
+
 DANGEROUS_SHELL = re.compile(
     r"(?:rm\s+-rf|Remove-Item\s+.*-Recurse|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f)",
     re.IGNORECASE,
@@ -217,8 +231,11 @@ def _evaluate(event: dict[str, Any], deny: Any, spawn_family: str | None = None)
             if not decision.allowed:
                 deny(decision.reason)
             return 0
-        if MUTATING_SHELL.search(command):
-            deny("shell-based mutation is forbidden during an active task; use hook-visible file tools")
+        if mutating_shell(command):
+            deny("shell-based mutation is forbidden during an active task (rm, mv, cp, tee, sed -i, or a "
+                 "redirect into a file). Write with the Write/Edit tools instead: inside write_scope, or "
+                 "ordinary files in this task's own folder. `release-lease` clears tasks/.active-task. "
+                 "`2>&1`, `>/dev/null` and a quoted `>` are fine.")
         return 0
 
     # `Agent` is the subagent tool's name in current Claude Code; `Task` is the older

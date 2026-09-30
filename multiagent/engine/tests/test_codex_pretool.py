@@ -78,6 +78,7 @@ class CodexAdapterTest(unittest.TestCase):
 
     def test_shell_rules_match_the_claude_hook(self):
         self.assertIn("shell-based mutation", self.run_event(self.shell("echo x > f")))
+        self.assertIsNone(self.run_event(self.shell("ls x 2>/dev/null | grep -c '^>'")))
         self.assertIn("destructive_action", self.run_event(self.shell("rm -rf docs")))
         self.assertIn("worker CLI", self.run_event(self.shell("claude -p hi")))
         self.assertIsNone(self.run_event(self.shell("ls docs")))
@@ -159,6 +160,29 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertIsNotNone(refused)
         self.assertIsNone(self.run_event(self.patch("*** Begin Patch\n*** Add File: tasks/t1/notes.md\n+x\n*** End Patch")))
         self.assertIsNotNone(self.run_event(self.patch("*** Begin Patch\n*** Update File: tasks/t1/task.yaml\n+x\n*** End Patch")))
+
+
+
+class MutatingShellTest(unittest.TestCase):
+    """What the shell rule refuses: file writes, not every `>` (bench8: 23 refusals, over half of them false)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.hook = adapter.load_hook()
+
+    def test_writes_are_refused(self):
+        for command in ("echo x > f", "cat > f <<'EOF'\nx\nEOF", "rm tasks/.active-task", "sed -i s/a/b/ f",
+                        "cp a b", "mv a b", "cmd | tee out", 'bash -c "echo x > f"', '/bin/sh -c "echo x > f"', "echo 'q' >> log",
+                        "cmd &> out.txt", "python3 x.py > out.json 2>&1", "echo x >| f"):
+            with self.subTest(command):
+                self.assertTrue(self.hook.mutating_shell(command))
+
+    def test_reads_are_allowed(self):
+        for command in ("grep -c '^>' f", "cmd 2>&1 | head", "ls x 2>/dev/null", "awk -F: '$1>2500' f",
+                        "cmd >/dev/null 2>&1", "diff <(sort a) <(sort b)", "cmd &>/dev/null",
+                        'grep "a > b" f', "cmd >&2", "diff a b | grep '^[<>]'"):
+            with self.subTest(command):
+                self.assertFalse(self.hook.mutating_shell(command))
 
 
 if __name__ == "__main__":

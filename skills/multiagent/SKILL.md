@@ -23,6 +23,20 @@ Reach for the engine only for:
 - **(c) contained writes or publication with a record**: `--write` (baseline, change set, restore)
   and `--out`.
 
+With none of these planned, create no contract, lease or `.active-task`: do the work in this
+session, even when the request names a task ID. The ceremony costs turns (bench8: 5–12 extra tool
+calls per run at audit 0).
+
+**One review round of work this session produced** (or its family's team workers did) is one call,
+in the foreground:
+
+    python3 $E review --target-repo <abs> --brief <file> --out <findings.md> [--review-copy]
+
+It writes a contract (one critic, `audit_cycles` 1, the author is this session's family), takes the
+lease, runs a reviewer of the other family, publishes its findings to `--out`, and releases the
+lease. Put the agreed review definitions (see "Review discipline") in the brief. Use the full
+procedure for work another family authored, several rounds on one contract, or a native reviewer.
+
 A PreToolUse hook enforces the contract on Claude Code (sessions launched from `multiagent/`) and
 on Codex (WSL `~/.codex`; sessions whose working directory is inside `multiagent/`), only while a
 task is active.
@@ -335,5 +349,7 @@ engine-mediated writes never reach it; the engine authorizes those itself.
 
 During an active task, write with file tools, not shell redirection or bulk shell commands: inside
 `write_scope`, or ordinary files in the task's own folder (briefs, notes, results). Engine state
-there (the contract, lease, events, authorship, state trees and dot-files) stays refused. Without
+there (the contract, lease, events, authorship, state trees and dot-files) stays refused.
+`rm`, `mv`, `cp`, `tee`, `sed -i` and redirects into files are refused. `2>&1`, `>/dev/null` and a
+quoted `>` are fine. `release-lease` clears `.active-task`; edit `task.yaml` after that. Without
 a hook (Codex), call `authorize` before a write and keep every mutation inside `write_scope`.

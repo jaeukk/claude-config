@@ -1027,3 +1027,50 @@ class BookDriverOutcomeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewCommandTest(ProduceFixture):
+    """`review`: produce with a reviewer role -- one critic, audit 1, the conductor's family, --out."""
+
+    def review(self, dispatch, **kwargs):
+        calls = []
+
+        def record(*args, **kw):
+            calls.append((args, kw))
+            return dispatch(*args, **kw)
+
+        options = {"role": "critic", "out": "review.md", **kwargs}
+        with mock.patch.object(pe, "dispatch_worker", side_effect=record), mock.patch.object(pe.sys, "stderr"):
+            code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks, owner="me",
+                              task_id="t1", **options)
+        return code, calls
+
+    def test_a_critic_contract_and_the_review_copy_reach_the_dispatch(self):
+        code, calls = self.review(lambda *a, **k: 0, review_copy=True)
+        self.assertEqual(code, 0)
+        (args, _), = calls
+        task = args[1]
+        self.assertEqual((task["roles_plan"], task["audit_cycles"], task["author_family"]), (["critic"], 1, "claude"))
+        self.assertEqual((args[2], args[9], args[14]), ("critic", "review.md", True))
+        self.assertEqual(self.contract()["status"], "complete")
+        self.assertFalse((self.task_dir / "lease.json").exists())
+
+    def test_a_verifier_spends_no_audit_budget(self):
+        code, calls = self.review(lambda *a, **k: 0, role="verifier")
+        self.assertEqual((code, calls[0][0][1]["audit_cycles"]), (0, 0))
+
+    def test_reviewer_misuse_is_refused_before_anything_is_written(self):
+        for options in ({"out": None, "write": "src/x.py"}, {"exec_bash": True},
+                        {"role": "implementer", "review_copy": True}):
+            with self.subTest(options=options):
+                code, calls = self.review(lambda *a, **k: 0, **options)
+                self.assertEqual((code, calls), (2, []))
+                self.assertFalse(self.task_dir.exists())
+
+    def test_the_review_subcommand_runs_a_critic_by_default(self):
+        with mock.patch.object(pe, "produce", return_value=0) as produce, mock.patch.object(pe.sys, "stdout"):
+            code = pe.main(["--root", str(ROOT), "review", "--target-repo", str(self.repo),
+                            "--brief", str(self.brief), "--out", "review.md", "--review-copy"])
+        self.assertEqual(code, 0)
+        kwargs = produce.call_args.kwargs
+        self.assertEqual((kwargs["role"], kwargs["out"], kwargs["review_copy"]), ("critic", "review.md", True))
