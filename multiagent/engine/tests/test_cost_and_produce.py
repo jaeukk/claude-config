@@ -17,6 +17,21 @@ sys.path.insert(0, str(ENGINE))
 
 import policy_engine as pe  # noqa: E402
 
+#: No test here may launch a real worker, even when the code under test regresses: with no
+#: `claude`/`codex` on PATH, a dispatch that gets past its mocks fails at launch instead of
+#: running on a real account (a 2026-09-30 mutation check did exactly that). Tests that need
+#: the launch path patch `which` themselves.
+_NO_LAUNCH = mock.patch.object(pe.shutil, "which", return_value=None)
+
+
+def setUpModule():
+    _NO_LAUNCH.start()
+
+
+def tearDownModule():
+    _NO_LAUNCH.stop()
+
+
 TEAM = {"backend": "claude-core-team", "host": "claude-code", "family": "claude",
         "model": "claude-opus-5-5", "effort": "high", "account": "team",
         "config_dir": "/tmp/team"}
@@ -359,18 +374,32 @@ class ProduceRound2Test(ProduceFixture):
         self.assertFalse(summary["lease_released"])
         self.assertTrue(summary["status"].startswith("skipped"))
 
-    def test_a_refused_or_raising_acquisition_marks_the_contract_failed(self):
+    def test_a_refused_or_raising_acquisition_leaves_the_contract_pending(self):
+        # Round 4: without the lease this run never owned the task, so it writes nothing to the
+        # contract; `pending` says it never started.
         with mock.patch.object(pe, "acquire_lease", return_value=pe.Decision(False, "busy")):
             code, summary = self.produce_capturing(lambda *a, **k: 0)
-        self.assertEqual((code, summary["status"]), (2, "failed"))
-        self.assertEqual(self.contract()["status"], "failed")
+        self.assertEqual(code, 2)
+        self.assertTrue(summary["status"].startswith("pending"), summary)
+        self.assertEqual(self.contract()["status"], "pending")
         self.assertEqual(pe.validate_task(self.bundle, self.contract())[0], [])
         self.task_dir = self.tasks / "t2"
         with mock.patch.object(pe, "acquire_lease", side_effect=OSError("disk gone")), \
                 mock.patch.object(pe.sys, "stderr"), self.assertRaises(OSError):
             pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks, owner="me",
                        task_id="t2", write="src/x.py")
-        self.assertEqual(self.contract()["status"], "failed")
+        self.assertEqual(self.contract()["status"], "pending")
+
+    def test_the_contract_is_active_only_while_this_run_holds_the_lease(self):
+        seen = {}
+
+        def look(*args, **kwargs):
+            seen["during"] = self.contract()["status"]
+            return 0
+
+        code, summary = self.produce_capturing(look)
+        self.assertEqual((seen["during"], summary["status"], self.contract()["status"]),
+                         ("active", "complete", "complete"))
 
 
 class ProduceRound3Test(ProduceFixture):
@@ -399,9 +428,38 @@ class ProduceRound3Test(ProduceFixture):
         with mock.patch.object(pe, "acquire_lease", side_effect=competitor_first):
             code, summary = self.run_capturing(lambda *a, **k: 0)
         self.assertEqual(code, 2)
-        self.assertIn("another lease", summary["status"])
-        self.assertEqual(self.contract()["status"], "active")
+        self.assertTrue(summary["status"].startswith("pending"), summary)
+        self.assertEqual(self.contract()["status"], "pending")
         self.assertEqual(json.loads((self.task_dir / "lease.json").read_text())["owner"], "other")
+
+    def test_a_competitor_that_finished_and_released_keeps_its_result(self):
+        # Round 4's interleaving: the competitor acquires, completes, marks the contract and
+        # releases, all before the refused caller cleans up. No lease is left, and still the
+        # refused caller must not touch the contract.
+        real_acquire = pe.acquire_lease
+
+        def competitor_done(task_dir, owner, ttl):
+            generation = real_acquire(task_dir, "other", 600).details["acquired_at"]
+            refused = real_acquire(task_dir, owner, ttl)
+            pe._finalize_produced(task_dir, task_dir / "task.yaml", "other", generation, "complete")
+            pe.release_lease(task_dir, "other", generation)
+            return refused
+
+        with mock.patch.object(pe, "acquire_lease", side_effect=competitor_done):
+            code, summary = self.run_capturing(lambda *a, **k: 0)
+        self.assertEqual(code, 2)
+        self.assertFalse((self.task_dir / "lease.json").exists())
+        self.assertEqual(self.contract()["status"], "complete")
+
+    def test_an_unreadable_brief_reserves_nothing_and_the_id_stays_free(self):
+        with mock.patch.object(pe.sys, "stderr"), \
+                mock.patch.object(pe, "dispatch_worker", return_value=0):
+            code = pe.produce(self.bundle, self.repo, self.tasks.parent / "missing.md",
+                              tasks_root=self.tasks, owner="me", task_id="t1", write="src/x.py")
+        self.assertEqual(code, 2)
+        self.assertFalse(self.task_dir.exists())
+        code, summary = self.run_capturing(lambda *a, **k: 0)
+        self.assertEqual((code, summary["status"]), (0, "complete"))
 
     def test_a_malformed_lease_counter_does_not_escape_cleanup(self):
         def null_counter(*args, **kwargs):

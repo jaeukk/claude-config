@@ -3179,15 +3179,16 @@ def _print_cost_report(report: dict[str, Any]) -> None:
           f"{totals['external']:>8}   ({report['files']} event files)")
 
 
-def _rewrite_contract_status(contract_path: Path, status: str) -> None:
-    """Set a contract's ``status`` (and clear ``current_role``), reloading it and replacing it
-    atomically through an exclusively created temporary file. A linked contract is refused."""
+def _rewrite_contract_status(contract_path: Path, status: str, clear_role: bool = True) -> None:
+    """Set a contract's ``status`` (and, by default, clear ``current_role``), reloading it and
+    replacing it atomically through an exclusively created temporary file. A linked contract is
+    refused."""
     if contract_path.is_symlink() or not contract_path.is_file():
         raise ValueError(f"{contract_path} is not a regular file")
     task = load_document(contract_path)
     task["status"] = status
     task["updated_at"] = utc_now()
-    if isinstance(task.get("dispatch"), dict):
+    if clear_role and isinstance(task.get("dispatch"), dict):
         task["dispatch"]["current_role"] = None
     handle, staging = tempfile.mkstemp(dir=contract_path.parent, prefix=".task.", suffix=".tmp")
     try:
@@ -3200,7 +3201,7 @@ def _rewrite_contract_status(contract_path: Path, status: str) -> None:
 
 
 def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generation: str | None,
-                       status: str) -> str:
+                       status: str, clear_role: bool = True) -> str:
     """Mark a ``produce`` contract finished while this run still owns its lease.
 
     Reloads the contract from disk and changes only ``status``, ``updated_at`` and
@@ -3213,7 +3214,7 @@ def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generati
             lease = load_document(task_dir / "lease.json")
             if lease.get("owner") != owner or lease.get("acquired_at") != generation:
                 return "skipped: the lease is no longer this run's"
-            _rewrite_contract_status(contract_path, status)
+            _rewrite_contract_status(contract_path, status, clear_role)
             return status
     except Exception as error:  # noqa: BLE001 -- reported by the caller's summary, never raised
         return f"skipped: {error}"
@@ -3263,7 +3264,7 @@ def produce(
                     if bundle.backends.get(item.get("backend"), {}).get("host") == conductor_host), None)
     now = utc_now()
     task: dict[str, Any] = {
-        "schema_version": 1, "task_id": task_id, "status": "active",
+        "schema_version": 1, "task_id": task_id, "status": "pending",
         "conductor": {"host": conductor_host, "backend": backend, "lease_owner": owner},
         "target_repo": str(target), "write_scope": [str(destination)], "roles_plan": [role],
         "audit_cycles": 0, "approvals": {"user": []}, "dispatch": {"current_role": role},
@@ -3279,6 +3280,10 @@ def produce(
         return dispatch_worker(bundle, task, role, brief, "native", True, out_path=out,
                                min_publish_bytes=min_publish_bytes, write_path=write,
                                exec_bash=exec_bash)
+    try:
+        brief_bytes = Path(brief).read_bytes()  # before anything is reserved
+    except OSError as error:
+        return refuse(f"produce: the brief cannot be read ({error.strerror or error})")
     task_dir = Path(tasks_root) / task_id
     try:
         task_dir.mkdir()  # exclusive: an existing folder, file or link is refused, never reused
@@ -3286,9 +3291,15 @@ def produce(
         return refuse(f"produce: {task_dir} cannot be created fresh ({error.strerror or error})")
     contract_path = task_dir / "task.yaml"
     brief_copy = task_dir / "workers" / role / "brief.md"
-    brief_copy.parent.mkdir(parents=True)
-    shutil.copyfile(brief, brief_copy)
-    contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
+    try:
+        brief_copy.parent.mkdir(parents=True)
+        brief_copy.write_bytes(brief_bytes)
+        # `pending` until this run holds the lease: a contract is written only by whoever owns
+        # the task, and before the lease nobody does.
+        contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
+    except OSError as error:
+        shutil.rmtree(task_dir, ignore_errors=True)  # this call created it a moment ago
+        return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error})")
     code, generation, lease_note = 2, None, "not acquired"
     try:
         lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
@@ -3296,24 +3307,21 @@ def produce(
             lease_note = f"not acquired: {lease.reason}"
             return refuse(lease.reason)
         generation = (lease.details or {}).get("acquired_at")
+        activated = _finalize_produced(task_dir, contract_path, owner, generation, "active",
+                                       clear_role=False)
+        if activated != "active":
+            return refuse(f"produce: the contract could not be activated ({activated})")
+        task["status"] = "active"
         code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
                                task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
     finally:
         # Cleanup must never raise: an exception here would replace the dispatch's own.
         status = "complete" if code == 0 else "failed"
         if generation is None:
-            # This run never held a lease. Mark the contract failed rather than leave it looking
-            # active, but only under the lock and only while no other lease holds the task: a
-            # competing caller that acquired first owns it now.
-            try:
-                with _lease_lock(task_dir):
-                    if (task_dir / "lease.json").exists():
-                        finalized = "skipped: another lease holds this task"
-                    else:
-                        _rewrite_contract_status(contract_path, status)
-                        finalized = status
-            except Exception as error:  # noqa: BLE001 -- reported, never raised
-                finalized = f"skipped: {error}"
+            # This run never held the lease, so it never owned the task and writes nothing to
+            # the contract: it stays `pending`. A competitor that acquired first -- and may
+            # already have finished and released -- keeps whatever it wrote.
+            finalized = "pending: the lease was never acquired"
             released = Decision(False, lease_note)
         else:
             finalized = _finalize_produced(task_dir, contract_path, owner, generation, status)

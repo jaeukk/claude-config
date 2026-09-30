@@ -23,8 +23,10 @@ one codex-ceiling consultation.
 - **`policy_engine.py produce`** is the one-producer route: contract (one planned producer,
   `audit_cycles` 0), lease, dispatch (`--write [--exec]` or `--out`), release, and a summary on
   stderr, in one call. It validates the policy and the contract, creates the task folder
-  exclusively (an existing folder or link is refused), and finalizes the contract under the lease
-  lock only while it still owns the lease; `--dry-run` creates nothing.
+  exclusively after reading the brief (an existing folder or link is refused), writes the contract
+  `pending`, activates it and later finalizes it only under the lease lock while this run owns the
+  lease, and never writes it when the lease was not acquired; cleanup never raises. `--dry-run`
+  creates nothing.
 - Contract status `failed` is now valid (the benchmark driver already wrote it).
 
 ### Changed
