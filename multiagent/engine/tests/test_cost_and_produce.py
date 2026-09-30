@@ -210,8 +210,8 @@ class ProduceTest(unittest.TestCase):
         self.assertEqual(list(self.tasks.iterdir()), [])
 
 
-class ProduceLifecycleTest(unittest.TestCase):
-    """Setup is exclusive; finalization keeps others' edits and never writes a lost task."""
+class ProduceFixture(unittest.TestCase):
+    """Shared setup for the produce lifecycle tests; holds no tests itself."""
 
     @classmethod
     def setUpClass(cls):
@@ -236,6 +236,9 @@ class ProduceLifecycleTest(unittest.TestCase):
 
     def contract(self):
         return json.loads((self.task_dir / "task.yaml").read_text(encoding="utf-8"))
+
+class ProduceLifecycleTest(ProduceFixture):
+    """Setup is exclusive; finalization keeps others' edits and never writes a lost task."""
 
     def test_an_existing_folder_or_link_is_refused_before_anything_is_written(self):
         other = self.tasks / "other"
@@ -296,6 +299,97 @@ class ProduceLifecycleTest(unittest.TestCase):
         with mock.patch.object(pe, "validate_policy", return_value=(["broken"], [])):
             self.assertEqual(self.produce(lambda *a, **k: 0), 2)
         self.assertFalse(self.task_dir.exists())
+
+
+class ProduceRound2Test(ProduceFixture):
+    """Audit round 2: staging, same-owner successors, unreadable leases, failed acquisition."""
+
+    def produce_capturing(self, dispatch):
+        import io
+        err = io.StringIO()
+        with mock.patch.object(pe, "dispatch_worker", side_effect=dispatch), \
+                mock.patch.object(pe.sys, "stderr", err):
+            code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                              owner="me", task_id="t1", write="src/x.py")
+        line = [l for l in err.getvalue().splitlines() if l.startswith("produce: ")][-1]
+        return code, json.loads(line[len("produce: "):])
+
+    def test_finalization_uses_no_predictable_staging_name(self):
+        def plant(*args, **kwargs):
+            (self.task_dir / "task.yaml.partial").write_text("a producer's output", encoding="utf-8")
+            return 0
+
+        code, summary = self.produce_capturing(plant)
+        self.assertEqual((code, summary["status"]), (0, "complete"))
+        self.assertEqual((self.task_dir / "task.yaml.partial").read_text(), "a producer's output")
+        self.assertEqual(list(self.task_dir.glob(".task.*.tmp")), [])
+
+    def test_a_linked_contract_is_not_written_through(self):
+        outside = self.tasks / "elsewhere.yaml"
+
+        def relink(*args, **kwargs):
+            outside.write_text((self.task_dir / "task.yaml").read_text(), encoding="utf-8")
+            (self.task_dir / "task.yaml").unlink()
+            (self.task_dir / "task.yaml").symlink_to(outside)
+            return 0
+
+        code, summary = self.produce_capturing(relink)
+        self.assertTrue(summary["status"].startswith("skipped"), summary)
+        self.assertEqual(json.loads(outside.read_text())["status"], "active")
+
+    def test_a_same_owner_successor_lease_is_not_released(self):
+        def successor(*args, **kwargs):
+            lease = json.loads((self.task_dir / "lease.json").read_text(encoding="utf-8"))
+            lease["acquired_at"] = "2099-01-01T00:00:00Z"
+            (self.task_dir / "lease.json").write_text(json.dumps(lease), encoding="utf-8")
+            return 0
+
+        code, summary = self.produce_capturing(successor)
+        self.assertFalse(summary["lease_released"])
+        self.assertTrue((self.task_dir / "lease.json").exists())
+        self.assertEqual(self.contract()["status"], "active")
+
+    def test_an_unreadable_lease_still_ends_with_a_summary(self):
+        def corrupt(*args, **kwargs):
+            (self.task_dir / "lease.json").write_text("{ not json", encoding="utf-8")
+            return 0
+
+        code, summary = self.produce_capturing(corrupt)
+        self.assertEqual(code, 0)
+        self.assertFalse(summary["lease_released"])
+        self.assertTrue(summary["status"].startswith("skipped"))
+
+    def test_a_refused_or_raising_acquisition_marks_the_contract_failed(self):
+        with mock.patch.object(pe, "acquire_lease", return_value=pe.Decision(False, "busy")):
+            code, summary = self.produce_capturing(lambda *a, **k: 0)
+        self.assertEqual((code, summary["status"]), (2, "failed"))
+        self.assertEqual(self.contract()["status"], "failed")
+        self.assertEqual(pe.validate_task(self.bundle, self.contract())[0], [])
+        self.task_dir = self.tasks / "t2"
+        with mock.patch.object(pe, "acquire_lease", side_effect=OSError("disk gone")), \
+                mock.patch.object(pe.sys, "stderr"), self.assertRaises(OSError):
+            pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks, owner="me",
+                       task_id="t2", write="src/x.py")
+        self.assertEqual(self.contract()["status"], "failed")
+
+
+class Round2AccountingTest(unittest.TestCase):
+    def test_huge_numbers_are_refused_and_tolerated_in_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            (task_dir / "task.yaml").write_text("{}", encoding="utf-8")
+            base = {"account": "team", "model": "m", "classification": "ok"}
+            self.assertFalse(pe.record_attempt(task_dir, {**base, "total_cost_usd": 10 ** 400}).allowed)
+            self.assertFalse(pe.record_attempt(task_dir, {**base, "usage": {"output_tokens": 10 ** 400}}).allowed)
+            (task_dir / "events.ndjson").write_text(
+                '{"type": "worker_attempt", "account": "team", "model": "m", "classification": "ok", '
+                '"total_cost_usd": ' + "9" * 401 + ', "usage": {"output_tokens": ' + "9" * 401 + '}}\n',
+                encoding="utf-8")
+            row = pe.cost_report([task_dir])["rows"][0]
+            self.assertEqual((row["uncosted"], row["output_tokens"], row["cost_usd"]), (1, 0, 0.0))
+            with self.assertRaises(ValueError):
+                pe.cost_report([task_dir], since="2026-99-99")
+            self.assertEqual(pe.cost_report([task_dir], since="2026-02-28")["files"], 1)
 
 
 class BookDriverRecordTest(unittest.TestCase):
@@ -382,6 +476,16 @@ class BookDriverOutcomeTest(unittest.TestCase):
 
         event = self.run_one(timeout)
         self.assertEqual((event["classification"], event["built"], event["exit"]), ("timeout", True, None))
+
+    def test_a_rate_limit_after_the_chapter_was_built(self):
+        by_status = self.run_one(lambda argv: subprocess.CompletedProcess(
+            argv, 1, stdout=json.dumps(envelope(is_error=True, api_error_status=429, result="x")),
+            stderr=""))
+        self.assertEqual((by_status["classification"], by_status["built"]), ("rate_limited", True))
+        by_stderr = self.run_one(lambda argv: subprocess.CompletedProcess(
+            argv, 1, stdout=json.dumps(envelope(is_error=True, result="failed")),
+            stderr="API Error: 429 rate limit"))
+        self.assertEqual((by_stderr["classification"], by_stderr["built"]), ("rate_limited", True))
 
     def test_a_nonzero_exit_after_the_chapter_was_built(self):
         event = self.run_one(lambda argv: subprocess.CompletedProcess(

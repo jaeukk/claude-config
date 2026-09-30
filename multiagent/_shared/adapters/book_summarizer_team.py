@@ -226,11 +226,12 @@ class Driver:
             self.log(f"{tag}: attempt {attempts} start ({self.model}, team)")
             started = time.time()
             exit_code: int | None = None
+            stderr = ""
             timed_out = False
             try:
                 proc = subprocess.run(self.command(chapter), cwd=self.vault, env=self.env,
                                       capture_output=True, text=True, timeout=self.timeout)
-                out, exit_code = proc.stdout, proc.returncode
+                out, exit_code, stderr = proc.stdout, proc.returncode, proc.stderr or ""
             except subprocess.TimeoutExpired as error:
                 out = error.stdout.decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
                 timed_out = True
@@ -243,7 +244,12 @@ class Driver:
                 envelope, text, err = {}, out or "", True
             limited = bool(LIMIT.search(text[:400])) and not self.done(chapter)
             built = not limited and self.done(chapter)
-            run_class = ("timeout" if timed_out else "rate_limited" if limited
+            # The CLI run's own outcome, independent of whether the chapter got built.
+            limit_signal = bool(
+                (isinstance(envelope, dict) and envelope.get("api_error_status") == 429)
+                or LIMIT.search(text[:400]) or LIMIT.search(stderr[:2000])
+            )
+            run_class = ("timeout" if timed_out else "rate_limited" if limit_signal
                          else "ok" if exit_code == 0 and not err else "error")
             self.record_attempt(chapter, attempts, envelope if isinstance(envelope, dict) else {},
                                 exit_code, run_class, built, started)

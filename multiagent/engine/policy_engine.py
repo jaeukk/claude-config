@@ -876,8 +876,11 @@ def heartbeat_lease(
     return _mutate_lease(task_dir, mutate)
 
 
-def release_lease(task_dir: Path, owner: str) -> Decision:
-    """Release a lease owned by ``owner``.
+def release_lease(task_dir: Path, owner: str, generation: str | None = None) -> Decision:
+    """Release a lease owned by ``owner`` (and, when given, of that ``generation``).
+
+    ``generation`` is the ``acquired_at`` the caller's own acquisition returned; with it, a newer
+    lease taken under the same owner name after this one expired is left alone.
 
     Locked like the rest of the lifecycle, and refuses while workers are still
     counted: deleting the lease under a running dispatch would destroy the record
@@ -891,6 +894,8 @@ def release_lease(task_dir: Path, owner: str) -> Decision:
             payload = load_document(lease_path)
             if payload.get("owner") != owner:
                 return Decision(False, "lease owner mismatch")
+            if generation is not None and payload.get("acquired_at") != generation:
+                return Decision(False, "lease generation mismatch: a newer lease holds this task")
             active = int(payload.get("active_workers", 0))
             if active:
                 return Decision(False, f"{active} worker slot(s) still held; release them first")
@@ -3035,6 +3040,8 @@ EXTERNAL_ATTEMPT_REQUIRED = ("account", "model", "classification")
 #: Optional accounting fields of an external attempt and the types they must have.
 EXTERNAL_ATTEMPT_NUMBERS = {"total_cost_usd": (int, float), "tokens_used": int, "exit": int,
                             "attempt": int, "duration_s": (int, float)}
+#: Above any real attempt's cost or token count; also keeps every value a float can hold.
+ACCOUNTING_MAX = 1e12
 
 
 def _external_attempt_error(fields: Any) -> str | None:
@@ -3050,8 +3057,8 @@ def _external_attempt_error(fields: Any) -> str | None:
         if value is None:
             continue
         if isinstance(value, bool) or not isinstance(value, kinds) or value != value \
-                or value in (float("inf"), float("-inf")) or (key != "exit" and value < 0):
-            return f"{key} must be a finite non-negative number"
+                or not -ACCOUNTING_MAX < value < ACCOUNTING_MAX or (key != "exit" and value < 0):
+            return f"{key} must be a finite non-negative number below {ACCOUNTING_MAX:g}"
     usage = fields.get("usage")
     if usage is not None:
         if not isinstance(usage, dict):
@@ -3059,7 +3066,8 @@ def _external_attempt_error(fields: Any) -> str | None:
         for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens",
                     "cache_read_input_tokens"):
             value = usage.get(key)
-            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int)
+                                      or not 0 <= value < ACCOUNTING_MAX):
                 return f"usage.{key} must be a non-negative integer"
     return None
 
@@ -3092,7 +3100,8 @@ def record_attempt(task_dir: Path, fields: dict[str, Any]) -> Decision:
 
 def _count(value: Any) -> int:
     """A non-negative integer from an event field, or 0 when it is missing or malformed."""
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+    return (value if isinstance(value, int) and not isinstance(value, bool)
+            and 0 < value < ACCOUNTING_MAX else 0)
 
 
 def cost_report(roots: list[Path], since: str | None = None) -> dict[str, Any]:
@@ -3103,8 +3112,13 @@ def cost_report(roots: list[Path], since: str | None = None) -> dict[str, Any]:
     none) is counted as ``uncosted``, never estimated. Each event file is read once even when
     roots overlap; malformed fields count as absent. ``since`` is a ``YYYY-MM-DD`` date.
     """
-    if since is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
-        raise ValueError(f"--since must be a date, YYYY-MM-DD; got {since!r}")
+    if since is not None:
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+                raise ValueError
+            datetime.strptime(since, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"--since must be a calendar date, YYYY-MM-DD; got {since!r}") from None
     event_files = sorted({events.resolve() for root in roots
                           for events in Path(root).expanduser().glob("**/events.ndjson")})
     groups: dict[tuple[str, str], dict[str, Any]] = {}
@@ -3130,10 +3144,10 @@ def cost_report(roots: list[Path], since: str | None = None) -> dict[str, Any]:
             usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
             row["output_tokens"] += _count(usage.get("output_tokens"))
             cost = event.get("total_cost_usd")
-            costed = isinstance(cost, (int, float)) and not isinstance(cost, bool) and 0 <= cost < float("inf")
+            costed = isinstance(cost, (int, float)) and not isinstance(cost, bool) and 0 <= cost < ACCOUNTING_MAX
             row["cost_usd"] += float(cost) if costed else 0.0
             tokens = event.get("tokens_used")
-            if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+            if isinstance(tokens, int) and not isinstance(tokens, bool) and 0 <= tokens < ACCOUNTING_MAX:
                 row["codex_tokens"] += tokens
                 costed = True
             row["uncosted"] += 0 if costed else 1
@@ -3165,6 +3179,26 @@ def _print_cost_report(report: dict[str, Any]) -> None:
           f"{totals['external']:>8}   ({report['files']} event files)")
 
 
+def _rewrite_contract_status(contract_path: Path, status: str) -> None:
+    """Set a contract's ``status`` (and clear ``current_role``), reloading it and replacing it
+    atomically through an exclusively created temporary file. A linked contract is refused."""
+    if contract_path.is_symlink() or not contract_path.is_file():
+        raise ValueError(f"{contract_path} is not a regular file")
+    task = load_document(contract_path)
+    task["status"] = status
+    task["updated_at"] = utc_now()
+    if isinstance(task.get("dispatch"), dict):
+        task["dispatch"]["current_role"] = None
+    handle, staging = tempfile.mkstemp(dir=contract_path.parent, prefix=".task.", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(task, indent=2) + "\n")
+        os.replace(staging, contract_path)
+    except BaseException:
+        Path(staging).unlink(missing_ok=True)
+        raise
+
+
 def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generation: str | None,
                        status: str) -> str:
     """Mark a ``produce`` contract finished while this run still owns its lease.
@@ -3172,21 +3206,14 @@ def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generati
     Reloads the contract from disk and changes only ``status``, ``updated_at`` and
     ``dispatch.current_role``, under the lease lock and only while the lease is the one this run
     acquired: an edit made meanwhile survives, and a task someone else now holds is left alone.
-    Returns what happened, for the summary.
+    Returns what happened, for the summary; never raises.
     """
     try:
         with _lease_lock(task_dir):
             lease = load_document(task_dir / "lease.json")
             if lease.get("owner") != owner or lease.get("acquired_at") != generation:
                 return "skipped: the lease is no longer this run's"
-            task = load_document(contract_path)
-            task["status"] = status
-            task["updated_at"] = utc_now()
-            if isinstance(task.get("dispatch"), dict):
-                task["dispatch"]["current_role"] = None
-            staging = contract_path.with_suffix(".yaml.partial")
-            staging.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
-            staging.replace(contract_path)
+            _rewrite_contract_status(contract_path, status)
             return status
     except (OSError, ValueError, TimeoutError) as error:
         return f"skipped: {error}"
@@ -3262,18 +3289,32 @@ def produce(
     brief_copy.parent.mkdir(parents=True)
     shutil.copyfile(brief, brief_copy)
     contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
-    lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
-    if not lease.allowed:
-        return refuse(lease.reason)
-    generation = (lease.details or {}).get("acquired_at")
-    code = 2
+    code, generation, lease_note = 2, None, "not acquired"
     try:
+        lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
+        if not lease.allowed:
+            lease_note = f"not acquired: {lease.reason}"
+            return refuse(lease.reason)
+        generation = (lease.details or {}).get("acquired_at")
         code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
                                task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
     finally:
-        finalized = _finalize_produced(task_dir, contract_path, owner, generation,
-                                       "complete" if code == 0 else "failed")
-        released = release_lease(task_dir, owner)
+        status = "complete" if code == 0 else "failed"
+        if generation is None:
+            # No lease was ever held, and the folder was created by this call: nothing else can
+            # own it, so the contract is marked failed directly rather than left looking active.
+            try:
+                _rewrite_contract_status(contract_path, status)
+                finalized = status
+            except (OSError, ValueError) as error:
+                finalized = f"skipped: {error}"
+            released = Decision(False, lease_note)
+        else:
+            finalized = _finalize_produced(task_dir, contract_path, owner, generation, status)
+            try:
+                released = release_lease(task_dir, owner, generation)
+            except (OSError, ValueError) as error:
+                released = Decision(False, f"release failed: {error}")
         attempts = []
         for event in _read_events(task_dir):
             if event.get("type") != "worker_attempt":
@@ -3284,7 +3325,7 @@ def produce(
                 | {"output_tokens": usage.get("output_tokens")})
         print("produce: " + json.dumps({
             "task_dir": str(task_dir), "exit": code, "status": finalized,
-            "lease_released": released.allowed, "attempts": attempts,
+            "lease_released": released.allowed, "lease": released.reason, "attempts": attempts,
         }, ensure_ascii=False, default=str), file=sys.stderr)
     return code
 
