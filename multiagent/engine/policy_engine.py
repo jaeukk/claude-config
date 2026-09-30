@@ -3307,7 +3307,15 @@ def produce(
         # removing the folder this call just created cannot take anyone else's lease with it.
         shutil.rmtree(task_dir, ignore_errors=True)
         return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error})")
-    Path(staging).unlink(missing_ok=True)
+    setup_note = ""
+    try:
+        os.unlink(staging)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        # The task is published now, so this is reported and never rolled back: a competitor may
+        # already hold it. A leftover staging file is harmless.
+        setup_note = f"staging file {staging} left behind: {error.strerror or error}"
     code, generation, lease_note = 2, None, "not acquired"
     try:
         lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
@@ -3351,6 +3359,7 @@ def produce(
         print("produce: " + json.dumps({
             "task_dir": str(task_dir), "exit": code, "status": finalized,
             "lease_released": released.allowed, "lease": released.reason, "attempts": attempts,
+            **({"setup": setup_note} if setup_note else {}),
         }, ensure_ascii=False, default=str), file=sys.stderr)
     return code
 

@@ -470,6 +470,22 @@ class ProduceRound3Test(ProduceFixture):
         self.assertEqual(pe.validate_task(self.bundle, self.contract())[0], [])
         self.assertEqual(list(self.task_dir.glob(".task.*.tmp")), [])
 
+    def test_a_failed_staging_cleanup_after_publishing_is_reported_not_fatal(self):
+        # Round 6: once task.yaml is published, a failure to delete the staging file must neither
+        # abort the run nor trigger the rollback (a competitor may already hold the task).
+        real_unlink = pe.os.unlink
+
+        def unlink(path, *args, **kwargs):
+            if Path(path).name.startswith(".task.") and Path(path).parent == self.task_dir:
+                raise OSError(5, "Input/output error")
+            return real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(pe.os, "unlink", side_effect=unlink):
+            code, summary = self.run_capturing(lambda *a, **k: 0)
+        self.assertEqual((code, summary["status"]), (0, "complete"))
+        self.assertIn("left behind", summary["setup"])
+        self.assertTrue(self.task_dir.exists())
+
     def test_an_unreadable_brief_reserves_nothing_and_the_id_stays_free(self):
         with mock.patch.object(pe.sys, "stderr"), \
                 mock.patch.object(pe, "dispatch_worker", return_value=0):
