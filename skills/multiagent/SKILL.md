@@ -11,7 +11,8 @@ The default is **one producer and no review loop**: this session, a native subag
 `Agent`, Codex `spawn_agent`; no contract), or one team-account worker with Bash
 (`dispatch-worker --write <dest> --exec`). Measured 2026-09-29/30 on two test-oracle code tasks: the
 multiagent arm scored within noise of a single session at 2–3.7× its cost, mostly because its
-implementer lacked Bash; one critic → fix round changed the score in 1 of 7 runs.
+implementer lacked Bash; one critic → fix round changed the score in 1 of 7 runs. Which account
+and model does the work is a separate choice: see "Accounts" and "Native spawns".
 
 Reach for the engine only for:
 
@@ -95,6 +96,12 @@ not from the binding; the hook checks only that a compatible binding exists. Kee
 in sync, and never report the resolved backend as the model that ran unless the frontmatter says
 so. Model evidence: `references/model-refresh-2026-09-27.md`.
 
+**Native spawns: choose the type and model by tier.** A `general-purpose` subagent with no
+`model` runs at the session's model (Opus or Fable) on the private login. Use `Explore` or
+`runner` (Haiku, no edit tools) for lookups and searches; pass `model: "haiku"` for mechanical shards
+and `model: "sonnet"` for routine production; keep the session's model only for judgment-heavy
+work. On Codex, set `model` and `reasoning_effort` on `spawn_agent` (with `fork_turns: "none"`).
+
 ## Accounts
 
 Two Claude logins: **private** (`~/.claude`, this session's, the only one with Fable) and
@@ -109,6 +116,23 @@ Two Claude logins: **private** (`~/.claude`, this session's, the only one with F
   `unknown` (an unreadable or rate-limited probe) routes to team anyway. A team run that comes
   back rate-limited gets one private retry, never in write mode; nothing else is retried.
   `claude-worker` routes the same way.
+- **When to push a job to team.** Hand it to one team producer when it is self-contained (the
+  brief and readable files suffice; one destination), substantial (minutes of work, not a quick
+  edit), and needs neither this conversation's context nor Fable. Keep it here when it is short,
+  iterates with the user, or depends on what this session has loaded: moving it costs a brief and a
+  cold start. One call runs the whole route:
+
+      python3 $E produce --target-repo <abs> --brief <file> --write <dest> --exec   # or --out <path>
+
+  It writes a contract (one planned producer, `audit_cycles` 0) under `tasks/<id>`, takes and
+  releases the lease, dispatches, and prints the account, model and cost on stderr. Use the full
+  procedure for review, several producers, or a contract you need to edit.
+- **Cost records.** Every `worker_attempt` event carries account, model, outcome, and what the CLI
+  reported (Claude `usage` and `total_cost_usd`, Codex `tokens_used`). `python3 $E cost-report
+  [--tasks-root <dir>]... [--since <date>]` sums them by account and model; `uncosted` counts
+  attempts recorded before 1.4.0. A headless driver records each run with `python3 $E
+  record-attempt --task-dir … --event '<json>'` (`account`, `model`, `classification` required).
+  Native subagents leave no record.
 
 ### Publishing a worker's text: `--out`
 
@@ -166,7 +190,8 @@ under a contract:
 Start from `_templates/book-summarizer-team/`. The conductor supplies the PDF path, page offset and
 per-chapter page ranges in the job. One chapter at a time; `--jobs N` only when the user authorized
 parallel chapters. On rerun, a chapter is skipped when its `x.00` overview note exceeds 2,000
-bytes and carries an `agent:` line. After each chapter the driver runs `record-author`, an assertion (see "Authorship"). The
+bytes and carries an `agent:` line. After each attempt the driver runs `record-attempt`, and after each built chapter
+`record-author`, an assertion (see "Authorship"). The
 shell grant is a named allowlist, but nothing intercepts a write: containment is the brief, and the
 contract's `deviations` must say so. The model is the job's (default `claude-sonnet-5-5`).
 

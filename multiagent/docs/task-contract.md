@@ -47,14 +47,16 @@ Old contracts carrying them are accepted and ignored.
 1. Copy `_templates/task.yaml` to `tasks/<task-id>/task.yaml` and fill the absolute target, write
    scope, planned roles, audit budget, and the conducting session's lease owner.
 2. Run `policy_engine.py validate-policy` and `validate-task`, then
-   `acquire-lease --task-dir tasks/<task-id> --owner <lease_owner>`. Lease and event commands
-   refuse a folder with no `task.yaml`. `dispatch-worker` refuses without a live lease you own,
+   `acquire-lease --task-dir tasks/<task-id> --owner <lease_owner>`. `acquire-lease`,
+   `append-event` and `record-attempt` refuse a folder with no `task.yaml`. For a single
+   producer with no review, `produce` runs steps 1–2 and the dispatch in one call. `dispatch-worker` refuses without a live lease you own,
    since that is where it counts CLI workers. A natively spawned worker is not stopped by a
    missing lease: there, holding the lease first is the cooperating-conductor protocol.
 3. Put only the task ID in `tasks/.active-task` while the hook should enforce the task.
 4. Before a native spawn, set `dispatch.current_role` to its role. Dispatch CLI workers with
    `dispatch-worker --role <role>`.
-5. Store each worker result separately; only the lease owner appends events. A CLI producer
+5. Store each worker result separately; only the lease owner appends events, except a headless
+   driver's `record-attempt`, which is marked `source: external`. A CLI producer
    records its family in `observed-author.json` beside the contract (the hook records a native
    producer before it runs, success or not); reviewer dispatch is checked against that record,
    not against `author_family` alone.

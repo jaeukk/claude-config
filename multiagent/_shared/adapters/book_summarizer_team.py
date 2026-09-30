@@ -156,6 +156,33 @@ class Driver:
         self.log(f"ch{chapter['chapter']}: record-author exit {result.returncode}: "
                  f"{(result.stdout or result.stderr).strip()[:200]}")
 
+    def record_attempt(self, chapter: dict, attempt: int, envelope: dict, exit_code: int | None,
+                       classification: str, started: float) -> None:
+        """Record the attempt's account, model, usage and cost on the contract.
+
+        The same ``worker_attempt`` record ``dispatch-worker`` writes, marked ``source: external``,
+        so ``policy_engine.py cost-report`` counts headless team production too.
+        """
+        event = {
+            "account": "team", "config_dir": str(TEAM_DIR), "model": self.model,
+            "role": "implementer", "backend": "headless:book-summarizer",
+            "classification": classification, "exit": exit_code, "attempt": attempt,
+            "reason": f"book_summarizer_team.py ch{chapter['chapter']}",
+            "duration_s": round(time.time() - started, 1),
+        }
+        if isinstance(envelope.get("usage"), dict):
+            event["usage"] = envelope["usage"]
+        if isinstance(envelope.get("total_cost_usd"), (int, float)):
+            event["total_cost_usd"] = envelope["total_cost_usd"]
+        result = subprocess.run(
+            [sys.executable, str(ENGINE), "record-attempt", "--task-dir", str(self.task_dir),
+             "--event", json.dumps(event)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode:
+            self.log(f"ch{chapter['chapter']}: record-attempt failed: "
+                     f"{(result.stdout or result.stderr).strip()[:200]}")
+
     def wait_for_reset(self, text: str) -> None:
         """Pause all lanes until the reset time named in ``text`` (fallback: 30 min)."""
         with lock:
@@ -195,10 +222,11 @@ class Driver:
             attempts += 1
             self.log(f"{tag}: attempt {attempts} start ({self.model}, team)")
             started = time.time()
+            exit_code: int | None = None
             try:
                 proc = subprocess.run(self.command(chapter), cwd=self.vault, env=self.env,
                                       capture_output=True, text=True, timeout=self.timeout)
-                out = proc.stdout
+                out, exit_code = proc.stdout, proc.returncode
             except subprocess.TimeoutExpired as error:
                 out = error.stdout.decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
                 self.log(f"{tag}: TIMEOUT after {self.timeout // 60} min")
@@ -208,11 +236,16 @@ class Driver:
                 text, err = str(envelope.get("result", "")), envelope.get("is_error")
             except (TypeError, ValueError):
                 envelope, text, err = {}, out or "", True
-            if LIMIT.search(text[:400]) and not self.done(chapter):
+            limited = bool(LIMIT.search(text[:400])) and not self.done(chapter)
+            built = not limited and self.done(chapter)
+            self.record_attempt(chapter, attempts, envelope if isinstance(envelope, dict) else {},
+                                exit_code, "rate_limited" if limited else "ok" if built else "error",
+                                started)
+            if limited:
                 attempts -= 1  # a limit wait is not a real attempt
                 self.wait_for_reset(text)
                 continue
-            if self.done(chapter):
+            if built:
                 (self.work / f"{tag}.result.md").write_text(text, encoding="utf-8")
                 self.log(f"{tag}: BUILT in {(time.time() - started) / 60:.1f} min, "
                          f"cost ${envelope.get('total_cost_usd', 0):.2f}, error_flag={err}")

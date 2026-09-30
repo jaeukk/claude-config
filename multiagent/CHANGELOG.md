@@ -5,6 +5,29 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-30
+
+Items 1–2 of the post-cut plan (`tasks/2026-09-30-multiagent-next/synthesis.md`), worked out with
+one codex-ceiling consultation.
+
+### Added
+- **`policy_engine.py cost-report`** sums every `worker_attempt` event under one or more task
+  roots by account and model: attempts, outcomes, Claude output tokens and `total_cost_usd`, Codex
+  `tokens_used`, and `uncosted` (attempts recorded before 1.4.0). `--since`, `--json`.
+- **`policy_engine.py record-attempt`** lets a headless driver record a worker the engine did not
+  launch (`source: external`; `account`, `model`, `classification` required; no lease, like
+  `record-author`). The book driver now records every attempt with the envelope's usage and cost.
+- **`policy_engine.py produce`** is the one-producer route: contract (one planned producer,
+  `audit_cycles` 0), lease, dispatch (`--write [--exec]` or `--out`), release, and a summary on
+  stderr, in one call. It refuses to overwrite an existing contract; `--dry-run` creates nothing.
+
+### Changed
+- SKILL.md: native spawns choose the type and model by tier (`Explore`/`runner` for lookups;
+  `model: "haiku"`/`"sonnet"` on `Agent` for shards and routine production). A `general-purpose`
+  spawn with no model otherwise runs at the session's model on the private login. Also added: a rule
+  for when to push a job to the team account, and the cost commands. SKILL.md is 2,882 words
+  (1.4.0: 2,598).
+
 ## [1.4.0] - 2026-09-30
 
 Cut program, stages 2–3 (`tasks/2026-09-29-cut-stage2-3/plan.md`; design-basis D17). Stage 1 found

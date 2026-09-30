@@ -3027,6 +3027,210 @@ def _run_worker(
             spec.result_file.unlink(missing_ok=True)
 
 
+#: Fields an externally recorded attempt must carry; everything else in the event is optional.
+EXTERNAL_ATTEMPT_REQUIRED = ("account", "model", "classification")
+
+
+def record_attempt(task_dir: Path, fields: dict[str, Any]) -> Decision:
+    """Append a ``worker_attempt`` event for a worker the engine did not launch.
+
+    For headless drivers (the book driver, a task's own ``claude -p`` loop), which do most
+    team-account production and otherwise leave no record. Trusted like ``record-author``: no
+    lease is needed, the event is marked ``source: external``, and the folder must hold its
+    ``task.yaml``. ``cost-report`` reads these beside the engine's own attempts.
+    """
+    missing = _missing_contract(task_dir)
+    if missing is not None:
+        return missing
+    absent = [key for key in EXTERNAL_ATTEMPT_REQUIRED if not fields.get(key)]
+    if absent:
+        return Decision(False, f"record-attempt needs {', '.join(absent)}")
+    record = {**fields, "at": utc_now(), "type": "worker_attempt", "source": "external",
+              "dispatch_id": str(fields.get("dispatch_id") or uuid.uuid4().hex)}
+    try:
+        with _lease_lock(task_dir):
+            with _state_file(task_dir, "events.ndjson").open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except (OSError, ValueError, TimeoutError) as error:
+        return Decision(False, f"attempt not recorded: {error}")
+    return Decision(True, "attempt recorded", {"dispatch_id": record["dispatch_id"]})
+
+
+def cost_report(roots: list[Path], since: str | None = None) -> dict[str, Any]:
+    """Summarize every ``worker_attempt`` event under ``roots``, by account and model.
+
+    Costs are what the worker CLIs reported: Claude's ``total_cost_usd`` and ``usage``, Codex's
+    ``tokens used``. Attempts recorded before 1.4.0, or by a driver that passed no cost, carry
+    neither and are counted as ``uncosted``, never estimated. ``since`` is an ISO date prefix.
+    """
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    files = 0
+    for root in roots:
+        for events in sorted(Path(root).expanduser().glob("**/events.ndjson")):
+            files += 1
+            for line in events.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict) or event.get("type") != "worker_attempt":
+                    continue
+                if since and str(event.get("at", "")) < since:
+                    continue
+                key = (str(event.get("account") or "?"), str(event.get("model") or "?"))
+                row = groups.setdefault(key, {
+                    "account": key[0], "model": key[1], "attempts": 0, "outcomes": {},
+                    "output_tokens": 0, "cost_usd": 0.0, "codex_tokens": 0, "uncosted": 0,
+                    "external": 0, "tasks": set(),
+                })
+                row["attempts"] += 1
+                outcome = str(event.get("classification") or "?")
+                row["outcomes"][outcome] = row["outcomes"].get(outcome, 0) + 1
+                usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+                row["output_tokens"] += int(usage.get("output_tokens") or 0)
+                costed = False
+                if isinstance(event.get("total_cost_usd"), (int, float)):
+                    row["cost_usd"] += float(event["total_cost_usd"])
+                    costed = True
+                if isinstance(event.get("tokens_used"), int):
+                    row["codex_tokens"] += event["tokens_used"]
+                    costed = True
+                row["uncosted"] += 0 if costed else 1
+                row["external"] += 1 if event.get("source") == "external" else 0
+                row["tasks"].add(str(events.parent))
+    rows = sorted(groups.values(), key=lambda r: (r["account"], -r["attempts"]))
+    for row in rows:
+        row["tasks"] = len(row["tasks"])
+        row["cost_usd"] = round(row["cost_usd"], 4)
+    totals = {key: sum(row[key] for row in rows)
+              for key in ("attempts", "output_tokens", "codex_tokens", "uncosted", "external")}
+    totals["cost_usd"] = round(sum(row["cost_usd"] for row in rows), 4)
+    return {"files": files, "rows": rows, "totals": totals}
+
+
+def _print_cost_report(report: dict[str, Any]) -> None:
+    """Print ``cost_report`` as a fixed-width table."""
+    header = (f"{'account':8} {'model':24} {'attempts':>8} {'outcomes':30} {'out_tokens':>11} "
+              f"{'cost_usd':>9} {'codex_tok':>10} {'uncosted':>8} {'external':>8} {'tasks':>5}")
+    print(header)
+    for row in report["rows"]:
+        outcomes = ",".join(f"{k}={v}" for k, v in sorted(row["outcomes"].items()))
+        print(f"{row['account']:8} {row['model'][:24]:24} {row['attempts']:>8} {outcomes[:30]:30} "
+              f"{row['output_tokens']:>11} {row['cost_usd']:>9.2f} {row['codex_tokens']:>10} "
+              f"{row['uncosted']:>8} {row['external']:>8} {row['tasks']:>5}")
+    totals = report["totals"]
+    print(f"{'total':33} {totals['attempts']:>8} {'':30} {totals['output_tokens']:>11} "
+          f"{totals['cost_usd']:>9.2f} {totals['codex_tokens']:>10} {totals['uncosted']:>8} "
+          f"{totals['external']:>8}   ({report['files']} event files)")
+
+
+def produce(
+    bundle: PolicyBundle,
+    target_repo: Path,
+    brief: Path,
+    *,
+    write: str | None = None,
+    out: str | None = None,
+    exec_bash: bool = False,
+    role: str = "implementer",
+    task_id: str | None = None,
+    tasks_root: Path,
+    owner: str,
+    conductor_host: str = "claude-code",
+    read_scope: list[str] | None = None,
+    min_publish_bytes: int = MIN_PUBLISH_BYTES,
+    dry_run: bool = False,
+) -> int:
+    """Run one producer with a record, in one call: contract, lease, dispatch, release.
+
+    The one-producer route (1.4.0): no review, no roles bookkeeping. The binding decides the
+    account as usual, so an implementer goes to the team account when it has headroom. The
+    contract, brief copy, events and ``outputs/`` record stay in ``tasks_root/<task_id>``, so
+    ``cost-report`` and ``restore-write`` work on it like any other task.
+    """
+    if (write is None) == (out is None):
+        print(json.dumps(Decision(False, "produce needs exactly one of --write or --out").as_dict(),
+                         indent=2), file=sys.stderr)
+        return 2
+    destination = write if write is not None else out
+    target = Path(target_repo).expanduser().resolve()
+    if task_id is None:
+        slug = re.sub(r"[^a-z0-9]+", "-", Path(str(destination)).stem.lower()).strip("-")[:24] or "job"
+        task_id = f"{datetime.now():%Y-%m-%d}-produce-{slug}-{uuid.uuid4().hex[:6]}"
+    backend = next((item["backend"] for item in bundle.bindings.get("conductor", {}).get("candidates", [])
+                    if bundle.backends.get(item.get("backend"), {}).get("host") == conductor_host), None)
+    now = utc_now()
+    task: dict[str, Any] = {
+        "schema_version": 1, "task_id": task_id, "status": "active",
+        "conductor": {"host": conductor_host, "backend": backend, "lease_owner": owner},
+        "target_repo": str(target), "write_scope": [str(destination)], "roles_plan": [role],
+        "audit_cycles": 0, "approvals": {"user": []}, "dispatch": {"current_role": role},
+        "created_at": now, "updated_at": now,
+        "notes": "one-producer route: policy_engine.py produce",
+    }
+    if read_scope:
+        task["read_scope"] = list(read_scope)
+    errors, _ = validate_task(bundle, task)
+    if errors:
+        print(json.dumps(Decision(False, "produce: contract invalid", {"errors": errors}).as_dict(),
+                         indent=2), file=sys.stderr)
+        return 2
+    if dry_run:
+        return dispatch_worker(bundle, task, role, brief, "native", True, out_path=out,
+                               min_publish_bytes=min_publish_bytes, write_path=write,
+                               exec_bash=exec_bash)
+    task_dir = Path(tasks_root) / task_id
+    if (task_dir / "task.yaml").exists():
+        print(json.dumps(Decision(False, f"{task_dir} already holds a contract").as_dict(),
+                         indent=2), file=sys.stderr)
+        return 2
+    brief_copy = task_dir / "workers" / role / "brief.md"
+    brief_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(brief, brief_copy)
+    contract_path = task_dir / "task.yaml"
+    contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
+    lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
+    if not lease.allowed:
+        print(json.dumps(lease.as_dict(), indent=2), file=sys.stderr)
+        return 2
+    code = 2
+    try:
+        code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
+                               task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
+    finally:
+        released = release_lease(task_dir, owner)
+        task.update(status="complete" if code == 0 else "failed", updated_at=utc_now())
+        task["dispatch"]["current_role"] = None
+        contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
+        attempts = [
+            {key: event.get(key) for key in ("account", "backend", "model", "classification",
+                                             "total_cost_usd", "tokens_used")}
+            | {"output_tokens": (event.get("usage") or {}).get("output_tokens")}
+            for event in _read_events(task_dir) if event.get("type") == "worker_attempt"
+        ]
+        print("produce: " + json.dumps({
+            "task_dir": str(task_dir), "exit": code, "status": task["status"],
+            "lease_released": released.allowed, "attempts": attempts,
+        }, ensure_ascii=False), file=sys.stderr)
+    return code
+
+
+def _read_events(task_dir: Path) -> list[dict[str, Any]]:
+    """The task's events, skipping unreadable lines."""
+    path = task_dir / "events.ndjson"
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
 def self_test(root: Path) -> Decision:
     """Run dependency-free policy, routing, authorization, and lease checks."""
     bundle = load_policy(root)
@@ -3255,6 +3459,35 @@ def main(argv: list[str] | None = None) -> int:
         "--assume-stopped", action="store_true",
         help="restore a dispatch that never recorded an outcome; assert its worker has stopped",
     )
+    attempt_parser = subparsers.add_parser("record-attempt", allow_abbrev=False)
+    attempt_parser.add_argument("--task-dir", type=Path, required=True)
+    attempt_parser.add_argument(
+        "--event", required=True,
+        help="JSON object: account, model, classification required; usage, total_cost_usd, "
+             "tokens_used, role, backend, exit, attempt, reason optional",
+    )
+    report_parser = subparsers.add_parser("cost-report", allow_abbrev=False)
+    report_parser.add_argument(
+        "--tasks-root", type=Path, action="append",
+        help="a folder to scan for events.ndjson (repeatable; default: this installation's tasks/)",
+    )
+    report_parser.add_argument("--since", help="ISO date, e.g. 2026-09-30")
+    report_parser.add_argument("--json", action="store_true")
+    produce_parser = subparsers.add_parser("produce", allow_abbrev=False)
+    produce_parser.add_argument("--target-repo", type=Path, required=True)
+    produce_parser.add_argument("--brief", type=Path, required=True)
+    produce_mode = produce_parser.add_mutually_exclusive_group(required=True)
+    produce_mode.add_argument("--write", help="one destination (file or existing directory) in target_repo")
+    produce_mode.add_argument("--out", help="publish the worker's returned text to this path in target_repo")
+    produce_parser.add_argument("--exec", action="store_true", help="with --write, Bash with the named allowlist")
+    produce_parser.add_argument("--role", default="implementer")
+    produce_parser.add_argument("--task-id")
+    produce_parser.add_argument("--tasks-root", type=Path, help="default: this installation's tasks/")
+    produce_parser.add_argument("--owner", default=f"produce-{os.getpid()}")
+    produce_parser.add_argument("--conductor-host", choices=("claude-code", "codex"), default="claude-code")
+    produce_parser.add_argument("--read-scope", nargs="+")
+    produce_parser.add_argument("--min-bytes", type=int, default=MIN_PUBLISH_BYTES)
+    produce_parser.add_argument("--dry-run", action="store_true")
     event_parser = subparsers.add_parser("append-event", allow_abbrev=False)
     event_parser.add_argument("--task-dir", type=Path, required=True)
     event_parser.add_argument("--owner", required=True)
@@ -3328,6 +3561,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "restore-write":
         return _print_decision(
             restore_write(args.task_dir, args.dispatch_id, args.assume_stopped)
+        )
+    if args.command == "record-attempt":
+        return _print_decision(record_attempt(args.task_dir, json.loads(args.event)))
+    if args.command == "cost-report":
+        report = cost_report(args.tasks_root or [args.root / "tasks"], args.since)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            _print_cost_report(report)
+        return 0
+    if args.command == "produce":
+        return produce(
+            bundle, args.target_repo, args.brief.resolve(), write=args.write, out=args.out,
+            exec_bash=args.exec, role=args.role, task_id=args.task_id,
+            tasks_root=args.tasks_root or args.root / "tasks", owner=args.owner,
+            conductor_host=args.conductor_host, read_scope=args.read_scope,
+            min_publish_bytes=args.min_bytes, dry_run=args.dry_run,
         )
     if args.command == "append-event":
         return _print_decision(append_event(args.task_dir, args.owner, json.loads(args.event)))
