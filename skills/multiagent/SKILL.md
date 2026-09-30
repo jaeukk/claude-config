@@ -68,7 +68,7 @@ Run from `multiagent/`, with `E=engine/policy_engine.py`.
    no `task.yaml`.
 4. For the hook to enforce the task, put its ID in `tasks/.active-task`.
 5. `python3 $E dispatch-worker --task tasks/<id>/task.yaml --role <role> --brief <file>`, plus
-   `--write` or `--out` (below). `--dry-run` prints the resolved backend, account and
+   `--write` or `--out` (`references/workers.md`). `--dry-run` prints the resolved backend, account and
    `enforcement` without launching; for `--write`, read `write.enforcement`, not the
    base argv it shows. Before a native spawn under an active contract, set
    `dispatch.current_role` to that role: the hook authorizes the spawn against it. Workers do not
@@ -76,7 +76,7 @@ Run from `multiagent/`, with `E=engine/policy_engine.py`.
    you started is still running: run `dispatch-worker` in the foreground, or wait for a
    backgrounded one to finish before you answer. A headless session (`claude -p`, `codex exec`)
    ends with its turn and kills the worker; the review is lost and its usage goes unrecorded.
-6. Critic and verifier differ in family from the artifact's author (see "Authorship").
+6. Critic and verifier differ in family from the artifact's author (`references/authorship.md`).
 7. Retry only transport, timeout and rate-limit failures; surface the rest; never drop a shard
    silently. Synthesize once, then `release-lease`: it also removes `tasks/.active-task` when that
    names this task, which you cannot do yourself while the hook enforces it. Then mark the task
@@ -149,7 +149,7 @@ Two Claude logins: **private** (`~/.claude`, this session's, the only one with F
 - A native subagent always bills the session's login; no binding changes that.
 - The routes to team are `dispatch-worker` (it sets `CLAUDE_CONFIG_DIR` for the `*-team`
   backends), the `claude-worker` CLI (`~/.local/bin/claude-worker`, no contract or record), and
-  the headless team driver (below).
+  the headless team driver (`references/workers.md`).
 - Quota routing is not a health check. Before selecting a team backend the engine probes that
   account: `available` routes there, `exhausted` (a window at or past 95%) falls to private, and
   `unknown` (an unreadable or rate-limited probe) routes to team anyway. A team run that comes
@@ -174,166 +174,17 @@ Two Claude logins: **private** (`~/.claude`, this session's, the only one with F
   record-attempt --task-dir … --event '<json>'` (`account`, `model`, `classification` required).
   Native subagents leave no record.
 
-### Publishing a worker's text: `--out`
+## Reference (read when needed)
 
-When a worker's returned text is the deliverable (a note, a summary, a review), `--out <path>`
-has the engine write it instead of the conductor:
-
-    python3 $E dispatch-worker --task … --role bulk_worker --brief … --out notes/paper-x.md
-
-It refuses before launch when the suffix is code, the destination is reserved
-(engine state of any task, any `.git*` component, `.claude`, `.codex`, `.vscode`, `.mcp.json`),
-`authorize_action` denies the path, or `--write` is also given. On success the engine writes an
-immutable snapshot, then the destination, then `outputs/<dispatch_id>.json` (account, backend,
-model, attempt, sha256, lease generation). An unsuccessful worker result publishes nothing; its
-`status: failed` record is written only if the lease check and state write succeed. Publication is not atomic: a guard failing partway (lost lease,
-narrowed scope) can leave a snapshot or the destination written with no record; inspect both
-before retrying. A result under 200 UTF-8 bytes after trimming leading and trailing whitespace is `below_min_bytes` and is not
-published, because a one-word refusal also exits 0; pass `--min-bytes` for genuinely short output
-(`0` disables it).
-
-### Landing files: `--write` and `--exec`
-
-`--write <path>` gives a worker one destination (a file, or an existing directory) inside
-`target_repo` and `write_scope`:
-
-    python3 $E dispatch-worker --task … --role implementer --brief … --write src/parser.py --exec
-
-- Only a role with `may_write` (today `implementer`), only a Claude backend, never with `--out`.
-  The worker runs `--restricted` with the file tools and a generated permission file whose `Edit`
-  rules name the destination; any other path has no rule and is refused. Paths containing
-  `*?[]{}!` are refused, not escaped. `--write` is refused while a managed-settings file exists.
-  Nothing under `~/.claude` works as a destination (the CLI asks a human).
-- Before launch the engine copies the destination to `writes/<dispatch_id>.before`;
-  `restore-write --task-dir … --dispatch-id <id>` puts it back, and refuses if the destination
-  changed after the run was recorded. `outputs/<dispatch_id>.json` carries the change set and one
-  of `succeeded`, `succeeded_no_change`, `partial` (failed but changed files), `failed`, or
-  `unknown` (not inspectable; never success). A rate-limited write is not retried. Where git is
-  blind, as in a vault that ignores `40_Resources/`, the baseline is the complete record.
-- `--exec` (requires `--write`) adds `Bash` with a named allowlist: `python3`, `python`, `ls`,
-  `cat`, `head`, `tail`, `sed -n`, `grep`, `wc`, `find`, `git diff`, `git status`, `git log`.
-  **Bash writes are not confined to the destination and are outside the change set**; the brief
-  is their only containment, and the recorded `enforcement` says so. Use it for code with a test
-  oracle: in three runs (2026-09-30) it matched a single session's catches at the same cost (within
-  run-to-run spread) and half a no-Bash implementer's tokens and time.
-- A brief for summary notes must carry the note's frontmatter schema; a worker infers none of it.
-
-### Agent workers needing other tools: the headless team driver
-
-`paper-reviewer` and `book-summarizer` render pages, crop figures and run the vault's gates, which
-are outside `--exec`'s allowlist. The sanctioned route is one headless `claude -p --agent <name>`
-process per chapter under `CLAUDE_CONFIG_DIR=~/.claude-team`, cwd the vault, launched by a driver
-under a contract:
-
-    python3 _shared/adapters/book_summarizer_team.py --task-dir tasks/<id> --job tasks/<id>/job.json
-
-Start from `_templates/book-summarizer-team/`. The conductor supplies the PDF path, page offset and
-per-chapter page ranges in the job. One chapter at a time; `--jobs N` only when the user authorized
-parallel chapters. On rerun, a chapter is skipped when its `x.00` overview note exceeds 2,000
-bytes and carries an `agent:` line. After each attempt the driver runs `record-attempt`, and after each built chapter
-`record-author`, an assertion (see "Authorship"). The
-shell grant is a named allowlist, but nothing intercepts a write: containment is the brief, and the
-contract's `deviations` must say so. The model is the job's (default `claude-sonnet-5-5`).
-
-### What a dispatched worker inherits
-
-A Claude worker inherits nothing from your profile: `--restricted` drops user, project and local
-settings, including plugins, hooks and the global `CLAUDE.md`. The engine appends a baseline (identity, American
-spelling, state assumptions instead of asking, code conventions); vault layout, HPC or Zotero
-details belong in the brief. The worker's cwd is `target_repo`. To read elsewhere, declare
-`read_scope`: absolute existing directories, never `$HOME`, a filesystem root, or anything holding
-credentials or agent configuration. The engine passes them to Claude as `--add-dir`, which also
-grants write, so under `--write` every read root must equal or sit inside the destination.
-
-## Authorship
-
-A reviewer is cleared against what was **observed** producing the artifact, recorded in
-`observed-author.json` beside the contract. `dispatch-worker` records a CLI producer
-(`implementer`, `bulk_worker`) after exit 0, or under `--write` whenever the change set is
-non-empty, failure included. The hook records a
-native producer before the call runs, since PreToolUse cannot see the outcome; a session that did
-not load the hook records nothing. The record accumulates every family that produced part of the
-artifact.
-
-`critic` and `verifier` are refused when the record is unreadable or names an unknown family; when
-it names more than one family (mixed: split the artifact or review by hand); when it contradicts
-`author_family` (fix the contract, not the sidecar); when a `--write` reservation recorded no
-outcome; and when `roles_plan` includes a producer but nothing was observed. The conductor's family
-stands in only for a contract that planned no producer.
-
-`record-author --task-dir … --family … --source …` stores an **assertion**. It only adds families a
-reviewer must differ from. It stands in for a missing observation only when the user has
-recorded `authorship_assertion` under `approvals.user`; then assert every producing family. The
-engine trusts `approvals.user` as the user's word; it authenticates nobody.
-
-A `--out` publication also records its producer in `outputs/<dispatch_id>.json`; a `runner`
-publication is attributed only there.
-
-## Host adapters
-
-- **Claude Code:** several spawns in one message run concurrently.
-- **Codex:** no batch spawn; one `spawn_agent` at a time, at most three live
-  (`max_active_children: 3`). `fork_turns` defaults to `all`, and a full-history fork accepts no
-  `model` or `reasoning_effort`; when setting either, pass `fork_turns: "none"` or a positive
-  integer string.
-- Codex's child API reaches Codex models only. Fill a cross-family role with `dispatch-worker`,
-  which runs the resolved backend's CLI with the brief on stdin, never with `spawn_agent`.
-
-The engine counts CLI workers on the lease against `min(max_fanout, max_active_children)`, so a
-real dispatch needs a live lease you own. It bounds accidental fan-out; it is not a
-security boundary. A process killed mid-update leaves
-`tasks/<id>/lease.lock`: every later lease operation times out naming it, and expiry does not clear
-it. Stop the task's processes and delete it by hand.
-
-The dry run reports `enforcement`:
-
-| Host | Enforcement | Meaning |
-|---|---|---|
-| `codex` | `os-sandbox-read-only` | The OS refuses writes. |
-| `claude-code` | `restricted-tool-surface` | `--tools Read,Grep,Glob` removes Bash and the write tools; `--strict-mcp-config` drops MCP servers. Binds the agent, not the process. `--write` and `--exec` extend it (`write.enforcement`; the write record). |
-
-## Conductor host support
-
-A host may conduct when all three hold, each machine-checked:
-
-1. Its backend is a candidate of the `conductor` binding (`claude-frontier`, `codex-frontier`).
-2. Its host has a `conductor_adapters` entry in `routing.yaml`.
-3. That entry's `dispatch_hosts` reaches an independent `critic` and `verifier` for every author
-   family. `dispatch_hosts` fails closed: omit it and the adapter dispatches nothing.
-
-**Codex.** `engine/adapters/codex_pretool.py`, registered in `~/.codex/hooks.json`, applies the
-Claude hook's rules to Codex: shell commands, every file an `apply_patch` touches, and
-`spawn_agent` children (as family `codex`, so a Codex child cannot review Codex work). It fails
-open: Codex runs the call if the hook is untrusted, crashes or times out, and editing the hook
-entry's command, matcher or timeout voids its trust silently until it is re-trusted (the hash is
-in `codex app-server`'s `hooks/list`). Call `python3 $E authorize --task … --action '<json>'` for
-anything the hook does not see.
-
-**Claude Code.** The hook sees tool calls only. It denies what looks like a worker CLI typed into
-Bash, but that match is a heuristic; an absolute path or a variable defeats it.
-
-A host with no conductor adapter takes no lease and operates advisory.
-
-`agy` (Gemini) is not wired; revive it from commit `8e57af8`. With two families, one vendor's
-outage leaves `critic` and `verifier` with no independent candidate.
-
-## Two gaps
-
-**What cannot land.** A Codex implementer returns a patch, and nothing applies one:
-`apply-worker-patch` does not exist, and the hook denies `git apply` during an active task. Apply
-it by hand with file tools, or use a Claude implementer with `--write`.
-
-**What cannot execute.** Among CLI-dispatched Claude workers, only a `--write --exec` producer gets
-Bash; a Claude critic or verifier reads tests but cannot run them. A Codex worker can run commands,
-but its default read-only sandbox blocks every write, temp files included, so a suite that needs a
-temporary directory errors (4 of 4 Stage 1 critic runs). Add `--review-copy` to a Codex critic or
-verifier dispatch: the engine copies `target_repo` (without `.git`, caches and virtual environments;
-refused above 20,000 files or 500 MB) into a fresh temporary folder, runs Codex there with
-`--sandbox workspace-write` (`/tmp` excluded, `TMPDIR` inside that folder), and deletes it
-afterwards; the original stays read-only
-(measured 2026-09-30: 281 tests ran, OK). Codex-authored work's verifier is `claude-mid-team`
-first, which cannot run tests; for executed evidence there, run the suite yourself or spawn a native
-Claude verifier under the hook. Report executed verification only for checks that actually ran.
+- `references/workers.md`: `--out` publication, `--write` and `--exec`, the headless team driver,
+  and what a dispatched worker inherits. Read it before dispatching a worker that publishes text or
+  writes files.
+- `references/authorship.md`: how a critic or verifier is cleared against the artifact's authors.
+  Read it when a reviewer is refused, or when more than one family produced the artifact.
+- `references/hosts.md`: Claude Code and Codex spawn limits, which hosts may conduct and how each
+  is enforced, and what cannot land or execute (`--review-copy`). Read it when conducting from
+  Codex, or when a reviewer must run tests.
+- `references/model-refresh-2026-09-27.md`: the model evidence behind the tier table.
 
 ## Approval and enforcement
 

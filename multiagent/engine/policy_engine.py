@@ -3478,7 +3478,7 @@ def produce(
     no producer, so the artifact's author is the conductor's own family and the binding picks a
     reviewer of the other family; a critic gets ``audit_cycles`` 1. The call blocks until the
     reviewer finishes, so a conductor cannot end its turn with the review still running (bench8).
-    Work authored by another family needs the full procedure (see SKILL.md, "Authorship").
+    Work authored by another family needs the full procedure (skills/multiagent/references/authorship.md).
     """
     def refuse(reason: str, details: dict[str, Any] | None = None) -> int:
         print(json.dumps(Decision(False, reason, details).as_dict(), indent=2), file=sys.stderr)

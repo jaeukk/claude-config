@@ -34,6 +34,8 @@
     refusals drop to the 8 real writes); refusal messages say what to do instead.
   - SKILL.md: no contract, lease or pointer when nothing is dispatched or reviewed.
   - `multiagent/CLAUDE.md`/`AGENTS.md`: reading the karpathy guidelines in full is no longer a required first step.
+  - SKILL.md 3,530 → 2,094 words: `--out`/`--write`/driver/inheritance, Authorship and the host sections
+    moved verbatim to `references/{workers,authorship,hosts}.md`, with a read-when index.
 
 ## [1.5.0] - 2026-09-30
 
