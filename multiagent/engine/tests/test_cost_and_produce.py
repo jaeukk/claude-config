@@ -671,6 +671,105 @@ class CodexLimitClassificationTest(unittest.TestCase):
         self.assertEqual(self.classify(0, self.CAPTURED), "ok")
 
 
+class ReviewCopyTest(unittest.TestCase):
+    """--review-copy: a Codex reviewer runs with a writable sandbox in a disposable copy (step 5)."""
+
+    CODEX = {"backend": "codex-ceiling", "host": "codex", "family": "codex", "model": "gpt-x",
+             "effort": "medium", "account": "private"}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bundle = pe.load_policy(ROOT)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.repo = base / "repo"
+        (self.repo / ".git").mkdir(parents=True)
+        (self.repo / ".git" / "HEAD").write_text("ref", encoding="utf-8")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "x.py").write_text("print(1)\n", encoding="utf-8")
+        self.task_dir = base / "task"
+        self.task_dir.mkdir()
+        self.brief = self.task_dir / "brief.md"
+        self.brief.write_text("review it", encoding="utf-8")
+        self.contract_path = self.task_dir / "task.yaml"
+        self.contract = {
+            "schema_version": 1, "task_id": "t", "status": "active", "target_repo": str(self.repo),
+            "write_scope": [], "roles_plan": ["critic"], "audit_cycles": 1, "author_family": "claude",
+            "approvals": {"user": []}, "dispatch": {"current_role": "critic"},
+            "conductor": {"host": "claude-code", "backend": "claude-frontier", "lease_owner": "me"},
+        }
+        self.contract_path.write_text(json.dumps(self.contract), encoding="utf-8")
+        self.assertTrue(pe.acquire_lease(self.task_dir, "me", 600).allowed)
+
+    def dispatch(self, backend=None, role="critic", dry_run=False, run=None):
+        seen = {}
+
+        def fake_run(command, **kwargs):
+            seen.update(command=command, **kwargs)
+            if run:
+                run(Path(kwargs["cwd"]))
+            return subprocess.CompletedProcess(command, 0, stdout=None, stderr="tokens used\n5\n")
+
+        with mock.patch.object(pe.subprocess, "run", side_effect=fake_run), \
+                mock.patch.object(pe.shutil, "which", return_value="/usr/bin/codex"), \
+                mock.patch.object(pe, "_resolve_with_account",
+                                  return_value=(pe.Decision(True, "resolved", backend or self.CODEX), "stub")), \
+                mock.patch.object(pe.sys, "stdout"), mock.patch.object(pe.sys, "stderr"):
+            code = pe.dispatch_worker(
+                self.bundle, dict(self.contract), role, self.brief, "native", dry_run, None,
+                self.task_dir, self.task_dir, None, self.contract_path, 0, None, False, True)
+        return code, seen
+
+    def test_the_reviewer_writes_in_a_copy_that_is_removed_and_the_original_is_untouched(self):
+        def run(cwd):
+            self.assertNotEqual(cwd.resolve(), self.repo.resolve())
+            self.assertTrue(cwd.parent.name.startswith("multiagent-review-"))
+            self.assertTrue((cwd / "src" / "x.py").exists())
+            self.assertFalse((cwd / ".git").exists())
+            (cwd / "scratch.txt").write_text("test output", encoding="utf-8")
+
+        code, seen = self.dispatch(run=run)
+        self.assertEqual(code, 0)
+        self.assertIn("workspace-write", seen["command"])
+        self.assertIn("disposable copy of the repository", seen["input"])
+        self.assertFalse(Path(seen["cwd"]).parent.exists())
+        self.assertFalse((self.repo / "scratch.txt").exists())
+        event = [e for e in pe._read_events(self.task_dir) if e.get("type") == "worker_attempt"][0]
+        self.assertTrue(event["review_copy"])
+
+    def test_only_a_codex_critic_or_verifier_may_use_it(self):
+        code, seen = self.dispatch(role="implementer")
+        self.assertEqual((code, seen), (2, {}))
+        claude = {"backend": "claude-ceiling", "host": "claude-code", "family": "claude",
+                  "model": "m", "effort": "high", "account": "private"}
+        code, seen = self.dispatch(backend=claude)
+        self.assertEqual((code, seen), (2, {}))
+        with self.assertRaises(NotImplementedError):
+            pe.build_worker_command(claude, "native", self.repo, "critic", review_copy=True)
+
+    def test_a_target_over_the_limit_is_refused_before_copying(self):
+        with mock.patch.object(pe, "REVIEW_COPY_MAX_FILES", 0), \
+                mock.patch.object(pe.tempfile, "mkdtemp") as made:
+            code, seen = self.dispatch()
+        self.assertEqual((code, seen), (2, {}))
+        made.assert_not_called()
+
+    def test_a_dry_run_makes_no_copy_and_the_default_stays_read_only(self):
+        with mock.patch.object(pe.tempfile, "mkdtemp") as made:
+            code, seen = self.dispatch(dry_run=True)
+        self.assertEqual(code, 0)
+        made.assert_not_called()
+        with mock.patch.object(pe.shutil, "which", return_value="/usr/bin/codex"):
+            plain = pe.build_worker_command(self.CODEX, "native", self.repo, "critic")[1]
+            copied = pe.build_worker_command(self.CODEX, "native", self.repo, "critic", review_copy=True)[1]
+        self.assertIn("read-only", plain.args)
+        self.assertNotIn("workspace-write", plain.args)
+        self.assertEqual(copied.enforcement, pe.REVIEW_COPY_ENFORCEMENT)
+
+
 class Round3AccountingTest(unittest.TestCase):
     def test_an_integer_past_the_digit_limit_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as tmp:

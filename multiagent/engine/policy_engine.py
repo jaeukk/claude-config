@@ -49,6 +49,15 @@ EXEC_BASH_ALLOW = (
     "git diff", "git status", "git log",
 )
 WRITE_ENFORCEMENT = "restricted-tool-surface + single-destination write allowlist"
+REVIEW_COPY_ENFORCEMENT = (
+    "os-sandbox-workspace-write in a disposable copy of target_repo; the original is outside the "
+    "writable root, and the copy is deleted afterwards"
+)
+#: What ``--review-copy`` leaves out of the disposable copy, and how large a target it copies.
+#: Above the limits the dispatch is refused rather than copying a vault-sized tree per review.
+REVIEW_COPY_IGNORE = (".git", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cache", ".pytest_cache")
+REVIEW_COPY_MAX_FILES = 20_000
+REVIEW_COPY_MAX_BYTES = 500 * 1024 * 1024
 EXEC_ENFORCEMENT = (
     f"{WRITE_ENFORCEMENT} + Bash limited to a named command allowlist; Bash writes are not "
     "confined to the destination and are outside the change set"
@@ -1335,6 +1344,7 @@ class WorkerCommand:
     env: dict[str, str] = field(default_factory=dict)
     result_file: Path | None = None
     bash_allowed: bool = False
+    review_copy: bool = False
 
 
 def _codex_cli(
@@ -1438,7 +1448,7 @@ def worker_cli_args(
 def build_worker_command(
     backend: dict[str, Any], host_mode: str, target_repo: Path, role: str | None = None,
     capture_result: bool = False, write_settings: Path | None = None,
-    read_roots: list[str] | None = None, exec_bash: bool = False,
+    read_roots: list[str] | None = None, exec_bash: bool = False, review_copy: bool = False,
 ) -> tuple[list[str], WorkerCommand]:
     """Resolve a worker launch specification into a native argv.
 
@@ -1482,6 +1492,15 @@ def build_worker_command(
         )
     elif exec_bash:
         raise ValueError("--exec needs --write: Bash is granted only to a write-mode worker")
+    if review_copy:
+        if spec.program != "codex":
+            raise NotImplementedError(
+                "--review-copy runs a Codex reviewer; a CLI-dispatched Claude reviewer has no Bash"
+            )
+        args = list(spec.args)
+        args[args.index("read-only")] = "workspace-write"
+        spec = dataclasses.replace(spec, args=args, enforcement=REVIEW_COPY_ENFORCEMENT,
+                                   review_copy=True)
     if host_mode == "native":
         executable = (
             shutil.which(f"{spec.program}.cmd") or shutil.which(spec.program)
@@ -1720,6 +1739,7 @@ def _record_attempt(
     bundle: PolicyBundle, task_dir: Path, owner: str, generation: str | None,
     contract_path: Path, role: str, backend: dict[str, Any], number: int,
     reason: str, attempt: accounts.Attempt, dispatch_id: str,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     """Append one attempt record to the task's events; never fatal.
 
@@ -1735,7 +1755,7 @@ def _record_attempt(
     recorded = _append_state_event(bundle, task_dir, owner, generation, contract_path, {
         "type": "worker_attempt", "dispatch_id": dispatch_id, "role": role,
         "backend": backend["backend"], "attempt": number, "reason": reason,
-        **attempt.as_event(), **attempt_cost(attempt),
+        **attempt.as_event(), **attempt_cost(attempt), **(extra or {}),
     })
     if not recorded.allowed:
         print(f"warning: attempt not recorded: {recorded.reason}", file=sys.stderr)
@@ -2404,6 +2424,35 @@ def _commit_out(
     )
 
 
+def _make_review_copy(target_repo: Path) -> tuple[Path, Path]:
+    """Copy ``target_repo`` into a fresh temporary folder for ``--review-copy``.
+
+    Returns ``(root, workdir)``: ``root`` is the engine's own ``mkdtemp`` folder, removed by the
+    caller afterwards; ``workdir`` is the copy the reviewer runs in. Links are copied as links, so
+    one pointing back at the original resolves outside the writable root and stays read-only.
+    Refuses a target above ``REVIEW_COPY_MAX_FILES`` or ``REVIEW_COPY_MAX_BYTES``.
+    """
+    files = size = 0
+    for folder, subfolders, names in os.walk(target_repo):
+        subfolders[:] = [d for d in subfolders if d not in REVIEW_COPY_IGNORE]
+        for name in names:
+            files += 1
+            try:
+                size += (Path(folder) / name).lstat().st_size
+            except OSError:
+                pass
+        if files > REVIEW_COPY_MAX_FILES or size > REVIEW_COPY_MAX_BYTES:
+            raise ValueError(
+                f"--review-copy refused: {target_repo} exceeds {REVIEW_COPY_MAX_FILES} files or "
+                f"{REVIEW_COPY_MAX_BYTES // (1024 * 1024)} MB"
+            )
+    root = Path(tempfile.mkdtemp(prefix="multiagent-review-"))
+    workdir = root / (target_repo.name or "repo")
+    shutil.copytree(target_repo, workdir, symlinks=True,
+                    ignore=shutil.ignore_patterns(*REVIEW_COPY_IGNORE))
+    return root, workdir
+
+
 def dispatch_worker(
     bundle: PolicyBundle,
     task: dict[str, Any],
@@ -2419,6 +2468,7 @@ def dispatch_worker(
     min_publish_bytes: int = MIN_PUBLISH_BYTES,
     write_path: str | None = None,
     exec_bash: bool = False,
+    review_copy: bool = False,
 ) -> int:
     """Dispatch one bounded worker as a subprocess.
 
@@ -2441,6 +2491,11 @@ def dispatch_worker(
     if exec_bash and write_path is None:
         print(json.dumps(Decision(
             False, "--exec needs --write: Bash is granted only to a write-mode worker"
+        ).as_dict(), indent=2), file=sys.stderr)
+        return 2
+    if review_copy and role not in {"critic", "verifier"}:
+        print(json.dumps(Decision(
+            False, f"--review-copy is for a critic or verifier, not {role}"
         ).as_dict(), indent=2), file=sys.stderr)
         return 2
     if role == "critic":
@@ -2652,9 +2707,15 @@ def dispatch_worker(
     target_repo = Path(task["target_repo"]).resolve()
     write_settings_path: Path | None = None
     baseline: dict[str, Any] | None = None
+    if review_copy and backend["host"] != "codex":
+        print(json.dumps(Decision(
+            False, f"--review-copy needs a Codex reviewer; {role} resolved to {backend['backend']}, "
+                   "a Claude CLI worker with no Bash"
+        ).as_dict(), indent=2), file=sys.stderr)
+        return 2
     command, spec = build_worker_command(
         backend, host_mode, target_repo, role, capture_result=out_path is not None,
-        write_settings=write_settings_path, read_roots=read_roots,
+        write_settings=write_settings_path, read_roots=read_roots, review_copy=review_copy,
     )
     if dry_run:
         print(json.dumps(
@@ -2669,6 +2730,7 @@ def dispatch_worker(
                 "probe": probe_reason,
                 "out": None if destination is None else str(destination),
                 "read_roots": read_roots,
+                "review_copy": "a disposable copy of target_repo, made at launch" if review_copy else None,
                 # Named in the preview because the real command differs: write mode adds
                 # `--restricted`, the file tools, and a generated permission file. A dry run
                 # that showed the read-only argv would preview something that never runs.
@@ -2695,6 +2757,7 @@ def dispatch_worker(
     # a heartbeat the lease expires mid-run, another conductor may take the task
     # while the worker is still going, and the release lands on a lease that
     # never counted it.
+    copy_root: Path | None = None
     stop_heartbeat = threading.Event()
     heartbeat = threading.Thread(
         target=_heartbeat_until, args=(slots, owner, generation, stop_heartbeat), daemon=True
@@ -2748,13 +2811,20 @@ def dispatch_worker(
                 backend, host_mode, target_repo, role, capture_result=False,
                 write_settings=write_settings_path, read_roots=read_roots, exec_bash=exec_bash,
             )
+        run_dir = target_repo
+        if review_copy:
+            try:
+                copy_root, run_dir = _make_review_copy(target_repo)
+            except (OSError, ValueError, shutil.Error) as error:
+                print(json.dumps(Decision(False, str(error)).as_dict(), indent=2), file=sys.stderr)
+                return 2
         attempt = _run_worker(
-            command, spec, task, role, brief_path, target_repo, backend,
+            command, spec, task, role, brief_path, run_dir, backend,
             None if write_target is None else str(write_target),
         )
         _record_attempt(
             bundle, slots, owner, generation, contract_path, role, backend, 1,
-            probe_reason, attempt, dispatch_id,
+            probe_reason, attempt, dispatch_id, {"review_copy": True} if review_copy else None,
         )
         attempt_number = 1
         if attempt.classification == "rate_limited" and backend.get("account") == "team":
@@ -2928,6 +2998,8 @@ def dispatch_worker(
         # A worker that crashed still freed its slot, and leaking one would
         # shrink the ceiling for the rest of the task. The release can still be
         # refused across a reacquired lease -- reported below, never silent.
+        if copy_root is not None:
+            shutil.rmtree(copy_root, ignore_errors=True)  # the engine's own mkdtemp folder
         stop_heartbeat.set()
         heartbeat.join(timeout=5)
         released = release_worker_slot(slots, owner, generation)
@@ -3005,6 +3077,10 @@ def _run_worker(
             f"You may write only inside {write_destination}; every other path is refused, so "
             "nothing you write elsewhere will land. "
             if write_destination is not None else
+            "You are working in a disposable copy of the repository: run its tests or anything "
+            "else you need to check your findings; nothing you write there is kept, and the "
+            "original is not writable. Report what you ran and what it showed. "
+            if spec.review_copy else
             "Do not write to the filesystem; return a structured review, evidence, or an "
             "applicable patch instead. "
         )
@@ -3703,6 +3779,11 @@ def main(argv: list[str] | None = None) -> int:
              "the worker stays read-only and the engine performs the write",
     )
     dispatch_parser.add_argument(
+        "--review-copy", action="store_true",
+        help="run a Codex critic or verifier with a writable sandbox in a disposable copy of "
+             "target_repo, so it can run the tests; the original stays read-only",
+    )
+    dispatch_parser.add_argument(
         "--exec", action="store_true",
         help="with --write, also give the worker Bash limited to a named command allowlist "
              "(for code with tests to run); Bash writes are not confined to the destination",
@@ -3779,7 +3860,7 @@ def main(argv: list[str] | None = None) -> int:
         return dispatch_worker(
             bundle, load_document(args.task), args.role, args.brief, "native", args.dry_run,
             args.required_family, args.task_dir or args.task.parent, args.task.parent,
-            args.out, args.task, args.min_bytes, args.write, args.exec,
+            args.out, args.task, args.min_bytes, args.write, args.exec, args.review_copy,
         )
     if args.command == "self-test":
         return _print_decision(self_test(args.root))

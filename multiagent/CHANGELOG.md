@@ -9,6 +9,8 @@
 - SKILL.md "Review discipline": agree the threat model, the blocking bar, the round plan and the stop
   rule before the first critic round (the global CLAUDE.md rule reaches Claude sessions only; Codex
   conductors read the skill).
+- `dispatch-worker --review-copy` (Codex critic or verifier): a writable sandbox in a disposable
+  copy of `target_repo`, so the reviewer can run the tests; the original stays read-only.
 
 ### Changed
 - A Codex usage-limit exit is recorded as `rate_limited`, not `error` (only the last stderr lines are
