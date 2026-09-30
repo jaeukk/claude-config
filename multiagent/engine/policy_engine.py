@@ -700,7 +700,7 @@ def _lease_lock(task_dir: Path, timeout: float = 10.0) -> Any:
     deadline = time.monotonic() + timeout
     while True:
         try:
-            os.close(os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL))
+            handle = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
             break
         except FileExistsError:
             if time.monotonic() >= deadline:
@@ -714,7 +714,18 @@ def _lease_lock(task_dir: Path, timeout: float = 10.0) -> Any:
     try:
         yield
     finally:
-        lock_path.unlink(missing_ok=True)
+        # Remove the lock only if it is still the file this holder created: a lock someone
+        # replaced (against the protocol) is left for them. The check and the unlink are two
+        # steps, so this narrows that case rather than closing it; a pathname lock cannot.
+        try:
+            ours = os.fstat(handle)
+            current = os.stat(lock_path)
+            if (ours.st_dev, ours.st_ino) == (current.st_dev, current.st_ino):
+                lock_path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
+        finally:
+            os.close(handle)
 
 
 def _write_lease(lease_path: Path, payload: dict[str, Any]) -> None:
@@ -724,8 +735,11 @@ def _write_lease(lease_path: Path, payload: dict[str, Any]) -> None:
     strands the task; ``os.replace`` makes the update all-or-nothing so an
     unlocked reader sees either the old payload or the new one.
     """
-    temporary = lease_path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    # An exclusively created, randomly named temporary file: a fixed name would truncate (or
+    # follow a link to) whatever file sat there. Left in place on failure, never unlinked by name.
+    handle, temporary = tempfile.mkstemp(dir=lease_path.parent, prefix=".lease.", suffix=".tmp")
+    with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload, indent=2) + "\n")
     os.replace(temporary, lease_path)
 
 

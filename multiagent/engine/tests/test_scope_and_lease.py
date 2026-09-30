@@ -107,5 +107,33 @@ class LeaseNeedsContractTest(unittest.TestCase):
             pe.main(["acquire-lease", "--task", str(self.root), "--owner", "me"])
 
 
+
+class LeaseFilesPreservationTest(unittest.TestCase):
+    """The lease layer never truncates or deletes a file it did not create (audit round 11)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.task_dir = Path(self.tmp.name)
+        (self.task_dir / "task.yaml").write_text("{}", encoding="utf-8")
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_a_file_at_the_old_fixed_temporary_name_survives_a_lease_write(self):
+        planted = self.task_dir / "lease.json.tmp"
+        planted.write_text("FOREIGN", encoding="utf-8")
+        self.assertTrue(pe.acquire_lease(self.task_dir, "me").allowed)
+        self.assertTrue(pe.heartbeat_lease(self.task_dir, "me", 600).allowed)
+        self.assertEqual(planted.read_text(), "FOREIGN")
+        self.assertEqual(list(self.task_dir.glob(".lease.*.tmp")), [])
+
+    def test_the_lock_is_removed_on_exit_unless_someone_replaced_it(self):
+        lock = self.task_dir / "lease.lock"
+        with pe._lease_lock(self.task_dir):
+            self.assertTrue(lock.exists())
+        self.assertFalse(lock.exists())
+        with pe._lease_lock(self.task_dir):
+            lock.unlink()
+            lock.write_text("theirs", encoding="utf-8")
+        self.assertEqual(lock.read_text(), "theirs")
+
 if __name__ == "__main__":
     unittest.main()
