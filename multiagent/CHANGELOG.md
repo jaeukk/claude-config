@@ -27,6 +27,13 @@
     state there stays refused. Before this, a critic brief could not be written mid-task at all.
   - SKILL.md: never end a turn while a dispatch you started is running (a headless session killed its
     critic); do not open other tasks' folders as examples; task IDs are lowercase.
+- Fewer conductor turns (bench8: multiagent runs took 2–5× vanilla's turns, most of them ceremony):
+  - `policy_engine.py review --target-repo … --brief … --out … [--review-copy]`: one review round in one
+    foreground call (`produce` with a critic or verifier role; the author is the conductor's family).
+  - The shell rule refuses file writes only: a quoted `>`, `2>&1`, `/dev/null` and `>(…)` pass (bench8's 23
+    refusals drop to the 8 real writes); refusal messages say what to do instead.
+  - SKILL.md: no contract, lease or pointer when nothing is dispatched or reviewed.
+  - `multiagent/CLAUDE.md`/`AGENTS.md`: reading the karpathy guidelines in full is no longer a required first step.
 
 ## [1.5.0] - 2026-09-30
 

@@ -49,7 +49,8 @@ Old contracts carrying them are accepted and ignored.
 2. Run `policy_engine.py validate-policy` and `validate-task`, then
    `acquire-lease --task-dir tasks/<task-id> --owner <lease_owner>`. `acquire-lease`,
    `append-event` and `record-attempt` refuse a folder with no `task.yaml`. For a single
-   producer with no review, `produce` runs steps 1–2 and the dispatch in one call. `dispatch-worker` refuses without a live lease you own,
+   producer with no review, `produce` runs steps 1–2 and the dispatch in one call; for one review round of the conductor's own
+   work, `review` does the same with a critic of the other family. `dispatch-worker` refuses without a live lease you own,
    since that is where it counts CLI workers. A natively spawned worker is not stopped by a
    missing lease: there, holding the lease first is the cooperating-conductor protocol.
 3. Put only the task ID in `tasks/.active-task` while the hook should enforce the task.
