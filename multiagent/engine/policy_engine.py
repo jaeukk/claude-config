@@ -3295,11 +3295,19 @@ def produce(
         brief_copy.parent.mkdir(parents=True)
         brief_copy.write_bytes(brief_bytes)
         # `pending` until this run holds the lease: a contract is written only by whoever owns
-        # the task, and before the lease nobody does.
-        contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
+        # the task, and before the lease nobody does. It is written privately and published by
+        # an exclusive hard link as the last setup step, so `task.yaml` appears complete or not
+        # at all -- and until it appears, no lease can be taken here (acquire-lease needs it).
+        handle, staging = tempfile.mkstemp(dir=task_dir, prefix=".task.", suffix=".tmp")
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(task, indent=2) + "\n")
+        os.link(staging, contract_path)
     except OSError as error:
-        shutil.rmtree(task_dir, ignore_errors=True)  # this call created it a moment ago
+        # Nothing here was ever visible as a task (the link is the last step and is atomic), so
+        # removing the folder this call just created cannot take anyone else's lease with it.
+        shutil.rmtree(task_dir, ignore_errors=True)
         return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error})")
+    Path(staging).unlink(missing_ok=True)
     code, generation, lease_note = 2, None, "not acquired"
     try:
         lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)

@@ -451,6 +451,25 @@ class ProduceRound3Test(ProduceFixture):
         self.assertFalse((self.task_dir / "lease.json").exists())
         self.assertEqual(self.contract()["status"], "complete")
 
+    def test_a_failed_contract_publish_leaves_nothing_behind(self):
+        # Round 5: the contract appears by one atomic link as the last setup step, so a setup
+        # failure happens before any lease could exist, and the cleanup removes only this call's
+        # folder.
+        acquired = []
+        with mock.patch.object(pe.os, "link", side_effect=OSError(28, "No space left on device")), \
+                mock.patch.object(pe, "acquire_lease", side_effect=lambda *a: acquired.append(a)), \
+                mock.patch.object(pe.sys, "stderr"):
+            code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                              owner="me", task_id="t1", write="src/x.py")
+        self.assertEqual((code, acquired), (2, []))
+        self.assertFalse(self.task_dir.exists())
+
+    def test_a_published_contract_is_complete_and_no_staging_file_remains(self):
+        code, summary = self.run_capturing(lambda *a, **k: 0)
+        self.assertEqual(code, 0)
+        self.assertEqual(pe.validate_task(self.bundle, self.contract())[0], [])
+        self.assertEqual(list(self.task_dir.glob(".task.*.tmp")), [])
+
     def test_an_unreadable_brief_reserves_nothing_and_the_id_stays_free(self):
         with mock.patch.object(pe.sys, "stderr"), \
                 mock.patch.object(pe, "dispatch_worker", return_value=0):
