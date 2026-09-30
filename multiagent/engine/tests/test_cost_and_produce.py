@@ -643,6 +643,33 @@ class ProduceInterruptTest(ProduceFixture):
         self.assertTrue((self.task_dir / "workers" / "implementer" / "brief.md").exists())
 
 
+class CodexLimitClassificationTest(unittest.TestCase):
+    """A Codex usage-limit exit is `rate_limited`, not `error` (OPEN_ITEMS A10, captured 2026-09-23)."""
+
+    CAPTURED = ("ERROR: You\u2019ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
+                "to purchase more credits or try again at Sep 28th, 2026 6:24 PM.\n")
+
+    def classify(self, returncode, stderr):
+        spec = pe._codex_cli({"model": "m", "effort": "low"})
+        done = subprocess.CompletedProcess([], returncode, stdout=None, stderr=stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            brief = Path(tmp) / "brief.md"
+            brief.write_text("b", encoding="utf-8")
+            with mock.patch.object(pe.subprocess, "run", return_value=done):
+                return pe._run_worker(["codex"], spec, {"task_id": "t"}, "critic", brief,
+                                      Path(tmp), {"model": "m"}).classification
+
+    def test_the_captured_usage_limit_is_rate_limited(self):
+        self.assertEqual(self.classify(1, "progress...\n" + self.CAPTURED), "rate_limited")
+
+    def test_reviewed_text_that_mentions_rate_limits_is_not_a_limit(self):
+        log = "codex\nThe test covers the 429 rate limit branch of classify.\nERROR: stream disconnected\n"
+        self.assertEqual(self.classify(1, log), "error")
+
+    def test_a_clean_exit_is_ok_whatever_stderr_says(self):
+        self.assertEqual(self.classify(0, self.CAPTURED), "ok")
+
+
 class Round3AccountingTest(unittest.TestCase):
     def test_an_integer_past_the_digit_limit_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as tmp:

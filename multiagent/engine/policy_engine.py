@@ -1685,6 +1685,11 @@ def _emit_attempt(attempt: accounts.Attempt) -> None:
     sys.stderr.write(attempt.stderr)
 
 
+#: A Codex run stopped by its plan's usage window says so in its own ``ERROR:`` line on stderr, with
+#: exit 1 and no HTTP status, e.g. "ERROR: You’ve hit your usage limit. ... try again at Sep 28th,
+#: 2026 6:24 PM." (captured 2026-09-23). Only Codex's own error lines are read: its stderr also
+#: carries the progress log, which can quote reviewed text that mentions rate limits.
+CODEX_LIMIT = re.compile(r"^ERROR:.*(usage limit|rate[ _-]?limit|\b429\b)", re.IGNORECASE | re.MULTILINE)
 #: Codex prints its run's token total on stderr as ``tokens used`` then the number.
 CODEX_TOKENS_USED = re.compile(r"tokens used\s*\n?\s*([\d,]+)")
 
@@ -3029,7 +3034,11 @@ def _run_worker(
                 text=True, check=False, **streams,
             )
         if not capture:
-            classification = "ok" if completed.returncode == 0 else "error"
+            classification = (
+                "ok" if completed.returncode == 0
+                else "rate_limited" if CODEX_LIMIT.search(completed.stderr or "")
+                else "error"
+            )
             return accounts.Attempt(
                 account, config_dir, model, completed.returncode, classification, None, "",
                 completed.stderr or "",
