@@ -2452,8 +2452,15 @@ def _make_review_copy(target_repo: Path) -> tuple[Path, Path]:
                 f"--review-copy refused: {target_repo} exceeds {REVIEW_COPY_MAX_FILES} files or "
                 f"{REVIEW_COPY_MAX_BYTES // (1024 * 1024)} MB"
             )
+    temporary = Path(tempfile.gettempdir()).resolve()
+    if temporary == target_repo or target_repo in temporary.parents:
+        # The copy would land inside its own source and copy itself until something breaks.
+        raise ValueError(
+            f"--review-copy refused: the temporary directory {temporary} is inside target_repo; "
+            "point TMPDIR elsewhere"
+        )
     root = Path(tempfile.mkdtemp(prefix="multiagent-review-"))
-    workdir = root / (target_repo.name or "repo")
+    workdir = root / "repo"  # fixed, and distinct from root / "tmp"
     try:
         (root / "tmp").mkdir()
         shutil.copytree(target_repo, workdir, symlinks=True,
@@ -2471,10 +2478,13 @@ def _remove_review_copy(root: Path) -> None:
     and retried; whatever still cannot be removed is reported, never silently left.
     """
     def force(function: Any, path: str, _error: Any) -> None:
-        # Deleting an entry needs its folder writable, so both are opened up before the retry.
+        # Deleting an entry needs its folder writable, so the folder (always inside `root`) is
+        # opened up before the retry. A link's own mode is never changed: chmod would follow it
+        # to the original the link points at.
         try:
             os.chmod(os.path.dirname(path), 0o700)
-            os.chmod(path, 0o700)
+            if not os.path.islink(path):
+                os.chmod(path, 0o700)
             function(path)
         except OSError:
             pass

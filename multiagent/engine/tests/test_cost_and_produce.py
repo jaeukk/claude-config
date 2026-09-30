@@ -822,6 +822,38 @@ class ReviewCopyTest(unittest.TestCase):
             pe._remove_review_copy(stuck)
         self.assertIn("could not be fully removed", err.getvalue())
 
+    def test_cleanup_never_changes_an_original_through_a_link(self):
+        # Round 1 (step 5), finding 1: chmod follows links.
+        original = Path(self.tmp.name) / "original.txt"
+        original.write_text("keep", encoding="utf-8")
+        original.chmod(0o444)
+        root = Path(tempfile.mkdtemp(prefix="multiagent-review-test-"))
+        (root / "sub").mkdir()
+        (root / "sub" / "link").symlink_to(original)
+        (root / "sub").chmod(0o500)
+        pe._remove_review_copy(root)
+        self.assertFalse(root.exists())
+        self.assertEqual(original.stat().st_mode & 0o777, 0o444)
+        original.chmod(0o644)
+
+    def test_a_temporary_directory_inside_the_target_is_refused(self):
+        # Round 1 (step 5), finding 2: the copy would copy itself.
+        with mock.patch.object(pe.tempfile, "gettempdir", return_value=str(self.repo / ".tmp")), \
+                mock.patch.object(pe.tempfile, "mkdtemp") as made:
+            code, seen = self.dispatch()
+        self.assertEqual((code, seen), (2, {}))
+        made.assert_not_called()
+
+    def test_a_repository_named_tmp_can_be_reviewed(self):
+        # Round 1 (step 5), finding 3: the copy and TMPDIR used to collide.
+        renamed = self.repo.parent / "tmp"
+        self.repo.rename(renamed)
+        self.repo = renamed
+        self.contract["target_repo"] = str(renamed)
+        code, seen = self.dispatch()
+        self.assertEqual(code, 0)
+        self.assertNotEqual(Path(seen["cwd"]), Path(seen["env"]["TMPDIR"]))
+
     def test_a_target_over_the_limit_is_refused_before_copying(self):
         with mock.patch.object(pe, "REVIEW_COPY_MAX_FILES", 0), \
                 mock.patch.object(pe.tempfile, "mkdtemp") as made:

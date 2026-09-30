@@ -136,6 +136,13 @@ native Windows, acquire and re-acquire a lease, exit a `_lease_lock` body with a
 descriptor is closed and `lease.lock` removed. Recorded as non-blocking by the scoped audit round 13
 (`tasks/2026-09-30-multiagent-150-audit/`).
 
+## W2. `--review-copy` on native Windows not verified (2026-09-30)
+
+The Codex sandbox flags (`workspace-write`, `sandbox_workspace_write.exclude_slash_tmp`), `TMPDIR`
+redirection, `copytree(symlinks=True)` and the cleanup were run on WSL only. To close: on native
+Windows, run a Codex verifier with `--review-copy` on a small repository and check the tests run in the
+copy, the original is not writable, and the engine's folder is removed.
+
 ## C. Housekeeping
 
 - Whether anything on the Windows side still reads `~/.multiagent` (redeployed 2026-09-30 with
