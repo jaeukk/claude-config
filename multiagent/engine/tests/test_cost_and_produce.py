@@ -474,21 +474,33 @@ class ProduceRound3Test(ProduceFixture):
         self.assertEqual(pe.validate_task(self.bundle, self.contract())[0], [])
         self.assertEqual(list(self.task_dir.glob(".task.*.tmp")), [])
 
-    def test_a_failed_staging_cleanup_after_publishing_is_reported_not_fatal(self):
-        # Round 6: once task.yaml is published, a failure to delete the staging file must neither
-        # abort the run nor trigger the rollback (a competitor may already hold the task).
-        real_unlink = pe.os.unlink
-
-        def unlink(path, *args, **kwargs):
-            if Path(path).name.startswith(".task.") and Path(path).parent == self.task_dir:
-                raise OSError(5, "Input/output error")
-            return real_unlink(path, *args, **kwargs)
-
-        with mock.patch.object(pe.os, "unlink", side_effect=unlink):
-            code, summary = self.run_capturing(lambda *a, **k: 0)
+    def test_the_initial_contract_record_stays_and_nothing_is_deleted_by_name(self):
+        # Round 10: removing a staging file by name could remove someone else's file, so the
+        # hard-linked initial contract stays, and a failed rewrite leaves its own temp file too.
+        code, summary = self.run_capturing(lambda *a, **k: 0)
         self.assertEqual((code, summary["status"]), (0, "complete"))
-        self.assertIn("left behind", summary["setup"])
-        self.assertTrue(self.task_dir.exists())
+        initial = list(self.task_dir.glob(".task-initial.*.json"))
+        self.assertEqual(len(initial), 1)
+        self.assertEqual(json.loads(initial[0].read_text())["status"], "pending")
+        with mock.patch.object(pe.os, "replace", side_effect=OSError(5, "Input/output error")):
+            with self.assertRaises(OSError):
+                pe._rewrite_contract_status(self.task_dir / "task.yaml", "failed")
+        self.assertEqual(len(list(self.task_dir.glob(".task.*.tmp"))), 1)
+
+    def test_a_brief_planted_before_its_write_is_never_overwritten(self):
+        real_mkdir = Path.mkdir
+
+        def mkdir_then_plant(path, *args, **kwargs):
+            real_mkdir(path, *args, **kwargs)
+            if path.name == "implementer":
+                (path / "brief.md").write_text("theirs", encoding="utf-8")
+
+        with mock.patch.object(Path, "mkdir", mkdir_then_plant), mock.patch.object(pe.sys, "stderr"):
+            code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                              owner="me", task_id="t1", write="src/x.py")
+        self.assertEqual(code, 2)
+        self.assertEqual((self.task_dir / "workers" / "implementer" / "brief.md").read_text(), "theirs")
+        self.assertFalse((self.task_dir / "task.yaml").exists())
 
     def test_an_unreadable_brief_reserves_nothing_and_the_id_stays_free(self):
         with mock.patch.object(pe.sys, "stderr"), \
@@ -539,15 +551,14 @@ class ProduceInterruptTest(ProduceFixture):
         lines = [l for l in err.getvalue().splitlines() if l.startswith("produce: ")]
         return json.loads(lines[-1][len("produce: "):]) if lines else None
 
-    def test_after_publication_the_interrupt_propagates_with_a_summary(self):
-        real_unlink = pe.os.unlink
+    def test_an_interrupt_just_after_a_successful_link_ends_in_a_summary(self):
+        real_link = pe.os.link
 
-        def unlink(path, *args, **kwargs):
-            if Path(path).name.startswith(".task.") and Path(path).parent == self.task_dir:
-                raise KeyboardInterrupt
-            return real_unlink(path, *args, **kwargs)
+        def link_then_interrupt(src, dst, *args, **kwargs):
+            real_link(src, dst, *args, **kwargs)
+            raise KeyboardInterrupt
 
-        with mock.patch.object(pe.os, "unlink", side_effect=unlink):
+        with mock.patch.object(pe.os, "link", side_effect=link_then_interrupt):
             summary = self.interrupted()
         self.assertIsNotNone(summary)
         self.assertTrue(summary["status"].startswith("pending"), summary)

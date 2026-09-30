@@ -3182,7 +3182,13 @@ def _print_cost_report(report: dict[str, Any]) -> None:
 def _rewrite_contract_status(contract_path: Path, status: str, clear_role: bool = True) -> None:
     """Set a contract's ``status`` (and, by default, clear ``current_role``), reloading it and
     replacing it atomically through an exclusively created temporary file. A linked contract is
-    refused."""
+    refused. On failure the temporary file is left, never deleted by name.
+
+    Callers hold the lease lock, and cooperating writers of the contract take it too; an editor
+    that replaces ``task.yaml`` without the lock can lose an edit made in the instant between the
+    reload and the replace. That is the engine's cooperative model, not a boundary against such a
+    writer.
+    """
     if contract_path.is_symlink() or not contract_path.is_file():
         raise ValueError(f"{contract_path} is not a regular file")
     task = load_document(contract_path)
@@ -3191,13 +3197,9 @@ def _rewrite_contract_status(contract_path: Path, status: str, clear_role: bool 
     if clear_role and isinstance(task.get("dispatch"), dict):
         task["dispatch"]["current_role"] = None
     handle, staging = tempfile.mkstemp(dir=contract_path.parent, prefix=".task.", suffix=".tmp")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            stream.write(json.dumps(task, indent=2) + "\n")
-        os.replace(staging, contract_path)
-    except BaseException:
-        Path(staging).unlink(missing_ok=True)
-        raise
+    with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        stream.write(json.dumps(task, indent=2) + "\n")
+    os.replace(staging, contract_path)
 
 
 def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generation: str | None,
@@ -3287,7 +3289,7 @@ def produce(
     task_dir = Path(tasks_root) / task_id
     contract_path = task_dir / "task.yaml"
     brief_copy = task_dir / "workers" / role / "brief.md"
-    code, generation, lease_note, setup_note = 2, None, "not acquired", ""
+    code, generation, lease_note = 2, None, "not acquired"
     staging: str | None = None
     # Whether this call may have published task.yaml, which decides whether the lifecycle cleanup
     # and summary run. Set just *before* the link, because an interrupt can surface right after a
@@ -3302,13 +3304,16 @@ def produce(
     try:
         try:
             brief_copy.parent.mkdir(parents=True)
-            brief_copy.write_bytes(brief_bytes)
+            with open(brief_copy, "xb") as stream:  # exclusive: never truncates a file found there
+                stream.write(brief_bytes)
             # `pending` until this run holds the lease: a contract is written only by whoever
             # owns the task, and before the lease nobody does. It is written privately and
             # published by an exclusive hard link as the last setup step, so `task.yaml` appears
             # complete or not at all -- and until it appears, no lease can be taken here
-            # (acquire-lease needs it).
-            handle, staging = tempfile.mkstemp(dir=task_dir, prefix=".task.", suffix=".tmp")
+            # (acquire-lease needs it). The staging file stays afterwards: it is a hard link to
+            # the contract as first published, and removing it by name could remove someone
+            # else's file.
+            handle, staging = tempfile.mkstemp(dir=task_dir, prefix=".task-initial.", suffix=".json")
             with os.fdopen(handle, "w", encoding="utf-8") as stream:
                 stream.write(json.dumps(task, indent=2) + "\n")
             published = True
@@ -3317,14 +3322,6 @@ def produce(
             published = False  # the link is atomic: raised means this call published nothing
             return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error}); "
                           "the folder is left as it is, as a record -- rerun with another task ID")
-        try:
-            os.unlink(staging)
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            # The task is published now, so this is reported and never rolled back: a
-            # competitor may already hold it. A leftover staging file is harmless.
-            setup_note = f"staging file {staging} left behind: {error.strerror or error}"
         lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
         if not lease.allowed:
             lease_note = f"not acquired: {lease.reason}"
@@ -3367,7 +3364,6 @@ def produce(
             print("produce: " + json.dumps({
                 "task_dir": str(task_dir), "exit": code, "status": finalized,
                 "lease_released": released.allowed, "lease": released.reason, "attempts": attempts,
-                **({"setup": setup_note} if setup_note else {}),
             }, ensure_ascii=False, default=str), file=sys.stderr)
     return code
 

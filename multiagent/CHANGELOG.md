@@ -25,9 +25,10 @@ one codex-ceiling consultation.
   stderr, in one call. It validates the policy and the contract, creates the task folder
   exclusively after reading the brief (an existing folder or link is refused), writes the contract
   `pending`, activates it and later finalizes it only under the lease lock while this run owns the
-  lease, and never writes it when the lease was not acquired; cleanup never raises. It never
-  deletes anything: a setup that fails after creating the folder leaves it as a record (rerun
-  with another task ID). `--dry-run` creates nothing.
+  lease, and never writes it when the lease was not acquired; cleanup never raises. It deletes
+  nothing but its own lease (generation-checked): a setup that fails after creating the folder
+  leaves it as a record (rerun with another task ID), the brief is created exclusively, and the
+  hidden `.task-initial.*.json` hard link to the first contract stays. `--dry-run` creates nothing.
 - Contract status `failed` is now valid (the benchmark driver already wrote it).
 
 ### Changed
