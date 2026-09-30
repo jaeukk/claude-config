@@ -68,6 +68,16 @@ with a zero budget. The hook refuses a native critic at 0 but cannot count nativ
 a native loop within budget yourself. The verifier is not budgeted. Nothing forces review of
 conductor code edits; set `audit_cycles` when they need it.
 
+**Review discipline.** Before the first critic round, agree four things with the user and put them
+in every critic brief: the threat model and scope, with the failure classes accepted up front; what
+blocks landing (a realistic trigger, such as ordinary use, a crash, one interrupt or a supported
+platform's normal behavior, plus its impact; anything else goes to `OPEN_ITEMS.md`); the round plan
+(round 1 reviews the whole change, later rounds only the fix diff) and budget; and the stop rule
+(land after a clean round; stop and report when the budget is spent or every blocking finding is
+in code written that same round). Self-review the diff before each critic round, triage each
+finding as fix, defer or reject with a reason, and prefer deleting mechanism to adding it. Without
+this, an open-ended audit keeps finding ever-smaller issues: multiagent 1.5.0 took 12 rounds.
+
 ## Tiers and bindings
 
 Backends are named `<family>-<tier>`. A tier is a routing role, not an effort level.

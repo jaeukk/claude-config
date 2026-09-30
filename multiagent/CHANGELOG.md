@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### Added
+- SKILL.md "Review discipline": agree the threat model, the blocking bar, the round plan and the stop
+  rule before the first critic round (the global CLAUDE.md rule reaches Claude sessions only; Codex
+  conductors read the skill).
+- A Codex usage-limit exit is recorded as `rate_limited`, not `error`.
+
 ## [1.5.0] - 2026-09-30
 
 Items 1–2 of the post-cut plan (`tasks/2026-09-30-multiagent-next/synthesis.md`), worked out with
