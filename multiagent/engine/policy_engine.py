@@ -435,8 +435,11 @@ def completed_audit_cycles(task_dir: Path | None) -> int:
             event = json.loads(line)
         except ValueError:
             continue
+        # `source: external` is a headless driver's accounting record (record-attempt), never a
+        # critic this engine dispatched, so it can neither spend nor fake an audit round.
         if (isinstance(event, dict) and event.get("type") == "worker_attempt"
-                and event.get("role") == "critic" and event.get("classification") == "ok"):
+                and event.get("role") == "critic" and event.get("classification") == "ok"
+                and event.get("source") != "external"):
             done.add(str(event.get("dispatch_id")))
     return len(done)
 
@@ -454,7 +457,7 @@ def validate_task(bundle: PolicyBundle, task: dict[str, Any]) -> tuple[list[str]
         errors.append("unsupported task schema version")
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", str(task["task_id"])):
         errors.append("task_id must use lowercase letters, digits, dots, underscores, or hyphens")
-    if task.get("status") not in {"pending", "active", "verifying", "complete", "blocked", "cancelled"}:
+    if task.get("status") not in {"pending", "active", "verifying", "complete", "failed", "blocked", "cancelled"}:
         errors.append("invalid task status")
     conductor = task.get("conductor", {})
     declared = {
@@ -3029,6 +3032,36 @@ def _run_worker(
 
 #: Fields an externally recorded attempt must carry; everything else in the event is optional.
 EXTERNAL_ATTEMPT_REQUIRED = ("account", "model", "classification")
+#: Optional accounting fields of an external attempt and the types they must have.
+EXTERNAL_ATTEMPT_NUMBERS = {"total_cost_usd": (int, float), "tokens_used": int, "exit": int,
+                            "attempt": int, "duration_s": (int, float)}
+
+
+def _external_attempt_error(fields: Any) -> str | None:
+    """Why an external attempt record is malformed, or ``None`` when it is well formed."""
+    if not isinstance(fields, dict):
+        return "the event must be a JSON object"
+    absent = [key for key in EXTERNAL_ATTEMPT_REQUIRED
+              if not isinstance(fields.get(key), str) or not fields[key]]
+    if absent:
+        return f"record-attempt needs non-empty strings for {', '.join(absent)}"
+    for key, kinds in EXTERNAL_ATTEMPT_NUMBERS.items():
+        value = fields.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, kinds) or value != value \
+                or value in (float("inf"), float("-inf")) or (key != "exit" and value < 0):
+            return f"{key} must be a finite non-negative number"
+    usage = fields.get("usage")
+    if usage is not None:
+        if not isinstance(usage, dict):
+            return "usage must be an object (the CLI envelope's usage)"
+        for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens",
+                    "cache_read_input_tokens"):
+            value = usage.get(key)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                return f"usage.{key} must be a non-negative integer"
+    return None
 
 
 def record_attempt(task_dir: Path, fields: dict[str, Any]) -> Decision:
@@ -3036,17 +3069,18 @@ def record_attempt(task_dir: Path, fields: dict[str, Any]) -> Decision:
 
     For headless drivers (the book driver, a task's own ``claude -p`` loop), which do most
     team-account production and otherwise leave no record. Trusted like ``record-author``: no
-    lease is needed, the event is marked ``source: external``, and the folder must hold its
-    ``task.yaml``. ``cost-report`` reads these beside the engine's own attempts.
+    lease is needed, the folder must hold its ``task.yaml``, and the event is marked
+    ``source: external``. It is accounting only: ``completed_audit_cycles`` ignores external
+    events, so a recorded "critic" never spends or fakes an audit round.
     """
     missing = _missing_contract(task_dir)
     if missing is not None:
         return missing
-    absent = [key for key in EXTERNAL_ATTEMPT_REQUIRED if not fields.get(key)]
-    if absent:
-        return Decision(False, f"record-attempt needs {', '.join(absent)}")
+    malformed = _external_attempt_error(fields)
+    if malformed is not None:
+        return Decision(False, malformed)
     record = {**fields, "at": utc_now(), "type": "worker_attempt", "source": "external",
-              "dispatch_id": str(fields.get("dispatch_id") or uuid.uuid4().hex)}
+              "dispatch_id": uuid.uuid4().hex}
     try:
         with _lease_lock(task_dir):
             with _state_file(task_dir, "events.ndjson").open("a", encoding="utf-8", newline="\n") as stream:
@@ -3056,48 +3090,55 @@ def record_attempt(task_dir: Path, fields: dict[str, Any]) -> Decision:
     return Decision(True, "attempt recorded", {"dispatch_id": record["dispatch_id"]})
 
 
+def _count(value: Any) -> int:
+    """A non-negative integer from an event field, or 0 when it is missing or malformed."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
 def cost_report(roots: list[Path], since: str | None = None) -> dict[str, Any]:
     """Summarize every ``worker_attempt`` event under ``roots``, by account and model.
 
     Costs are what the worker CLIs reported: Claude's ``total_cost_usd`` and ``usage``, Codex's
-    ``tokens used``. Attempts recorded before 1.4.0, or by a driver that passed no cost, carry
-    neither and are counted as ``uncosted``, never estimated. ``since`` is an ISO date prefix.
+    ``tokens used``. An attempt with neither (recorded before 1.4.0, or by a driver that passed
+    none) is counted as ``uncosted``, never estimated. Each event file is read once even when
+    roots overlap; malformed fields count as absent. ``since`` is a ``YYYY-MM-DD`` date.
     """
+    if since is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+        raise ValueError(f"--since must be a date, YYYY-MM-DD; got {since!r}")
+    event_files = sorted({events.resolve() for root in roots
+                          for events in Path(root).expanduser().glob("**/events.ndjson")})
     groups: dict[tuple[str, str], dict[str, Any]] = {}
-    files = 0
-    for root in roots:
-        for events in sorted(Path(root).expanduser().glob("**/events.ndjson")):
-            files += 1
-            for line in events.read_text(encoding="utf-8", errors="replace").splitlines():
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(event, dict) or event.get("type") != "worker_attempt":
-                    continue
-                if since and str(event.get("at", "")) < since:
-                    continue
-                key = (str(event.get("account") or "?"), str(event.get("model") or "?"))
-                row = groups.setdefault(key, {
-                    "account": key[0], "model": key[1], "attempts": 0, "outcomes": {},
-                    "output_tokens": 0, "cost_usd": 0.0, "codex_tokens": 0, "uncosted": 0,
-                    "external": 0, "tasks": set(),
-                })
-                row["attempts"] += 1
-                outcome = str(event.get("classification") or "?")
-                row["outcomes"][outcome] = row["outcomes"].get(outcome, 0) + 1
-                usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
-                row["output_tokens"] += int(usage.get("output_tokens") or 0)
-                costed = False
-                if isinstance(event.get("total_cost_usd"), (int, float)):
-                    row["cost_usd"] += float(event["total_cost_usd"])
-                    costed = True
-                if isinstance(event.get("tokens_used"), int):
-                    row["codex_tokens"] += event["tokens_used"]
-                    costed = True
-                row["uncosted"] += 0 if costed else 1
-                row["external"] += 1 if event.get("source") == "external" else 0
-                row["tasks"].add(str(events.parent))
+    for events in event_files:
+        for line in events.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict) or event.get("type") != "worker_attempt":
+                continue
+            if since and str(event.get("at", ""))[:10] < since:
+                continue
+            key = (str(event.get("account") or "?"), str(event.get("model") or "?"))
+            row = groups.setdefault(key, {
+                "account": key[0], "model": key[1], "attempts": 0, "outcomes": {},
+                "output_tokens": 0, "cost_usd": 0.0, "codex_tokens": 0, "uncosted": 0,
+                "external": 0, "tasks": set(),
+            })
+            row["attempts"] += 1
+            outcome = str(event.get("classification") or "?")
+            row["outcomes"][outcome] = row["outcomes"].get(outcome, 0) + 1
+            usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+            row["output_tokens"] += _count(usage.get("output_tokens"))
+            cost = event.get("total_cost_usd")
+            costed = isinstance(cost, (int, float)) and not isinstance(cost, bool) and 0 <= cost < float("inf")
+            row["cost_usd"] += float(cost) if costed else 0.0
+            tokens = event.get("tokens_used")
+            if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+                row["codex_tokens"] += tokens
+                costed = True
+            row["uncosted"] += 0 if costed else 1
+            row["external"] += 1 if event.get("source") == "external" else 0
+            row["tasks"].add(str(events.parent))
     rows = sorted(groups.values(), key=lambda r: (r["account"], -r["attempts"]))
     for row in rows:
         row["tasks"] = len(row["tasks"])
@@ -3105,7 +3146,7 @@ def cost_report(roots: list[Path], since: str | None = None) -> dict[str, Any]:
     totals = {key: sum(row[key] for row in rows)
               for key in ("attempts", "output_tokens", "codex_tokens", "uncosted", "external")}
     totals["cost_usd"] = round(sum(row["cost_usd"] for row in rows), 4)
-    return {"files": files, "rows": rows, "totals": totals}
+    return {"files": len(event_files), "rows": rows, "totals": totals}
 
 
 def _print_cost_report(report: dict[str, Any]) -> None:
@@ -3122,6 +3163,33 @@ def _print_cost_report(report: dict[str, Any]) -> None:
     print(f"{'total':33} {totals['attempts']:>8} {'':30} {totals['output_tokens']:>11} "
           f"{totals['cost_usd']:>9.2f} {totals['codex_tokens']:>10} {totals['uncosted']:>8} "
           f"{totals['external']:>8}   ({report['files']} event files)")
+
+
+def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generation: str | None,
+                       status: str) -> str:
+    """Mark a ``produce`` contract finished while this run still owns its lease.
+
+    Reloads the contract from disk and changes only ``status``, ``updated_at`` and
+    ``dispatch.current_role``, under the lease lock and only while the lease is the one this run
+    acquired: an edit made meanwhile survives, and a task someone else now holds is left alone.
+    Returns what happened, for the summary.
+    """
+    try:
+        with _lease_lock(task_dir):
+            lease = load_document(task_dir / "lease.json")
+            if lease.get("owner") != owner or lease.get("acquired_at") != generation:
+                return "skipped: the lease is no longer this run's"
+            task = load_document(contract_path)
+            task["status"] = status
+            task["updated_at"] = utc_now()
+            if isinstance(task.get("dispatch"), dict):
+                task["dispatch"]["current_role"] = None
+            staging = contract_path.with_suffix(".yaml.partial")
+            staging.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
+            staging.replace(contract_path)
+            return status
+    except (OSError, ValueError, TimeoutError) as error:
+        return f"skipped: {error}"
 
 
 def produce(
@@ -3141,17 +3209,24 @@ def produce(
     min_publish_bytes: int = MIN_PUBLISH_BYTES,
     dry_run: bool = False,
 ) -> int:
-    """Run one producer with a record, in one call: contract, lease, dispatch, release.
+    """Run one producer with a record, in one call: validate, contract, lease, dispatch, release.
 
-    The one-producer route (1.4.0): no review, no roles bookkeeping. The binding decides the
-    account as usual, so an implementer goes to the team account when it has headroom. The
-    contract, brief copy, events and ``outputs/`` record stay in ``tasks_root/<task_id>``, so
-    ``cost-report`` and ``restore-write`` work on it like any other task.
+    The one-producer route (1.5.0): no review, no roles bookkeeping. The binding decides the
+    account as usual, so an implementer goes to the team account when it has headroom. The task
+    folder must not exist yet; it is created exclusively, so a second call with the same ID, or a
+    link planted where the folder would go, is refused before anything is written. The contract,
+    brief copy, events and ``outputs/`` record stay there, so ``cost-report`` and ``restore-write``
+    work on it like any other task.
     """
-    if (write is None) == (out is None):
-        print(json.dumps(Decision(False, "produce needs exactly one of --write or --out").as_dict(),
-                         indent=2), file=sys.stderr)
+    def refuse(reason: str, details: dict[str, Any] | None = None) -> int:
+        print(json.dumps(Decision(False, reason, details).as_dict(), indent=2), file=sys.stderr)
         return 2
+
+    if (write is None) == (out is None):
+        return refuse("produce needs exactly one of --write or --out")
+    policy_errors, _ = validate_policy(bundle)
+    if policy_errors:
+        return refuse("produce: policy invalid", {"errors": policy_errors})
     destination = write if write is not None else out
     target = Path(target_repo).expanduser().resolve()
     if task_id is None:
@@ -3172,46 +3247,45 @@ def produce(
         task["read_scope"] = list(read_scope)
     errors, _ = validate_task(bundle, task)
     if errors:
-        print(json.dumps(Decision(False, "produce: contract invalid", {"errors": errors}).as_dict(),
-                         indent=2), file=sys.stderr)
-        return 2
+        return refuse("produce: contract invalid", {"errors": errors})
     if dry_run:
         return dispatch_worker(bundle, task, role, brief, "native", True, out_path=out,
                                min_publish_bytes=min_publish_bytes, write_path=write,
                                exec_bash=exec_bash)
     task_dir = Path(tasks_root) / task_id
-    if (task_dir / "task.yaml").exists():
-        print(json.dumps(Decision(False, f"{task_dir} already holds a contract").as_dict(),
-                         indent=2), file=sys.stderr)
-        return 2
-    brief_copy = task_dir / "workers" / role / "brief.md"
-    brief_copy.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(brief, brief_copy)
+    try:
+        task_dir.mkdir()  # exclusive: an existing folder, file or link is refused, never reused
+    except OSError as error:
+        return refuse(f"produce: {task_dir} cannot be created fresh ({error.strerror or error})")
     contract_path = task_dir / "task.yaml"
+    brief_copy = task_dir / "workers" / role / "brief.md"
+    brief_copy.parent.mkdir(parents=True)
+    shutil.copyfile(brief, brief_copy)
     contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
     lease = acquire_lease(task_dir, owner, WORKER_LEASE_TTL)
     if not lease.allowed:
-        print(json.dumps(lease.as_dict(), indent=2), file=sys.stderr)
-        return 2
+        return refuse(lease.reason)
+    generation = (lease.details or {}).get("acquired_at")
     code = 2
     try:
         code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
                                task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
     finally:
+        finalized = _finalize_produced(task_dir, contract_path, owner, generation,
+                                       "complete" if code == 0 else "failed")
         released = release_lease(task_dir, owner)
-        task.update(status="complete" if code == 0 else "failed", updated_at=utc_now())
-        task["dispatch"]["current_role"] = None
-        contract_path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
-        attempts = [
-            {key: event.get(key) for key in ("account", "backend", "model", "classification",
-                                             "total_cost_usd", "tokens_used")}
-            | {"output_tokens": (event.get("usage") or {}).get("output_tokens")}
-            for event in _read_events(task_dir) if event.get("type") == "worker_attempt"
-        ]
+        attempts = []
+        for event in _read_events(task_dir):
+            if event.get("type") != "worker_attempt":
+                continue
+            usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+            attempts.append({key: event.get(key) for key in (
+                "account", "backend", "model", "classification", "total_cost_usd", "tokens_used")}
+                | {"output_tokens": usage.get("output_tokens")})
         print("produce: " + json.dumps({
-            "task_dir": str(task_dir), "exit": code, "status": task["status"],
+            "task_dir": str(task_dir), "exit": code, "status": finalized,
             "lease_released": released.allowed, "attempts": attempts,
-        }, ensure_ascii=False), file=sys.stderr)
+        }, ensure_ascii=False, default=str), file=sys.stderr)
     return code
 
 
@@ -3565,7 +3639,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "record-attempt":
         return _print_decision(record_attempt(args.task_dir, json.loads(args.event)))
     if args.command == "cost-report":
-        report = cost_report(args.tasks_root or [args.root / "tasks"], args.since)
+        try:
+            report = cost_report(args.tasks_root or [args.root / "tasks"], args.since)
+        except ValueError as error:
+            return _print_decision(Decision(False, str(error)))
         if args.json:
             print(json.dumps(report, indent=2))
         else:

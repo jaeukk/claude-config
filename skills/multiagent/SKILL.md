@@ -130,7 +130,8 @@ Two Claude logins: **private** (`~/.claude`, this session's, the only one with F
 - **Cost records.** Every `worker_attempt` event carries account, model, outcome, and what the CLI
   reported (Claude `usage` and `total_cost_usd`, Codex `tokens_used`). `python3 $E cost-report
   [--tasks-root <dir>]... [--since <date>]` sums them by account and model; `uncosted` counts
-  attempts recorded before 1.4.0. A headless driver records each run with `python3 $E
+  attempts with no cost data (recorded before 1.4.0, or by a driver that passed none). Such records are accounting only and never count as an audit round. A headless driver
+  records each run with `python3 $E
   record-attempt --task-dir … --event '<json>'` (`account`, `model`, `classification` required).
   Native subagents leave no record.
 

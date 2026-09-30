@@ -13,13 +13,19 @@ one codex-ceiling consultation.
 ### Added
 - **`policy_engine.py cost-report`** sums every `worker_attempt` event under one or more task
   roots by account and model: attempts, outcomes, Claude output tokens and `total_cost_usd`, Codex
-  `tokens_used`, and `uncosted` (attempts recorded before 1.4.0). `--since`, `--json`.
+  `tokens_used`, and `uncosted` (attempts with no cost data). Overlapping roots are read once;
+  `--since YYYY-MM-DD`; `--json`.
 - **`policy_engine.py record-attempt`** lets a headless driver record a worker the engine did not
   launch (`source: external`; `account`, `model`, `classification` required; no lease, like
-  `record-author`). The book driver now records every attempt with the envelope's usage and cost.
+  `record-author`). Fields are type-checked, and external events never count as an audit
+  round. The book driver records each attempt (best effort) with the CLI outcome, whether the
+  chapter was built, and the envelope's usage and cost.
 - **`policy_engine.py produce`** is the one-producer route: contract (one planned producer,
   `audit_cycles` 0), lease, dispatch (`--write [--exec]` or `--out`), release, and a summary on
-  stderr, in one call. It refuses to overwrite an existing contract; `--dry-run` creates nothing.
+  stderr, in one call. It validates the policy and the contract, creates the task folder
+  exclusively (an existing folder or link is refused), and finalizes the contract under the lease
+  lock only while it still owns the lease; `--dry-run` creates nothing.
+- Contract status `failed` is now valid (the benchmark driver already wrote it).
 
 ### Changed
 - SKILL.md: native spawns choose the type and model by tier (`Explore`/`runner` for lookups;

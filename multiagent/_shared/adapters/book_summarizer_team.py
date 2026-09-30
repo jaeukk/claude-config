@@ -157,16 +157,19 @@ class Driver:
                  f"{(result.stdout or result.stderr).strip()[:200]}")
 
     def record_attempt(self, chapter: dict, attempt: int, envelope: dict, exit_code: int | None,
-                       classification: str, started: float) -> None:
-        """Record the attempt's account, model, usage and cost on the contract.
+                       classification: str, built: bool, started: float) -> None:
+        """Record the attempt's account, model, usage and cost on the contract (best effort).
 
         The same ``worker_attempt`` record ``dispatch-worker`` writes, marked ``source: external``,
         so ``policy_engine.py cost-report`` counts headless team production too.
+        ``classification`` describes the CLI run; ``built`` says whether the chapter is done, which
+        a run can achieve and still time out or exit nonzero. A failed record is logged, not
+        retried.
         """
         event = {
             "account": "team", "config_dir": str(TEAM_DIR), "model": self.model,
             "role": "implementer", "backend": "headless:book-summarizer",
-            "classification": classification, "exit": exit_code, "attempt": attempt,
+            "classification": classification, "built": built, "exit": exit_code, "attempt": attempt,
             "reason": f"book_summarizer_team.py ch{chapter['chapter']}",
             "duration_s": round(time.time() - started, 1),
         }
@@ -223,12 +226,14 @@ class Driver:
             self.log(f"{tag}: attempt {attempts} start ({self.model}, team)")
             started = time.time()
             exit_code: int | None = None
+            timed_out = False
             try:
                 proc = subprocess.run(self.command(chapter), cwd=self.vault, env=self.env,
                                       capture_output=True, text=True, timeout=self.timeout)
                 out, exit_code = proc.stdout, proc.returncode
             except subprocess.TimeoutExpired as error:
                 out = error.stdout.decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
+                timed_out = True
                 self.log(f"{tag}: TIMEOUT after {self.timeout // 60} min")
             (self.work / f"{tag}.attempt{attempts}.json").write_text(out or "", encoding="utf-8")
             try:
@@ -238,9 +243,10 @@ class Driver:
                 envelope, text, err = {}, out or "", True
             limited = bool(LIMIT.search(text[:400])) and not self.done(chapter)
             built = not limited and self.done(chapter)
+            run_class = ("timeout" if timed_out else "rate_limited" if limited
+                         else "ok" if exit_code == 0 and not err else "error")
             self.record_attempt(chapter, attempts, envelope if isinstance(envelope, dict) else {},
-                                exit_code, "rate_limited" if limited else "ok" if built else "error",
-                                started)
+                                exit_code, run_class, built, started)
             if limited:
                 attempts -= 1  # a limit wait is not a real attempt
                 self.wait_for_reset(text)

@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": {"const": 1},
     "task_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
-    "status": {"enum": ["pending", "active", "verifying", "complete", "blocked", "cancelled"]},
+    "status": {"enum": ["pending", "active", "verifying", "complete", "failed", "blocked", "cancelled"]},
     "conductor": {
       "type": "object",
       "description": "Eligibility is computed, not listed here: validate_task() requires the host/backend pair to be a declared conductor-binding candidate whose adapter can dispatch every planned role. Enumerating the pair in this schema too would only drift from bindings.yaml and would still admit invalid cross-products such as codex + claude-frontier.",
