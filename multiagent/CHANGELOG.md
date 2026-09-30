@@ -6,6 +6,9 @@
 ## [Unreleased]
 
 ### Added
+- `engine/adapters/codex_pretool.py`: the Claude hook's rules on Codex through its `PreToolUse` hook
+  (shell, `apply_patch` per file, `spawn_agent` as family `codex`), for sessions inside `multiagent/`
+  while a task is active. The Claude hook's decision is now a shared `evaluate()`.
 - SKILL.md "Review discipline": agree the threat model, the blocking bar, the round plan and the stop
   rule before the first critic round (the global CLAUDE.md rule reaches Claude sessions only; Codex
   conductors read the skill).

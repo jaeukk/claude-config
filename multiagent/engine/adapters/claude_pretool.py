@@ -153,143 +153,163 @@ def normalized_path(tool_input: dict[str, Any]) -> str | None:
     return None
 
 
+def evaluate(event: dict[str, Any], spawn_family: str | None = None) -> str | None:
+    """Return the reason to deny one PreToolUse event, or ``None`` to allow it.
+
+    The decision both host adapters share: this file's ``main`` for Claude Code, and
+    ``codex_pretool.py``, which translates Codex events into this shape. ``spawn_family``
+    names the family a native spawn will run as when the tool name does not say (a Codex
+    ``spawn_agent`` child is Codex). Raises on malformed state; callers fail closed.
+    """
+    reasons: list[str] = []
+    _evaluate(event, reasons.append, spawn_family)
+    return reasons[0] if reasons else None
+
+
 def main() -> int:
     """Evaluate one hook event from standard input."""
     try:
-        event = json.load(sys.stdin)
-        task_path = active_task_path()
-        if task_path is None:
-            return 0
-        if not task_path.exists():
-            deny(f"active task contract does not exist: {task_path}")
-            return 0
-        task = load_document(task_path)
-        bundle = load_policy(ROOT)
-        tool = str(event.get("tool_name", ""))
-        tool_input = event.get("tool_input", {})
-        if not isinstance(tool_input, dict):
-            deny("tool_input must be an object")
-            return 0
-        actor = actor_role(event, task)
-
-        if tool in {"Edit", "Write", "NotebookEdit"}:
-            path_value = normalized_path(tool_input)
-            decision = authorize_action(bundle, task, {"kind": "write", "actor_role": actor, "path": path_value})
-            if not decision.allowed:
-                deny(decision.reason)
-            return 0
-
-        if tool == "Bash":
-            command = str(tool_input.get("command", ""))
-            if WORKER_CLI_SHELL.search(command):
-                deny(
-                    "this looks like a worker CLI launched directly, which skips the "
-                    "family-independence check; dispatch it with policy_engine.py "
-                    "dispatch-worker instead (heuristic match -- rephrase if it was quoted text)"
-                )
-                return 0
-            if DANGEROUS_SHELL.search(command):
-                decision = authorize_action(bundle, task, {"kind": "destructive_action", "actor_role": actor})
-                if not decision.allowed:
-                    deny(decision.reason)
-                return 0
-            if MUTATING_SHELL.search(command):
-                deny("shell-based mutation is forbidden during an active task; use hook-visible file tools")
-            return 0
-
-        # `Agent` is the subagent tool's name in current Claude Code; `Task` is the older
-        # name. Matching only `Task` is how every native spawn bypassed this hook -- found by
-        # the post-merge smoke test on 2026-09-21, not by any of eighteen review rounds.
-        if tool in NATIVE_SPAWN_TOOLS or tool.startswith("mcp__codex__"):
-            role = task.get("dispatch", {}).get("current_role")
-            family = "codex" if tool.startswith("mcp__codex__") else "claude"
-
-            # Independence is checked against what the hook OBSERVED producing the
-            # artifact, not against the self-declared field. A declaration that
-            # contradicts the observation is the interesting case: it would grant
-            # a same-family reviewer while the contract claims otherwise.
-            if role in {"critic", "verifier"}:
-                budget = task.get("audit_cycles", 0)
-                if role == "critic" and (type(budget) is not int or budget < 1):
-                    # Same gate as dispatch-worker. Native critic rounds are not counted against
-                    # the budget -- nothing records them -- so only the zero budget is enforced here.
-                    deny(
-                        f"critic blocked: audit_cycles is {budget!r}; 0, the default, means this "
-                        "task skips audit. Set audit_cycles to the number of critic rounds."
-                    )
-                    return 0
-                # Same refusal the engine applies on CLI dispatch: a write whose dispatcher
-                # died left changed files and never recorded which family changed them, so
-                # the sidecar still names the previous writer. Without this, an interrupted
-                # managed write defeats independence simply by reviewing natively instead.
-                pending = _unresolved_write_reservations(task_path.parent)
-                if pending:
-                    deny(
-                        f"{role} blocked: {', '.join(pending)} recorded no outcome, so what "
-                        "was written and by which family are both unknown; resolve them "
-                        "(restore-write --assume-stopped, or record the outcome) first"
-                    )
-                    return 0
-                seen = observed_author(task_path, task, bundle)
-                declared = task.get("author_family")
-                if seen is None:
-                    deny(
-                        f"{role} blocked: independence cannot be established -- a planned "
-                        "producer left no observed authorship (an assertion counts only with "
-                        "`authorship_assertion` under approvals.user), the authorship record "
-                        "is damaged, or the conductor backend is unknown"
-                    )
-                    return 0
-                if seen == "mixed":
-                    # Denied on its own terms. Left to the mismatch check below it would be
-                    # refused too -- no valid declaration equals "mixed" -- but the message
-                    # would blame the declaration for what is really mixed authorship.
-                    deny(
-                        f"{role} blocked: this artifact's authorship is mixed (observed and/or "
-                        "asserted); mixed authorship is refused for review and needs manual "
-                        "reconciliation"
-                    )
-                    return 0
-                if declared != seen:
-                    deny(
-                        f"{role} blocked: task declares author_family={declared!r} but the "
-                        f"hook observed {seen!r} producing this task's artifact"
-                    )
-                    return 0
-                if family == seen:
-                    deny(f"{role} blocked: {family} cannot review an artifact {seen} produced")
-                    return 0
-
-            decision = authorize_action(
-                bundle,
-                task,
-                {"kind": "spawn_worker", "actor_role": actor, "role": role, "native": True},
-                task_dir=task_path.parent,
-            )
-            if not decision.allowed:
-                deny(decision.reason)
-                return 0
-            binding = resolve_binding(
-                bundle,
-                str(role),
-                task.get("author_family"),
-                required_family=family,
-                conductor_host=task.get("conductor", {}).get("host"),
-                exclude_account_bound=True,  # a Task-tool child runs under the session login
-            )
-            if not binding.allowed:
-                deny(f"current role {role} has no compatible {family} backend")
-                return 0
-            if role in PRODUCING_ROLES:
-                # Recorded before the call runs: a PreToolUse hook cannot see the outcome. A
-                # native producer needs no stated reason since 1.4.0 (single session is the
-                # default), but its family is still evidence a later reviewer must differ from.
-                record_observed_author(task_path, family, f"{role} via {tool}")
-            return 0
+        reason = evaluate(json.load(sys.stdin))
+        if reason:
+            deny(reason)
         return 0
     except Exception as error:  # Claude must fail closed when a task is active or malformed.
         deny(f"multi-agent policy hook failed closed: {error}")
         return 0
+
+
+def _evaluate(event: dict[str, Any], deny: Any, spawn_family: str | None = None) -> int:
+    """The decision body: calls ``deny(reason)`` for a refusal. See ``evaluate``."""
+    task_path = active_task_path()
+    if task_path is None:
+        return 0
+    if not task_path.exists():
+        deny(f"active task contract does not exist: {task_path}")
+        return 0
+    task = load_document(task_path)
+    bundle = load_policy(ROOT)
+    tool = str(event.get("tool_name", ""))
+    tool_input = event.get("tool_input", {})
+    if not isinstance(tool_input, dict):
+        deny("tool_input must be an object")
+        return 0
+    actor = actor_role(event, task)
+
+    if tool in {"Edit", "Write", "NotebookEdit"}:
+        path_value = normalized_path(tool_input)
+        decision = authorize_action(bundle, task, {"kind": "write", "actor_role": actor, "path": path_value})
+        if not decision.allowed:
+            deny(decision.reason)
+        return 0
+
+    if tool == "Bash":
+        command = str(tool_input.get("command", ""))
+        if WORKER_CLI_SHELL.search(command):
+            deny(
+                "this looks like a worker CLI launched directly, which skips the "
+                "family-independence check; dispatch it with policy_engine.py "
+                "dispatch-worker instead (heuristic match -- rephrase if it was quoted text)"
+            )
+            return 0
+        if DANGEROUS_SHELL.search(command):
+            decision = authorize_action(bundle, task, {"kind": "destructive_action", "actor_role": actor})
+            if not decision.allowed:
+                deny(decision.reason)
+            return 0
+        if MUTATING_SHELL.search(command):
+            deny("shell-based mutation is forbidden during an active task; use hook-visible file tools")
+        return 0
+
+    # `Agent` is the subagent tool's name in current Claude Code; `Task` is the older
+    # name. Matching only `Task` is how every native spawn bypassed this hook -- found by
+    # the post-merge smoke test on 2026-09-21, not by any of eighteen review rounds.
+    if tool in NATIVE_SPAWN_TOOLS or tool.startswith("mcp__codex__"):
+        role = task.get("dispatch", {}).get("current_role")
+        family = spawn_family or ("codex" if tool.startswith("mcp__codex__") else "claude")
+
+        # Independence is checked against what the hook OBSERVED producing the
+        # artifact, not against the self-declared field. A declaration that
+        # contradicts the observation is the interesting case: it would grant
+        # a same-family reviewer while the contract claims otherwise.
+        if role in {"critic", "verifier"}:
+            budget = task.get("audit_cycles", 0)
+            if role == "critic" and (type(budget) is not int or budget < 1):
+                # Same gate as dispatch-worker. Native critic rounds are not counted against
+                # the budget -- nothing records them -- so only the zero budget is enforced here.
+                deny(
+                    f"critic blocked: audit_cycles is {budget!r}; 0, the default, means this "
+                    "task skips audit. Set audit_cycles to the number of critic rounds."
+                )
+                return 0
+            # Same refusal the engine applies on CLI dispatch: a write whose dispatcher
+            # died left changed files and never recorded which family changed them, so
+            # the sidecar still names the previous writer. Without this, an interrupted
+            # managed write defeats independence simply by reviewing natively instead.
+            pending = _unresolved_write_reservations(task_path.parent)
+            if pending:
+                deny(
+                    f"{role} blocked: {', '.join(pending)} recorded no outcome, so what "
+                    "was written and by which family are both unknown; resolve them "
+                    "(restore-write --assume-stopped, or record the outcome) first"
+                )
+                return 0
+            seen = observed_author(task_path, task, bundle)
+            declared = task.get("author_family")
+            if seen is None:
+                deny(
+                    f"{role} blocked: independence cannot be established -- a planned "
+                    "producer left no observed authorship (an assertion counts only with "
+                    "`authorship_assertion` under approvals.user), the authorship record "
+                    "is damaged, or the conductor backend is unknown"
+                )
+                return 0
+            if seen == "mixed":
+                # Denied on its own terms. Left to the mismatch check below it would be
+                # refused too -- no valid declaration equals "mixed" -- but the message
+                # would blame the declaration for what is really mixed authorship.
+                deny(
+                    f"{role} blocked: this artifact's authorship is mixed (observed and/or "
+                    "asserted); mixed authorship is refused for review and needs manual "
+                    "reconciliation"
+                )
+                return 0
+            if declared != seen:
+                deny(
+                    f"{role} blocked: task declares author_family={declared!r} but the "
+                    f"hook observed {seen!r} producing this task's artifact"
+                )
+                return 0
+            if family == seen:
+                deny(f"{role} blocked: {family} cannot review an artifact {seen} produced")
+                return 0
+
+        decision = authorize_action(
+            bundle,
+            task,
+            {"kind": "spawn_worker", "actor_role": actor, "role": role, "native": True},
+            task_dir=task_path.parent,
+        )
+        if not decision.allowed:
+            deny(decision.reason)
+            return 0
+        binding = resolve_binding(
+            bundle,
+            str(role),
+            task.get("author_family"),
+            required_family=family,
+            conductor_host=task.get("conductor", {}).get("host"),
+            exclude_account_bound=True,  # a Task-tool child runs under the session login
+        )
+        if not binding.allowed:
+            deny(f"current role {role} has no compatible {family} backend")
+            return 0
+        if role in PRODUCING_ROLES:
+            # Recorded before the call runs: a PreToolUse hook cannot see the outcome. A
+            # native producer needs no stated reason since 1.4.0 (single session is the
+            # default), but its family is still evidence a later reviewer must differ from.
+            record_observed_author(task_path, family, f"{role} via {tool}")
+        return 0
+    return 0
 
 
 if __name__ == "__main__":

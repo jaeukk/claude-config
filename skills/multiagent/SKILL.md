@@ -23,9 +23,9 @@ Reach for the engine only for:
 - **(c) contained writes or publication with a record**: `--write` (baseline, change set, restore)
   and `--out`.
 
-On Claude Code a PreToolUse hook enforces the contract, but only in sessions launched from
-`multiagent/`. Elsewhere, and on Codex, the contract is validated and kept, not enforced: say
-**policy-validated**.
+A PreToolUse hook enforces the contract on Claude Code (sessions launched from `multiagent/`) and
+on Codex (sessions whose working directory is inside `multiagent/`), only while a task is active.
+Elsewhere the contract is validated and kept, not enforced: say **policy-validated**.
 
 ## Load the local authority
 
@@ -275,10 +275,13 @@ A host may conduct when all three hold, each machine-checked:
 3. That entry's `dispatch_hosts` reaches an independent `critic` and `verifier` for every author
    family. `dispatch_hosts` fails closed: omit it and the adapter dispatches nothing.
 
-**Codex.** Codex 0.159 has PreToolUse hooks, but no multiagent adapter is wired to them yet. Until
-one is, nothing stops a Codex conductor from filling `critic` with `spawn_agent`: call
-`python3 $E authorize --task … --action '<json>'` before acting and `dispatch-worker` for every
-cross-family worker, and describe the result as a contract kept, not enforced.
+**Codex.** `engine/adapters/codex_pretool.py`, registered in `~/.codex/hooks.json`, applies the
+Claude hook's rules to Codex: shell commands, every file an `apply_patch` touches, and
+`spawn_agent` children (as family `codex`, so a Codex child cannot review Codex work). It fails
+open: Codex runs the call if the hook is untrusted, crashes or times out, and editing the hook
+entry's command, matcher or timeout voids its trust silently until it is re-trusted (the hash is
+in `codex app-server`'s `hooks/list`). Call `python3 $E authorize --task … --action '<json>'` for
+anything the hook does not see.
 
 **Claude Code.** The hook sees tool calls only. It denies what looks like a worker CLI typed into
 Bash, but that match is a heuristic; an absolute path or a variable defeats it.
