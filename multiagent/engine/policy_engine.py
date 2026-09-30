@@ -961,8 +961,11 @@ def release_lease(task_dir: Path, owner: str, generation: str | None = None) -> 
             active = int(payload.get("active_workers", 0))
             if active:
                 return Decision(False, f"{active} worker slot(s) still held; release them first")
+            # Pointer first: an interrupt between the two then leaves the lease, so a retried
+            # release still finds it and completes, instead of a stale pointer with no lease.
+            cleared = _clear_active_pointer(task_dir)
             lease_path.unlink()
-            return Decision(True, "lease released", {"active_task_cleared": _clear_active_pointer(task_dir)})
+            return Decision(True, "lease released", {"active_task_cleared": cleared})
     except TimeoutError as error:
         return Decision(False, str(error))
 

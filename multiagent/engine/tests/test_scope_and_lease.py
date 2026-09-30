@@ -282,6 +282,21 @@ class ReleaseClearsActivePointerTest(unittest.TestCase):
         self.assertFalse(pe.release_lease(self.task_dir, "me").allowed)
         self.assertTrue(self.pointer.exists())
 
+    def test_an_interrupted_release_can_be_retried(self):
+        """Round-1 review: an interrupt between the two removals must leave the lease, not the pointer."""
+        self.pointer.write_text("t1\n", encoding="utf-8")
+        real_unlink = Path.unlink
+
+        def interrupted(path, *args, **kwargs):
+            if path.name == "lease.json":
+                raise KeyboardInterrupt
+            return real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", interrupted), self.assertRaises(KeyboardInterrupt):
+            pe.release_lease(self.task_dir, "me")
+        self.assertFalse(self.pointer.exists())
+        self.assertTrue(pe.release_lease(self.task_dir, "me").allowed)
+
     def test_a_task_outside_the_installation_never_touches_its_pointer(self):
         elsewhere = Path(self.tmp.name).resolve() / "other" / "t1"
         elsewhere.mkdir(parents=True)
