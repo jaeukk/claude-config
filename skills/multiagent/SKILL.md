@@ -300,7 +300,8 @@ but its default read-only sandbox blocks every write, temp files included, so a 
 temporary directory errors (4 of 4 Stage 1 critic runs). Add `--review-copy` to a Codex critic or
 verifier dispatch: the engine copies `target_repo` (without `.git`, caches and virtual environments;
 refused above 20,000 files or 500 MB) into a fresh temporary folder, runs Codex there with
-`--sandbox workspace-write`, and deletes the copy afterwards; the original stays read-only
+`--sandbox workspace-write` (`/tmp` excluded, `TMPDIR` inside that folder), and deletes it
+afterwards; the original stays read-only
 (measured 2026-09-30: 281 tests ran, OK). Codex-authored work's verifier is `claude-mid-team`
 first, which cannot run tests; for executed evidence there, run the suite yourself or spawn a native
 Claude verifier under the hook. Report executed verification only for checks that actually ran.

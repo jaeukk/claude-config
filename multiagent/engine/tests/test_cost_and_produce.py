@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -749,6 +750,77 @@ class ReviewCopyTest(unittest.TestCase):
         self.assertEqual((code, seen), (2, {}))
         with self.assertRaises(NotImplementedError):
             pe.build_worker_command(claude, "native", self.repo, "critic", review_copy=True)
+
+    def test_the_role_guard_itself_refuses_a_planned_producer(self):
+        # Round-5 self-review N7: with implementer planned, only the --review-copy guard refuses.
+        self.contract["roles_plan"] = ["implementer", "critic"]
+        err = io.StringIO()
+        with mock.patch.object(pe.sys, "stderr", err), mock.patch.object(pe.sys, "stdout"):
+            code = pe.dispatch_worker(
+                self.bundle, dict(self.contract), "implementer", self.brief, "native", False, None,
+                self.task_dir, self.task_dir, None, self.contract_path, 0, None, False, True)
+        self.assertEqual(code, 2)
+        self.assertIn("--review-copy is for a critic or verifier", err.getvalue())
+
+    def test_the_copy_is_removed_when_the_run_fails(self):
+        made = []
+        real = pe.tempfile.mkdtemp
+
+        def mkdtemp(*args, **kwargs):
+            made.append(Path(real(*args, **kwargs)))
+            return str(made[-1])
+
+        def boom(cwd):
+            raise RuntimeError("worker launcher exploded")
+
+        with mock.patch.object(pe.tempfile, "mkdtemp", side_effect=mkdtemp), \
+                self.assertRaises(RuntimeError):
+            self.dispatch(run=boom)
+        self.assertEqual(len(made), 1)
+        self.assertFalse(made[0].exists())
+
+    def test_a_copy_that_fails_halfway_is_removed(self):
+        made = []
+        real_mkdtemp, real_copytree = pe.tempfile.mkdtemp, pe.shutil.copytree
+
+        def mkdtemp(*args, **kwargs):
+            made.append(Path(real_mkdtemp(*args, **kwargs)))
+            return str(made[-1])
+
+        def copytree(src, dst, *args, **kwargs):
+            Path(dst).mkdir()
+            (Path(dst) / "partial").write_text("x", encoding="utf-8")
+            raise pe.shutil.Error([("a", "b", "fifo")])
+
+        with mock.patch.object(pe.tempfile, "mkdtemp", side_effect=mkdtemp), \
+                mock.patch.object(pe.shutil, "copytree", side_effect=copytree):
+            code, seen = self.dispatch()
+        self.assertEqual((code, seen), (2, {}))
+        self.assertFalse(made[0].exists())
+
+    def test_tmp_is_excluded_and_tmpdir_is_inside_the_engines_folder(self):
+        code, seen = self.dispatch()
+        self.assertEqual(code, 0)
+        command = seen["command"]
+        self.assertIn("sandbox_workspace_write.exclude_slash_tmp=true", command)
+        tmpdir = Path(seen["env"]["TMPDIR"])
+        self.assertEqual(tmpdir.name, "tmp")
+        self.assertEqual(tmpdir.parent, Path(seen["cwd"]).parent)
+
+    def test_read_only_leftovers_are_removed_and_a_stuck_folder_is_reported(self):
+        root = Path(tempfile.mkdtemp(prefix="multiagent-review-test-"))
+        (root / "sub").mkdir()
+        (root / "sub" / "ro.txt").write_text("x", encoding="utf-8")
+        (root / "sub" / "ro.txt").chmod(0o400)
+        (root / "sub").chmod(0o500)
+        pe._remove_review_copy(root)
+        self.assertFalse(root.exists())
+        stuck = Path(tempfile.mkdtemp(prefix="multiagent-review-test-"))
+        self.addCleanup(pe.shutil.rmtree, stuck, True)
+        err = io.StringIO()
+        with mock.patch.object(pe.shutil, "rmtree"), mock.patch.object(pe.sys, "stderr", err):
+            pe._remove_review_copy(stuck)
+        self.assertIn("could not be fully removed", err.getvalue())
 
     def test_a_target_over_the_limit_is_refused_before_copying(self):
         with mock.patch.object(pe, "REVIEW_COPY_MAX_FILES", 0), \

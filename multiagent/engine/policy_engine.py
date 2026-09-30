@@ -50,8 +50,9 @@ EXEC_BASH_ALLOW = (
 )
 WRITE_ENFORCEMENT = "restricted-tool-surface + single-destination write allowlist"
 REVIEW_COPY_ENFORCEMENT = (
-    "os-sandbox-workspace-write in a disposable copy of target_repo; the original is outside the "
-    "writable root, and the copy is deleted afterwards"
+    "os-sandbox-workspace-write in a disposable copy of target_repo, with /tmp excluded and TMPDIR "
+    "inside the engine's own folder; the original is outside every writable root, and the folder "
+    "is deleted afterwards"
 )
 #: What ``--review-copy`` leaves out of the disposable copy, and how large a target it copies.
 #: Above the limits the dispatch is refused rather than copying a vault-sized tree per review.
@@ -1499,6 +1500,11 @@ def build_worker_command(
             )
         args = list(spec.args)
         args[args.index("read-only")] = "workspace-write"
+        # Codex's workspace-write also makes /tmp and $TMPDIR writable by default; exclude /tmp
+        # and point TMPDIR into the engine's own folder (set at launch), so nothing writable is
+        # outside it -- even when target_repo itself lives under /tmp.
+        args[args.index("workspace-write") + 1:args.index("workspace-write") + 1] = [
+            "-c", "sandbox_workspace_write.exclude_slash_tmp=true"]
         spec = dataclasses.replace(spec, args=args, enforcement=REVIEW_COPY_ENFORCEMENT,
                                    review_copy=True)
     if host_mode == "native":
@@ -2448,9 +2454,39 @@ def _make_review_copy(target_repo: Path) -> tuple[Path, Path]:
             )
     root = Path(tempfile.mkdtemp(prefix="multiagent-review-"))
     workdir = root / (target_repo.name or "repo")
-    shutil.copytree(target_repo, workdir, symlinks=True,
-                    ignore=shutil.ignore_patterns(*REVIEW_COPY_IGNORE))
+    try:
+        (root / "tmp").mkdir()
+        shutil.copytree(target_repo, workdir, symlinks=True,
+                        ignore=shutil.ignore_patterns(*REVIEW_COPY_IGNORE))
+    except BaseException:
+        _remove_review_copy(root)  # the engine's own folder, half-filled
+        raise
     return root, workdir
+
+
+def _remove_review_copy(root: Path) -> None:
+    """Delete a ``--review-copy`` folder (the engine's own ``mkdtemp``), warning if any of it stays.
+
+    Read-only files (``copytree`` keeps permissions, and tests may create them) are made writable
+    and retried; whatever still cannot be removed is reported, never silently left.
+    """
+    def force(function: Any, path: str, _error: Any) -> None:
+        # Deleting an entry needs its folder writable, so both are opened up before the retry.
+        try:
+            os.chmod(os.path.dirname(path), 0o700)
+            os.chmod(path, 0o700)
+            function(path)
+        except OSError:
+            pass
+
+    try:
+        shutil.rmtree(root, onexc=force)
+    except TypeError:  # Python < 3.12 has no onexc
+        shutil.rmtree(root, onerror=force)
+    except OSError:
+        pass
+    if root.exists():
+        print(f"warning: --review-copy folder {root} could not be fully removed", file=sys.stderr)
 
 
 def dispatch_worker(
@@ -2721,7 +2757,8 @@ def dispatch_worker(
         print(json.dumps(
             {
                 "command": command,
-                "cwd": "<isolated temporary directory>" if spec.isolated_cwd else str(target_repo),
+                "cwd": ("<isolated temporary directory>" if spec.isolated_cwd
+                        else "<a disposable copy of target_repo>" if review_copy else str(target_repo)),
                 "backend": backend["host"],
                 "enforcement": spec.enforcement,
                 "prompt_via": spec.prompt_via,
@@ -2818,6 +2855,7 @@ def dispatch_worker(
             except (OSError, ValueError, shutil.Error) as error:
                 print(json.dumps(Decision(False, str(error)).as_dict(), indent=2), file=sys.stderr)
                 return 2
+            spec = dataclasses.replace(spec, env={**spec.env, "TMPDIR": str(copy_root / "tmp")})
         attempt = _run_worker(
             command, spec, task, role, brief_path, run_dir, backend,
             None if write_target is None else str(write_target),
@@ -2851,9 +2889,11 @@ def dispatch_worker(
                 backend = fallback.details
                 command, spec = build_worker_command(
                     backend, host_mode, target_repo, role, capture_result=out_path is not None,
-                    write_settings=write_settings_path, read_roots=read_roots,
+                    write_settings=write_settings_path, read_roots=read_roots, review_copy=review_copy,
                 )
-                attempt = _run_worker(command, spec, task, role, brief_path, target_repo, backend)
+                if copy_root is not None:
+                    spec = dataclasses.replace(spec, env={**spec.env, "TMPDIR": str(copy_root / "tmp")})
+                attempt = _run_worker(command, spec, task, role, brief_path, run_dir, backend)
                 _record_attempt(
                     bundle, slots, owner, generation, contract_path, role, backend, 2,
                     "fallback after team rate limit", attempt, dispatch_id,
@@ -2998,8 +3038,6 @@ def dispatch_worker(
         # A worker that crashed still freed its slot, and leaking one would
         # shrink the ceiling for the rest of the task. The release can still be
         # refused across a reacquired lease -- reported below, never silent.
-        if copy_root is not None:
-            shutil.rmtree(copy_root, ignore_errors=True)  # the engine's own mkdtemp folder
         stop_heartbeat.set()
         heartbeat.join(timeout=5)
         released = release_worker_slot(slots, owner, generation)
@@ -3007,6 +3045,8 @@ def dispatch_worker(
             # Never silent: a slot that failed to come back shrinks the ceiling
             # for every later dispatch, and the cause is not visible elsewhere.
             print(f"warning: worker slot not released: {released.reason}", file=sys.stderr)
+        if copy_root is not None:
+            _remove_review_copy(copy_root)  # the engine's own mkdtemp folder
 
 
 #: Lease TTL used while a dispatched worker runs, and the interval at which it is
