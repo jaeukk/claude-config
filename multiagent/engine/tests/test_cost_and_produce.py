@@ -553,11 +553,54 @@ class ProduceInterruptTest(ProduceFixture):
         summary = self.interrupted(acquire_lease=mock.Mock(side_effect=KeyboardInterrupt))
         self.assertTrue(summary["status"].startswith("pending"), summary)
 
-    def test_before_publication_the_folder_is_removed_and_the_id_stays_free(self):
+    def test_an_interrupt_at_the_link_keeps_the_folder(self):
+        # It may surface just after a link that succeeded, so the task may be visible: keep it.
         with mock.patch.object(pe.os, "link", side_effect=KeyboardInterrupt):
+            summary = self.interrupted()
+        self.assertIsNotNone(summary)
+        self.assertTrue(self.task_dir.exists())
+
+    def test_before_the_link_the_folder_is_removed_and_the_id_stays_free(self):
+        with mock.patch.object(pe.tempfile, "mkstemp", side_effect=KeyboardInterrupt):
             summary = self.interrupted()
         self.assertIsNone(summary)
         self.assertFalse(self.task_dir.exists())
+
+    def test_an_unpublished_rollback_keeps_foreign_files(self):
+        # Round 8: a folder this call created can still receive others' files before it is
+        # published; only this call's own files may go.
+        def foreign_then_fail(*args, **kwargs):
+            (self.task_dir / "observed-author.json").write_text("{}", encoding="utf-8")
+            raise OSError(28, "No space left on device")
+
+        with mock.patch.object(pe.tempfile, "mkstemp", side_effect=foreign_then_fail), \
+                mock.patch.object(pe.sys, "stderr"):
+            code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                              owner="me", task_id="t1", write="src/x.py")
+        self.assertEqual(code, 2)
+        self.assertTrue((self.task_dir / "observed-author.json").exists())
+        self.assertFalse((self.task_dir / "workers" / "implementer" / "brief.md").exists())
+
+    def test_a_contract_removed_during_the_run_keeps_the_records(self):
+        # Round 8's P0: an absent task.yaml after publication must not look unpublished.
+        def remove_contract(*args, **kwargs):
+            (self.task_dir / "events.ndjson").write_text('{"type": "worker_attempt"}\n', encoding="utf-8")
+            (self.task_dir / "outputs").mkdir()
+            (self.task_dir / "outputs" / "record.json").write_text("{}", encoding="utf-8")
+            (self.task_dir / "task.yaml").unlink()
+            return 0
+
+        import io
+        err = io.StringIO()
+        with mock.patch.object(pe, "dispatch_worker", side_effect=remove_contract), \
+                mock.patch.object(pe.sys, "stderr", err):
+            code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
+                              owner="me", task_id="t1", write="src/x.py")
+        self.assertEqual(code, 0)
+        self.assertTrue((self.task_dir / "events.ndjson").exists())
+        self.assertTrue((self.task_dir / "outputs" / "record.json").exists())
+        summary = json.loads([l for l in err.getvalue().splitlines() if l.startswith("produce: ")][-1][9:])
+        self.assertTrue(summary["lease_released"], summary)
 
     def test_a_contract_planted_before_publication_is_left_alone(self):
         real_link = pe.os.link
@@ -572,6 +615,9 @@ class ProduceInterruptTest(ProduceFixture):
                               owner="me", task_id="t1", write="src/x.py")
         self.assertEqual(code, 2)
         self.assertEqual((self.task_dir / "task.yaml").read_text(), '{"planted": true}')
+        # Only this call's own files went; the folder stays because the planted contract is in it.
+        self.assertFalse((self.task_dir / "workers").exists())
+        self.assertEqual([p.name for p in self.task_dir.iterdir()], ["task.yaml"])
 
 
 class Round3AccountingTest(unittest.TestCase):
