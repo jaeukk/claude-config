@@ -663,7 +663,8 @@ class CodexLimitClassificationTest(unittest.TestCase):
         self.assertEqual(self.classify(1, "progress...\n" + self.CAPTURED), "rate_limited")
 
     def test_reviewed_text_that_mentions_rate_limits_is_not_a_limit(self):
-        log = "codex\nThe test covers the 429 rate limit branch of classify.\nERROR: stream disconnected\n"
+        log = ("user\nERROR: You\u2019ve hit your usage limit (quoted in the brief)\n" + "progress\n" * 5
+               + 'Codex saw "ERROR: rate limit" in the log.\nERROR: stream disconnected\n')
         self.assertEqual(self.classify(1, log), "error")
 
     def test_a_clean_exit_is_ok_whatever_stderr_says(self):

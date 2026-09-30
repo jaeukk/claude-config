@@ -246,7 +246,8 @@ Codex's exhausted-quota message ("You've hit your usage limit … try again at <
 429 and no "rate limit" text, so `accounts.classify` reports `error`, not `rate_limited`; the
 attempt event then reads like a worker failure rather than a quota stop. Recorded in
 OPEN_ITEMS rather than fixed — the classifier's patterns are meant to grow from captured
-fixtures, and this is one. (5) With two families, an exhausted Codex window blocks *every*
+fixtures, and this is one. (Fixed 2026-09-30: the Codex dispatch path now records such an exit as
+`rate_limited`, reading only Codex's last stderr lines.) (5) With two families, an exhausted Codex window blocks *every*
 cross-family review of Claude-authored work for the rest of the window (D14); check the Codex
 bar before planning a task whose acceptance needs a critic, the same way the team window is
 checked before a batch. (6) Obtaining the worker argv from the engine at run time, instead of
