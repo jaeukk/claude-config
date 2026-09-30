@@ -719,13 +719,20 @@ def _lease_lock(task_dir: Path, timeout: float = 10.0) -> Any:
         # steps, so this narrows that case rather than closing it; a pathname lock cannot.
         try:
             ours = os.fstat(handle)
+            if os.name == "nt":
+                # Windows refuses to delete a file that is still open, so close first there.
+                # POSIX keeps the descriptor until after the unlink, which stops the inode number
+                # being reused by a replacement in between.
+                os.close(handle)
+                handle = -1
             current = os.stat(lock_path)
             if (ours.st_dev, ours.st_ino) == (current.st_dev, current.st_ino):
                 lock_path.unlink(missing_ok=True)
         except FileNotFoundError:
             pass
         finally:
-            os.close(handle)
+            if handle != -1:
+                os.close(handle)
 
 
 def _write_lease(lease_path: Path, payload: dict[str, Any]) -> None:

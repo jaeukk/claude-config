@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 import unittest.mock
+from unittest import mock
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -134,6 +135,36 @@ class LeaseFilesPreservationTest(unittest.TestCase):
             lock.unlink()
             lock.write_text("theirs", encoding="utf-8")
         self.assertEqual(lock.read_text(), "theirs")
+
+    def test_the_windows_release_order_closes_before_deleting(self):
+        # Round 12: Windows cannot delete an open file, so the lock is closed first there. The
+        # branch is exercised on POSIX by pretending to be Windows; the file still goes, exactly
+        # once, and a replacement still stays.
+        lock = self.task_dir / "lease.lock"
+        order = []
+        real_close, real_unlink = pe.os.close, Path.unlink
+
+        def close(fd):
+            order.append("close")
+            real_close(fd)
+
+        def unlink(path, *args, **kwargs):
+            if path.name == "lease.lock":
+                order.append("unlink")
+            return real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(pe.os, "name", "nt"), \
+                mock.patch.object(pe.os, "close", side_effect=close), \
+                mock.patch.object(Path, "unlink", unlink):
+            with pe._lease_lock(self.task_dir):
+                pass
+            self.assertFalse(lock.exists())
+            self.assertEqual(order, ["close", "unlink"])
+            with pe._lease_lock(self.task_dir):
+                lock.unlink()
+                lock.write_text("theirs", encoding="utf-8")
+            self.assertEqual(lock.read_text(), "theirs")
+            self.assertEqual(order.count("close"), 2)
 
 if __name__ == "__main__":
     unittest.main()
