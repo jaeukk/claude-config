@@ -75,6 +75,36 @@ meets the rules above:
   delete-list and changes nothing; `/simplify` applies fixes. Neither replaces
   `/code-review`, which hunts bugs.
 
+# Review and audit discipline
+
+Applies when creating or revising code or skills that will go through review rounds
+(self-review, a cross-family audit through the `multiagent` skill, `/code-review`), and
+whenever I ask for "audit cycles" or "review with codex". Adopted 2026-09-30 after an audit of
+multiagent 1.5.0 ran 12 rounds of ever-smaller findings, with no definition of done.
+
+**Before the first round, ask me to define these** (one question round, with a recommended
+default for each), and put the agreed answers in every reviewer brief:
+
+1. **Threat model and scope:** what the change must withstand (a cooperating single user on
+   one machine? concurrent or hostile writers? which platforms: WSL, native Windows), what is
+   in scope, and which failure classes are accepted as known limitations up front.
+2. **Definition of clean:** a finding blocks landing only if it names a realistic trigger
+   (ordinary use, a crash, one interrupt, a supported platform's normal behavior) and its
+   impact. A finding that needs a contrived race or an out-of-scope actor is recorded as a
+   follow-up (the project's open-items list), not answered with another round.
+3. **Round plan and budget:** round 1 reviews the whole change; later rounds review only the
+   fix diff and regressions it caused, never "anything else"; the number of rounds.
+4. **Stop rule:** stop when a round finds only below-bar or out-of-scope issues, when all
+   findings are in code written that same round (churn), or when the budget is spent; then
+   report instead of continuing.
+
+**During the rounds:** self-review the diff (every create, replace, delete: can I prove the
+path is mine? every exit path, including interrupts; Windows vs POSIX; tests that could pass
+for the wrong reason, with mutation checks) before each cross-family round; triage every
+finding as fix, defer or reject-with-reason, since not every finding earns a re-review; and
+when a finding hits new machinery, first ask whether the machinery should exist at all:
+deletion converges, added mechanism does not.
+
 # Research notes — Obsidian vault folder convention
 
 Each project keeps its notes in an Obsidian-vault **Notes root** `<root>`. Resolve
