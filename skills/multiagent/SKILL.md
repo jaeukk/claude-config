@@ -71,14 +71,15 @@ conductor code edits; set `audit_cycles` when they need it.
 **Review discipline.** Before the first critic round, agree four things with the user and put them
 in every critic brief: the threat model and scope, with the failure classes accepted up front; what
 blocks landing (a realistic trigger, such as ordinary use, a crash, one interrupt or a supported
-platform's normal behavior, plus its impact; anything else goes to the target project's open-items list, `OPEN_ITEMS.md` for multiagent); the round plan
-(round 1 reviews the whole change, later rounds only the fix diff) and budget; and the stop rule
-(by default, land after a clean round if the user agreed to that; stop and report when the budget is
-spent or every blocking finding is in code written that same round). Self-review the diff before each critic round (path ownership for every create, replace and
-delete; every exit path, interrupts included; Windows vs POSIX; mutation checks on new tests); it is
-not a critic dispatch and spends no `audit_cycles`. Triage each
-finding as fix, defer or reject with a reason, and prefer deleting mechanism to adding it. Without
-this, an open-ended audit keeps finding ever-smaller issues: multiagent 1.5.0 took 12 rounds of findings.
+platform's normal behavior, plus its impact; anything else goes to the target project's open-items
+list, `OPEN_ITEMS.md` for multiagent); the round plan (round 1 reviews the whole change, later
+rounds only the fix diff) and budget; and the stop rule (by default, land after a clean round if the
+user agreed to that; stop and report when the budget is spent or every blocking finding is in code
+written that same round). Self-review the diff before each critic round (path ownership for every
+create, replace and delete; every exit path, interrupts included; Windows vs POSIX; mutation checks
+on new tests); it is not a critic dispatch and spends no `audit_cycles`. Triage each finding as fix,
+defer or reject with a reason, and prefer deleting mechanism to adding it. Without this, an
+open-ended audit keeps finding ever-smaller issues: multiagent 1.5.0 took 12 rounds of findings.
 
 ## Tiers and bindings
 
