@@ -79,8 +79,11 @@ user agreed to that; stop and report when the budget is spent or every blocking 
 written that same round). Self-review the diff before each critic round (path ownership for every
 create, replace and delete; every exit path, interrupts included; Windows vs POSIX; mutation checks
 on new tests); it is not a critic dispatch and spends no `audit_cycles`. Triage each finding as fix,
-defer or reject with a reason, and prefer deleting mechanism to adding it. Without this, an
-open-ended audit keeps finding ever-smaller issues: multiagent 1.5.0 took 12 rounds of findings.
+defer or reject with a reason, and prefer deleting mechanism to adding it. A round that leaves
+nothing to fix (no findings, or every one deferred or rejected) ends there: dispatch no fixer. Three
+empty Codex reviews on 2026-09-30 each still paid for an Opus fix (about $0.41) that changed
+nothing. Without this, an open-ended audit keeps finding ever-smaller issues: multiagent 1.5.0 took
+12 rounds of findings.
 
 ## Tiers and bindings
 

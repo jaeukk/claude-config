@@ -18,6 +18,8 @@
 ### Changed
 - A Codex usage-limit exit is recorded as `rate_limited`, not `error` (only the last stderr lines are
   read).
+- SKILL.md: a review round that leaves nothing to fix (no findings, or all deferred or rejected)
+  dispatches no fixer (step-7 benchmark: three empty reviews each paid an unchanged $0.41 fix).
 
 ## [1.5.0] - 2026-09-30
 
