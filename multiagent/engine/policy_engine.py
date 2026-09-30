@@ -3200,21 +3200,6 @@ def _rewrite_contract_status(contract_path: Path, status: str, clear_role: bool 
         raise
 
 
-def _remove_unpublished(task_dir: Path, brief_copy: Path, staging: str | None) -> None:
-    """Undo an unpublished ``produce`` setup: its own two files, then empty folders. Never raises."""
-    for leftover in (staging, brief_copy):
-        if leftover:
-            try:
-                Path(leftover).unlink(missing_ok=True)
-            except OSError:
-                pass
-    for folder in (brief_copy.parent, brief_copy.parent.parent, task_dir):
-        try:
-            folder.rmdir()
-        except OSError:
-            break
-
-
 def _finalize_produced(task_dir: Path, contract_path: Path, owner: str, generation: str | None,
                        status: str, clear_role: bool = True) -> str:
     """Mark a ``produce`` contract finished while this run still owns its lease.
@@ -3304,10 +3289,11 @@ def produce(
     brief_copy = task_dir / "workers" / role / "brief.md"
     code, generation, lease_note, setup_note = 2, None, "not acquired", ""
     staging: str | None = None
-    # Whether this call may have published task.yaml. Set just *before* the link, because an
-    # interrupt can surface right after a link that succeeded; from then on nothing is ever
-    # removed, since a competitor may hold the task and the folder holds its records. Cleared
-    # only when the link raised, which proves it did not happen.
+    # Whether this call may have published task.yaml, which decides whether the lifecycle cleanup
+    # and summary run. Set just *before* the link, because an interrupt can surface right after a
+    # link that succeeded; cleared only when the link raised, which proves it did not happen.
+    # `produce` never deletes anything: a setup that fails after the folder exists leaves it as a
+    # record (a rollback would have to prove which files are its own, and cannot do so safely).
     published = False
     try:
         task_dir.mkdir()  # exclusive: an existing folder, file or link is refused, never reused
@@ -3328,11 +3314,9 @@ def produce(
             published = True
             os.link(staging, contract_path)
         except OSError as error:
-            # The link is atomic: raised means this call published nothing. A task.yaml someone
-            # else put there (FileExistsError) is not touched: the cleanup removes only this
-            # call's own files, and folders only when empty.
-            published = False
-            return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error})")
+            published = False  # the link is atomic: raised means this call published nothing
+            return refuse(f"produce: setting up {task_dir} failed ({error.strerror or error}); "
+                          "the folder is left as it is, as a record -- rerun with another task ID")
         try:
             os.unlink(staging)
         except FileNotFoundError:
@@ -3354,12 +3338,7 @@ def produce(
         code = dispatch_worker(bundle, task, role, brief_copy, "native", False, None, task_dir,
                                task_dir, out, contract_path, min_publish_bytes, write, exec_bash)
     finally:
-        if not published:
-            # Never published, so no lease could exist here: remove what this call wrote, and
-            # only that, non-recursively. A file anyone else put here survives, and so does the
-            # folder then; otherwise the ID is free again.
-            _remove_unpublished(task_dir, brief_copy, staging)
-        else:
+        if published:
             # Cleanup must never raise: an exception here would replace the dispatch's own.
             status = "complete" if code == 0 else "failed"
             if generation is None:

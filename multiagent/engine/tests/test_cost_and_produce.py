@@ -451,18 +451,22 @@ class ProduceRound3Test(ProduceFixture):
         self.assertFalse((self.task_dir / "lease.json").exists())
         self.assertEqual(self.contract()["status"], "complete")
 
-    def test_a_failed_contract_publish_leaves_nothing_behind(self):
-        # Round 5: the contract appears by one atomic link as the last setup step, so a setup
-        # failure happens before any lease could exist, and the cleanup removes only this call's
-        # folder.
-        acquired = []
+    def test_a_failed_contract_publish_takes_no_lease_and_deletes_nothing(self):
+        # produce never deletes: the half-built folder stays as a record, with no contract, and
+        # no lease was possible without one.
+        import io
+        acquired, err = [], io.StringIO()
         with mock.patch.object(pe.os, "link", side_effect=OSError(28, "No space left on device")), \
                 mock.patch.object(pe, "acquire_lease", side_effect=lambda *a: acquired.append(a)), \
-                mock.patch.object(pe.sys, "stderr"):
+                mock.patch.object(pe.sys, "stderr", err):
             code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
                               owner="me", task_id="t1", write="src/x.py")
         self.assertEqual((code, acquired), (2, []))
-        self.assertFalse(self.task_dir.exists())
+        self.assertIn("left as it is", err.getvalue())
+        summaries = [l for l in err.getvalue().splitlines() if l.startswith("produce: {")]
+        self.assertEqual(summaries, [])  # nothing was published, so no lifecycle summary
+        self.assertFalse((self.task_dir / "task.yaml").exists())
+        self.assertTrue((self.task_dir / "workers" / "implementer" / "brief.md").exists())
 
     def test_a_published_contract_is_complete_and_no_staging_file_remains(self):
         code, summary = self.run_capturing(lambda *a, **k: 0)
@@ -560,17 +564,19 @@ class ProduceInterruptTest(ProduceFixture):
         self.assertIsNotNone(summary)
         self.assertTrue(self.task_dir.exists())
 
-    def test_before_the_link_the_folder_is_removed_and_the_id_stays_free(self):
+    def test_an_interrupt_before_the_link_leaves_the_folder_and_no_summary(self):
         with mock.patch.object(pe.tempfile, "mkstemp", side_effect=KeyboardInterrupt):
             summary = self.interrupted()
         self.assertIsNone(summary)
-        self.assertFalse(self.task_dir.exists())
+        self.assertTrue(self.task_dir.exists())
+        self.assertFalse((self.task_dir / "task.yaml").exists())
 
-    def test_an_unpublished_rollback_keeps_foreign_files(self):
-        # Round 8: a folder this call created can still receive others' files before it is
-        # published; only this call's own files may go.
+    def test_a_failed_setup_deletes_nothing_it_finds(self):
+        # Round 9: a rollback cannot prove which files are its own, so there is none. Anything
+        # another process put in the folder -- even at this call's own paths -- stays.
         def foreign_then_fail(*args, **kwargs):
             (self.task_dir / "observed-author.json").write_text("{}", encoding="utf-8")
+            (self.task_dir / "workers" / "implementer" / "brief.md").write_text("theirs", encoding="utf-8")
             raise OSError(28, "No space left on device")
 
         with mock.patch.object(pe.tempfile, "mkstemp", side_effect=foreign_then_fail), \
@@ -579,7 +585,7 @@ class ProduceInterruptTest(ProduceFixture):
                               owner="me", task_id="t1", write="src/x.py")
         self.assertEqual(code, 2)
         self.assertTrue((self.task_dir / "observed-author.json").exists())
-        self.assertFalse((self.task_dir / "workers" / "implementer" / "brief.md").exists())
+        self.assertEqual((self.task_dir / "workers" / "implementer" / "brief.md").read_text(), "theirs")
 
     def test_a_contract_removed_during_the_run_keeps_the_records(self):
         # Round 8's P0: an absent task.yaml after publication must not look unpublished.
@@ -615,9 +621,7 @@ class ProduceInterruptTest(ProduceFixture):
                               owner="me", task_id="t1", write="src/x.py")
         self.assertEqual(code, 2)
         self.assertEqual((self.task_dir / "task.yaml").read_text(), '{"planted": true}')
-        # Only this call's own files went; the folder stays because the planted contract is in it.
-        self.assertFalse((self.task_dir / "workers").exists())
-        self.assertEqual([p.name for p in self.task_dir.iterdir()], ["task.yaml"])
+        self.assertTrue((self.task_dir / "workers" / "implementer" / "brief.md").exists())
 
 
 class Round3AccountingTest(unittest.TestCase):
