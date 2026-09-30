@@ -19,6 +19,8 @@
 !/.gitattributes
 !/roo-to-claude.md
 !/skills
+# Anthropic skills synced by Claude itself (a machine-local cache, not config)
+/skills/synced/
 !/agents
 !/commands
 !/hooks
