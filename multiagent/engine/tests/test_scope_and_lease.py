@@ -131,6 +131,8 @@ class LeaseFilesPreservationTest(unittest.TestCase):
         with pe._lease_lock(self.task_dir):
             self.assertTrue(lock.exists())
         self.assertFalse(lock.exists())
+        if sys.platform == "win32":
+            return  # replacing a held (open) lock is itself impossible on native Windows
         with pe._lease_lock(self.task_dir):
             lock.unlink()
             lock.write_text("theirs", encoding="utf-8")
@@ -160,6 +162,8 @@ class LeaseFilesPreservationTest(unittest.TestCase):
                 pass
             self.assertFalse(lock.exists())
             self.assertEqual(order, ["close", "unlink"])
+            if sys.platform == "win32":
+                return  # replacing a held (open) lock is itself impossible on native Windows
             with pe._lease_lock(self.task_dir):
                 lock.unlink()
                 lock.write_text("theirs", encoding="utf-8")

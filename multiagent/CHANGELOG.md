@@ -26,7 +26,7 @@ one codex-ceiling consultation.
   exclusively after reading the brief (an existing folder or link is refused), writes the contract
   `pending`, activates it and later finalizes it only under the lease lock while this run owns the
   lease, and never writes it when the lease was not acquired; cleanup never raises. It deletes
-  nothing but its own lease (generation-checked): a setup that fails after creating the folder
+  nothing but its own lease file (generation-checked) and its own `lease.lock` (identity-checked): a setup that fails after creating the folder
   leaves it as a record (rerun with another task ID), the brief is created exclusively, and the
   hidden `.task-initial.*.json` hard link to the first contract stays. `--dry-run` creates nothing.
 - Contract status `failed` is now valid (the benchmark driver already wrote it).

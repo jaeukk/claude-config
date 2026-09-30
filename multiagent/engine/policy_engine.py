@@ -3311,7 +3311,6 @@ def produce(
     contract_path = task_dir / "task.yaml"
     brief_copy = task_dir / "workers" / role / "brief.md"
     code, generation, lease_note = 2, None, "not acquired"
-    staging: str | None = None
     # Whether this call may have published task.yaml, which decides whether the lifecycle cleanup
     # and summary run. Set just *before* the link, because an interrupt can surface right after a
     # link that succeeded; cleared only when the link raised, which proves it did not happen.

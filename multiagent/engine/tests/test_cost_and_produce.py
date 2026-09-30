@@ -458,17 +458,19 @@ class ProduceRound3Test(ProduceFixture):
         acquired, err = [], io.StringIO()
         with mock.patch.object(pe.os, "link", side_effect=OSError(28, "No space left on device")), \
                 mock.patch.object(pe, "acquire_lease", side_effect=lambda *a: acquired.append(a)), \
+                mock.patch.object(pe, "dispatch_worker") as dispatched, \
                 mock.patch.object(pe.sys, "stderr", err):
             code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
                               owner="me", task_id="t1", write="src/x.py")
         self.assertEqual((code, acquired), (2, []))
+        dispatched.assert_not_called()
         self.assertIn("left as it is", err.getvalue())
         summaries = [l for l in err.getvalue().splitlines() if l.startswith("produce: {")]
         self.assertEqual(summaries, [])  # nothing was published, so no lifecycle summary
         self.assertFalse((self.task_dir / "task.yaml").exists())
         self.assertTrue((self.task_dir / "workers" / "implementer" / "brief.md").exists())
 
-    def test_a_published_contract_is_complete_and_no_staging_file_remains(self):
+    def test_a_published_contract_is_complete_and_no_rewrite_temp_file_remains(self):
         code, summary = self.run_capturing(lambda *a, **k: 0)
         self.assertEqual(code, 0)
         self.assertEqual(pe.validate_task(self.bundle, self.contract())[0], [])
@@ -495,9 +497,12 @@ class ProduceRound3Test(ProduceFixture):
             if path.name == "implementer":
                 (path / "brief.md").write_text("theirs", encoding="utf-8")
 
-        with mock.patch.object(Path, "mkdir", mkdir_then_plant), mock.patch.object(pe.sys, "stderr"):
+        with mock.patch.object(Path, "mkdir", mkdir_then_plant), \
+                mock.patch.object(pe, "dispatch_worker") as dispatched, \
+                mock.patch.object(pe.sys, "stderr"):
             code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
                               owner="me", task_id="t1", write="src/x.py")
+        dispatched.assert_not_called()
         self.assertEqual(code, 2)
         self.assertEqual((self.task_dir / "workers" / "implementer" / "brief.md").read_text(), "theirs")
         self.assertFalse((self.task_dir / "task.yaml").exists())
@@ -572,8 +577,7 @@ class ProduceInterruptTest(ProduceFixture):
         # It may surface just after a link that succeeded, so the task may be visible: keep it.
         with mock.patch.object(pe.os, "link", side_effect=KeyboardInterrupt):
             summary = self.interrupted()
-        self.assertIsNotNone(summary)
-        self.assertTrue(self.task_dir.exists())
+        self.assertTrue(summary["status"].startswith("pending"), summary)
 
     def test_an_interrupt_before_the_link_leaves_the_folder_and_no_summary(self):
         with mock.patch.object(pe.tempfile, "mkstemp", side_effect=KeyboardInterrupt):
@@ -591,10 +595,12 @@ class ProduceInterruptTest(ProduceFixture):
             raise OSError(28, "No space left on device")
 
         with mock.patch.object(pe.tempfile, "mkstemp", side_effect=foreign_then_fail), \
+                mock.patch.object(pe, "dispatch_worker") as dispatched, \
                 mock.patch.object(pe.sys, "stderr"):
             code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
                               owner="me", task_id="t1", write="src/x.py")
         self.assertEqual(code, 2)
+        dispatched.assert_not_called()
         self.assertTrue((self.task_dir / "observed-author.json").exists())
         self.assertEqual((self.task_dir / "workers" / "implementer" / "brief.md").read_text(), "theirs")
 
@@ -627,10 +633,12 @@ class ProduceInterruptTest(ProduceFixture):
             return real_link(src, dst, *args, **kwargs)  # FileExistsError: exclusive
 
         with mock.patch.object(pe.os, "link", side_effect=plant_then_link), \
+                mock.patch.object(pe, "dispatch_worker") as dispatched, \
                 mock.patch.object(pe.sys, "stderr"):
             code = pe.produce(self.bundle, self.repo, self.brief, tasks_root=self.tasks,
                               owner="me", task_id="t1", write="src/x.py")
         self.assertEqual(code, 2)
+        dispatched.assert_not_called()
         self.assertEqual((self.task_dir / "task.yaml").read_text(), '{"planted": true}')
         self.assertTrue((self.task_dir / "workers" / "implementer" / "brief.md").exists())
 
