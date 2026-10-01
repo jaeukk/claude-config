@@ -67,6 +67,45 @@ session's own permissions -- which is how every change this week reached the liv
   clone → commit → merge → deploy.
 - **Migration.** Move `temp/2026-09-18-worker-write` to the clone and continue there.
 
+## A-producer. TODO: the account carrying a task as a contract setting; Codex as a producer
+
+Proposed 2026-10-01 (session `orca-setting`, with a blindspot pass), not built. **Motivation:
+continuity.** When one account's window is spent, the conductor should steer producing work to
+another account or family by editing the contract, not by changing terminals. Today the family is
+chosen per call (`dispatch-worker --required-family`), the implementer is team-first from every
+terminal (D15), and a Codex producer can land nothing but `--out` text or a patch (A1).
+
+- **Field.** `producer_family` (`claude` | `codex`): producing roles resolve against it unless
+  `--required-family` overrides; `validate-task` requires `author_family` to match it when review
+  is planned; the hook refuses a native producer of the other family (in a Claude terminal with
+  `codex` set, an `Agent` spawn is a Claude producer). **Default is an open decision:** the
+  terminal's family (as proposed) inverts team-first on Codex terminals; team-first on every
+  terminal with the field as the override keeps the quota goal. Decide whether `bulk_worker` and
+  `runner`, which have their own pools, follow the field.
+- **Landing path for Codex producers: not a repository copy.** `--review-copy` refuses targets over
+  500 MB (`REVIEW_COPY_MAX_BYTES`) and the vault is 4.6 GB in 12,344 files, so a copy would refuse
+  the main producing workload. Use Codex's sandbox roots instead: an empty scratch cwd under
+  `workspace-write` plus `--add-dir <destination>`, so only the one destination is writable, and
+  reuse `--write`'s baseline, change set and restore unchanged (the 2026-09-27 lithography task
+  already ran Codex with `--add-dir` for a writable task folder). **Measure first**, as the
+  Claude `--restricted` flags were measured: a call asked to write inside and outside the added
+  directory, confirming the outside write is refused, with `/tmp` excluded as `--review-copy` does.
+- **Codex quota is the review pool and the engine cannot see it.** `accounts.probe` runs only for
+  backends with a `config_dir`, which Codex backends lack, and Codex's window is seven days. The
+  2026-09-23 benchmark's critic stayed blocked until 09-28 after Codex ran out. Port the Codex
+  reading `scripts/usage-watch.py` already makes into `accounts.probe`, and keep a review reserve
+  (say 30%) that producing work may not cross.
+- **Switch semantics.** Authorship accumulates, so one artifact produced by both families has no
+  eligible reviewer and the engine refuses a critic as mixed. Allow the switch at artifact
+  boundaries (a new note, not inside one: in the book-summarizer A/B the Codex arm silently
+  regularized six equation bodies), and make a task with a review budget decide at switch time
+  (review before switching, or drop the budget). One test for the post-switch behavior.
+- **Also:** the conductor's own turns always bill the terminal's login, so start conductors on the
+  account to keep; writes are never retried on a rate limit (by design), so document the recovery
+  sequence inspect the change set, `restore-write`, switch, re-dispatch; Codex workers do not get
+  `WORKER_BASELINE_PROMPT` (Claude `--append-system-prompt` only), so prepend it to Codex prompts.
+- **Order.** After the cut program: Stage 3 is still reshaping the engine this field would hook into.
+
 ## A-cut. Left uncovered by the 2026-09-30 cuts
 
 - **Nothing forces review of conductor code edits.** The `direct_code_files` cap is gone;
