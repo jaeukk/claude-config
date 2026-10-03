@@ -11,6 +11,14 @@ vault's agent definition and scripts resolve), and an authorship assertion recor
 contract after every built chapter so a later cross-family critic can be dispatched through
 the engine once the user records ``authorship_assertion``.
 
+Before a chapter's first attempt the driver harvests the owner's Zotero highlights for the
+chapter's pages (and the book's child notes for ``first_chapter``) with the vault's
+``99_SYSTEM/scripts/zotero_annotations.py``, runs ``owner-question-responder`` headless when the
+harvest lists questions, and passes the files to the worker as ``ANNOTATIONS_FILE``,
+``NOTES_FILE`` and ``RESPONSES_FILE``, so they land in the overview's first write. A failed
+harvest still yields a file that says so; the worker records "not harvested" instead of omitting
+the section.
+
 Unlike that precedent, the shell grant is a named allowlist (the PDF tools, python3 for the
 crops and gates, curl for the local Zotero API, and read-only file commands), not bare Bash.
 Containment is still the brief only: nothing here intercepts a write. Record that in the
@@ -59,6 +67,9 @@ SHELL_ALLOW = [
         "find", "stat", "file", "md5sum", "date", "echo",
     )
 ]
+#: The responder only renders and reads pages, so its shell grant is narrower.
+RESPONDER_ALLOW = [f"Bash({name}:*)" for name in ("pdftoppm", "pdftotext", "pdfinfo", "ls", "grep")]
+HARVEST = "99_SYSTEM/scripts/zotero_annotations.py"
 #: Measured 2026-09-22 (§20.1 smoke, 160 turns): 11 shell calls were denied, all of them
 #: shapes a prefix rule cannot match -- a leading `VAR=...`/`export`, a `for` loop, `cd`
 #: outside the vault, `bash script.sh`, `chmod` -- and the worker recovered every time. The
@@ -86,6 +97,7 @@ class Driver:
         self.timeout = timeout_min * 60
         self.dry_run = dry_run
         self.env = {**os.environ, "CLAUDE_CONFIG_DIR": str(TEAM_DIR)}
+        self.owner_fields: dict[str, list[str]] = {}
 
     def log(self, msg: str) -> None:
         """Append a timestamped line to the driver log and echo it."""
@@ -126,9 +138,11 @@ class Driver:
             f"focus: {chapter.get('focus', 'none beyond the agent definition')}",
             "allow-list: build it yourself with Glob over the book root; a basename absent there stays plain text",
             "Zotero MCP tools are unavailable in this run: read item metadata with "
-            f"`curl -s http://localhost:23119/api/users/{ZOTERO_USER}/items/{key}` "
-            "and owner annotations at `.../children`",
+            f"`curl -s http://localhost:23119/api/users/{ZOTERO_USER}/items/{key}`; the owner's "
+            "notes and highlights come only from the harvest files below",
             f"today: {dt.date.today():%Y-%m-%d}",
+            *self.owner_fields.get(str(chapter["chapter"]),
+                                   ["owner annotations: harvested at launch (dry run shows none)"]),
         ]
         return f"{self.brief}\n\n---\n# Per-chapter fields\n" + "\n".join(f"- {f}" for f in fields) + "\n"
 
@@ -157,7 +171,8 @@ class Driver:
                  f"{(result.stdout or result.stderr).strip()[:200]}")
 
     def record_attempt(self, chapter: dict, attempt: int, envelope: dict, exit_code: int | None,
-                       classification: str, built: bool, started: float) -> None:
+                       classification: str, built: bool, started: float,
+                       role: str = "implementer", agent: str = "book-summarizer") -> None:
         """Record the attempt's account, model, usage and cost on the contract (best effort).
 
         The same ``worker_attempt`` record ``dispatch-worker`` writes, marked ``source: external``,
@@ -168,7 +183,7 @@ class Driver:
         """
         event = {
             "account": "team", "config_dir": str(TEAM_DIR), "model": self.model,
-            "role": "implementer", "backend": "headless:book-summarizer",
+            "role": role, "backend": f"headless:{agent}",
             "classification": classification, "built": built, "exit": exit_code, "attempt": attempt,
             "reason": f"book_summarizer_team.py ch{chapter['chapter']}",
             "duration_s": round(time.time() - started, 1),
@@ -185,6 +200,87 @@ class Driver:
         if result.returncode:
             self.log(f"ch{chapter['chapter']}: record-attempt failed: "
                      f"{(result.stdout or result.stderr).strip()[:200]}")
+
+    def harvest(self, chapter: dict) -> list[str]:
+        """Harvest the chapter's owner annotations and answer their questions; return prompt fields."""
+        tag, key = f"ch{chapter['chapter']}", self.job.get("zotero_key", "none")
+        if key == "none":
+            return ["owner annotations: no Zotero record, nothing to harvest"]
+        runs = [("ANNOTATIONS_FILE", "annotations", ["--part", "highlights",
+                                                     "--pdf-pages", chapter["pdf_pages"]])]
+        if str(chapter["chapter"]) == str(self.job.get("first_chapter", 1)):
+            runs.append(("NOTES_FILE", "notes", ["--part", "notes"]))
+        fields = []
+        for name, stem, extra in runs:
+            out = self.work / f"{tag}.{stem}.md"
+            out.unlink(missing_ok=True)  # a harvest that dies at startup must not leave a stale file
+            proc = subprocess.run(
+                [sys.executable, str(self.vault / HARVEST), key, "--pdf", self.job["pdf"], *extra,
+                 "--out", str(out)], cwd=self.vault, capture_output=True, text=True, check=False)
+            self.log(f"{tag}: harvest {stem} exit {proc.returncode}: {proc.stdout.strip()[:160]}")
+            fields.append(f"{name}: `{out}`" if out.is_file() else
+                          f"{name}: not harvested (harvest exit {proc.returncode}, no file written)")
+        annotations = self.work / f"{tag}.annotations.md"
+        # A crashed harvest leaves no file (the script deletes --out first); the worker then
+        # records "not harvested" from the missing file instead of finding a stale one.
+        if annotations.is_file() and '"action": "question"' in annotations.read_text(
+                encoding="utf-8", errors="replace"):
+            responses = self.work / f"{tag}.responses.md"
+            responses.unlink(missing_ok=True)
+            if self.respond(chapter, annotations, responses):
+                fields.append(f"RESPONSES_FILE: `{responses}`")
+        return fields
+
+    def respond(self, chapter: dict, annotations: pathlib.Path, responses: pathlib.Path) -> bool:
+        """Run owner-question-responder headless on one harvest; True when it wrote its block."""
+        tag = f"ch{chapter['chapter']}"
+        prompt = "\n".join([
+            f"ANNOTATIONS_FILE: `{annotations}`", f"RESPONSES_FILE: `{responses}`",
+            f"RESPONDER_ID: {self.model}", f"PDF: `{self.job['pdf']}`",
+            f"page offset: printed_page = PDF_page - {self.job['offset']}",
+            f"Vault root / cwd: `{self.vault}`",
+            ("Render pages into the folder that holds RESPONSES_FILE. Call each shell command "
+             "directly, one per call."),
+        ])
+        argv = ["claude", "--model", self.model, "--agent", "owner-question-responder", "-p", prompt,
+                "--output-format", "json", "--permission-mode", "acceptEdits",
+                "--allowedTools", *RESPONDER_ALLOW, "Read", "Write", "Glob", "Grep",
+                "--strict-mcp-config", "--add-dir", str(self.work)]
+        attempt = 0
+        while attempt < 3:
+            gate.wait()
+            attempt += 1
+            started, timed_out = time.time(), False
+            try:
+                proc = subprocess.run(argv, cwd=self.vault, env=self.env, capture_output=True,
+                                      text=True, timeout=self.timeout, check=False)
+                out, code = proc.stdout, proc.returncode
+            except subprocess.TimeoutExpired as error:
+                out = error.stdout.decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
+                code, timed_out = None, True
+            try:
+                envelope = json.loads(out)
+            except (TypeError, ValueError):
+                envelope = {}
+            envelope = envelope if isinstance(envelope, dict) else {}
+            text = str(envelope.get("result", ""))
+            wrote = responses.is_file() and "owner-question-responses:end" in responses.read_text(
+                encoding="utf-8", errors="replace")
+            limited = not wrote and (envelope.get("api_error_status") == 429
+                                     or bool(LIMIT.search(text[:400])))
+            run_class = ("timeout" if timed_out else "rate_limited" if limited
+                         else "ok" if code == 0 and not envelope.get("is_error") else "error")
+            self.record_attempt(chapter, attempt, envelope, code, run_class, wrote, started,
+                                role="responder", agent="owner-question-responder")
+            self.log(f"{tag}: responder attempt {attempt} {run_class}, wrote={wrote}, "
+                     f"cost ${envelope.get('total_cost_usd', 0) or 0:.2f}")
+            if wrote:
+                return True
+            if not limited:
+                return False  # the worker then writes the explicit "unanswered" line
+            attempt -= 1  # a limit wait is not a real attempt, as for the builder
+            self.wait_for_reset(text)
+        return False
 
     def wait_for_reset(self, text: str) -> None:
         """Pause all lanes until the reset time named in ``text`` (fallback: 30 min)."""
@@ -219,6 +315,7 @@ class Driver:
             print(" ".join("<prompt>" if i == 6 else a for i, a in enumerate(argv)))
             print(self.prompt(chapter))
             return tag, "dry-run"
+        self.owner_fields[str(chapter["chapter"])] = self.harvest(chapter)
         attempts = 0
         while attempts < 3:
             gate.wait()

@@ -25,7 +25,7 @@ A call that starts with a variable assignment or `export`, a `for` loop, `cd` ou
    equation numbers.
 
 ## Provenance
-The frontmatter `agent:` line is `<BUILDER_ID> via book-summarizer v1.3 (claude), <today>`.
+The frontmatter `agent:` line is `<BUILDER_ID> via book-summarizer v1.4 (claude), <today>`.
 Copy `BUILDER_ID` verbatim from the per-chapter fields; keep your §8 `BUILDER:` line consistent.
 
 ## Write scope
