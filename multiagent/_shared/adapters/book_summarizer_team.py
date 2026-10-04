@@ -17,7 +17,8 @@ chapter's pages (and the book's child notes for ``first_chapter``) with the vaul
 harvest lists questions, and passes the files to the worker as ``ANNOTATIONS_FILE``,
 ``NOTES_FILE`` and ``RESPONSES_FILE``, so they land in the overview's first write. A failed
 harvest still yields a file that says so; the worker records "not harvested" instead of omitting
-the section.
+the section. After a chapter is built, the questions the responder could not answer are filed in
+the vault's ``40_Resources/99_Queries/Owner_Questions.md`` for a later wiki query.
 
 Unlike that precedent, the shell grant is a named allowlist (the PDF tools, python3 for the
 crops and gates, curl for the local Zotero API, and read-only file commands), not bare Bash.
@@ -70,6 +71,7 @@ SHELL_ALLOW = [
 #: The responder only renders (through page_images.py) and reads pages, so its grant is narrower.
 RESPONDER_ALLOW = [f"Bash({name}:*)" for name in ("python3", "pdftotext", "pdfinfo", "ls", "grep")]
 HARVEST = "99_SYSTEM/scripts/zotero_annotations.py"
+QUEUE = "40_Resources/99_Queries/Owner_Questions.md"
 #: Measured 2026-09-22 (§20.1 smoke, 160 turns): 11 shell calls were denied, all of them
 #: shapes a prefix rule cannot match -- a leading `VAR=...`/`export`, a `for` loop, `cd`
 #: outside the vault, `bash script.sh`, `chmod` -- and the worker recovered every time. The
@@ -227,12 +229,13 @@ class Driver:
             fields.append(f"{name}: `{out}`" if out.is_file() else
                           f"{name}: not harvested (harvest exit {proc.returncode}, no file written)")
         annotations = self.work / f"{tag}.annotations.md"
+        for stale in ("responses.md", "unanswered.jsonl"):  # never pass or file an earlier run's
+            (self.work / f"{tag}.{stale}").unlink(missing_ok=True)
         # A crashed harvest leaves no file (the script deletes --out first); the worker then
         # records "not harvested" from the missing file instead of finding a stale one.
         if annotations.is_file() and '"action": "question"' in annotations.read_text(
                 encoding="utf-8", errors="replace"):
             responses = self.work / f"{tag}.responses.md"
-            responses.unlink(missing_ok=True)
             if self.respond(chapter, annotations, responses):
                 fields.append(f"RESPONSES_FILE: `{responses}`")
         return fields
@@ -242,6 +245,7 @@ class Driver:
         tag = f"ch{chapter['chapter']}"
         prompt = "\n".join([
             f"ANNOTATIONS_FILE: `{annotations}`", f"RESPONSES_FILE: `{responses}`",
+            f"UNANSWERED_FILE: `{self.work / f'{tag}.unanswered.jsonl'}`",
             f"RESPONDER_ID: {self.model}", f"PDF: `{self.job['pdf']}`",
             f"page offset: printed_page = PDF_page - {self.job['offset']}",
             f"Vault root / cwd: `{self.vault}`",
@@ -288,6 +292,26 @@ class Driver:
             self.wait_for_reset(text)
         return False
 
+    def file_questions(self, chapter: dict) -> None:
+        """File the built chapter's unanswered owner questions for a later wiki query."""
+        tag, note = f"ch{chapter['chapter']}", self.overview(chapter)
+        unanswered = self.work / f"{tag}.unanswered.jsonl"
+        responses = self.work / f"{tag}.responses.md"
+        if not (note and responses.is_file() and "owner-question-responses:end"
+                in responses.read_text(encoding="utf-8", errors="replace")):
+            return  # no responder block reached this chapter's note
+        if not unanswered.is_file():
+            self.log(f"{tag}: questions NOT filed: the responder wrote no UNANSWERED_FILE; its "
+                     f"'Cannot answer' questions are only in {note.name}")
+            return
+        if not unanswered.read_text(encoding="utf-8").strip():
+            return
+        proc = subprocess.run(
+            [sys.executable, str(self.vault / HARVEST), "--file-questions", str(unanswered),
+             str(self.work / f"{tag}.annotations.md"), note.stem, str(self.vault / QUEUE)],
+            cwd=self.vault, capture_output=True, text=True, check=False)
+        self.log(f"{tag}: file questions exit {proc.returncode}: {proc.stdout.strip()[:160]}")
+
     def wait_for_reset(self, text: str) -> None:
         """Pause all lanes until the reset time named in ``text`` (fallback: 30 min)."""
         with lock:
@@ -315,6 +339,8 @@ class Driver:
         tag = f"ch{chapter['chapter']}"
         if self.done(chapter):
             self.log(f"{tag}: already built ({self.overview(chapter).name}), skipped")
+            if not self.dry_run:  # an interrupt may have come between build and filing
+                self.file_questions(chapter)
             return tag, "skipped"
         if self.dry_run:
             argv = self.command(chapter)
@@ -368,6 +394,7 @@ class Driver:
                 self.log(f"{tag}: BUILT in {(time.time() - started) / 60:.1f} min, "
                          f"cost ${envelope.get('total_cost_usd', 0):.2f}, error_flag={err}")
                 self.record_author(chapter)
+                self.file_questions(chapter)
                 return tag, "built"
             self.log(f"{tag}: attempt {attempts} produced no valid overview note "
                      f"(error_flag={err}); head: {text[:160]!r}")
