@@ -106,6 +106,46 @@ terminal (D15), and a Codex producer can land nothing but `--out` text or a patc
   `WORKER_BASELINE_PROMPT` (Claude `--append-system-prompt` only), so prepend it to Codex prompts.
 - **Order.** After the cut program: Stage 3 is still reshaping the engine this field would hook into.
 
+## A-goal. TODO: `/goal` as the loop for single-session work, outside the audit budget
+
+Proposed 2026-10-04 (session in `30_Codes/modules`), not built; deferred for lack of time.
+**Motivation:** the default is a single session (SKILL "Scope"), which matched the engine on
+test-oracle tasks at a fraction of the cost (2026-09-29/30). `/goal` is the host's own loop for
+that case: it keeps one session working until a condition holds, so the engine stays reserved for
+(a)–(c).
+
+- **What it is** (code.claude.com/docs/en/goal, read 2026-10-04): a session-scoped prompt-based
+  Stop hook. After each turn the small fast model (Haiku unless `ANTHROPIC_DEFAULT_HAIKU_MODEL` is
+  set) judges the condition from the transcript alone, calling no tools: not met, met, or
+  impossible. There is no turn or cost cap; the condition (up to 4,000 characters) must carry one.
+  It runs under `claude -p` to completion in one invocation, printing nothing until the end
+  without `--output-format stream-json --verbose`. Unavailable under `disableAllHooks` or
+  `allowManagedHooksOnly`.
+- **Codex's `/goal` differs.** `~/.codex/goals_1.sqlite` keeps a native `token_budget` and the
+  statuses `usage_limited` and `budget_limited`. A Stop hook's `continue:false` is ignored during
+  a Codex goal (multi-agent-starter design-basis D10, measured), so only an external
+  `thread/goal/clear` stops one.
+- **Candidate shape, cheapest first.**
+  1. SKILL "Scope": for work with a test oracle, run the single session under `/goal`, with a
+     condition that has (i) an end state shown by command output; (ii) constraints that close the
+     cheap path to it (the checker is not edited, no cache or checkpoint is reused, a file scope);
+     (iii) a turn cap, plus an acceptable outcome for a legitimate blocker ("record it as
+     blocked"), so a missing dependency neither churns nor reads as impossible.
+  2. A goal-condition template in `_templates/` with those three parts.
+  3. Only if 1–2 see use: a `produce` option that runs a team producer as `claude -p "/goal …"`.
+     Check first: the dispatch timeout against a multi-turn run, whether `total_cost_usd` covers
+     the whole loop, and permission prompts under `-p`.
+- **Rules to state with it.** The goal evaluator is not a review (same vendor, small model,
+  transcript only): it spends no `audit_cycles` and never stands in for a critic or verifier.
+  Never put a review inside a goal condition ("until the Codex review is clean"): that rebuilds
+  the open-ended audit loop the review discipline exists to stop, and once the budget is spent
+  `dispatch-worker` refuses the critic, so the goal churns until its turn cap. Sequence instead:
+  goal to the oracle-verified state, then at most one `review` call.
+- **Open decisions.** Whether 3 is worth building. Whether unattended goals should require the
+  `coach --hook` usage guard (D10; on Claude its `continue:false` stops a goal), which is not
+  installed on this machine as of 2026-10-04.
+- **Order.** 1 is a doc change and can land any time; 2–3 after the cut program, like A-producer.
+
 ## A-cut. Left uncovered by the 2026-09-30 cuts
 
 - **Nothing forces review of conductor code edits.** The `direct_code_files` cap is gone;
