@@ -67,8 +67,8 @@ SHELL_ALLOW = [
         "find", "stat", "file", "md5sum", "date", "echo",
     )
 ]
-#: The responder only renders and reads pages, so its shell grant is narrower.
-RESPONDER_ALLOW = [f"Bash({name}:*)" for name in ("pdftoppm", "pdftotext", "pdfinfo", "ls", "grep")]
+#: The responder only renders (through page_images.py) and reads pages, so its grant is narrower.
+RESPONDER_ALLOW = [f"Bash({name}:*)" for name in ("python3", "pdftotext", "pdfinfo", "ls", "grep")]
 HARVEST = "99_SYSTEM/scripts/zotero_annotations.py"
 #: Measured 2026-09-22 (§20.1 smoke, 160 turns): 11 shell calls were denied, all of them
 #: shapes a prefix rule cannot match -- a leading `VAR=...`/`export`, a `for` loop, `cd`
@@ -141,6 +141,8 @@ class Driver:
             f"`curl -s http://localhost:23119/api/users/{ZOTERO_USER}/items/{key}`; the owner's "
             "notes and highlights come only from the harvest files below",
             f"today: {dt.date.today():%Y-%m-%d}",
+            f"RENDER_DIR: `{self.render_dir(chapter)}` (page renders shared with the responder; "
+            "render and crop only with 99_SYSTEM/scripts/page_images.py)",
             *self.owner_fields.get(str(chapter["chapter"]),
                                    ["owner annotations: harvested at launch (dry run shows none)"]),
         ]
@@ -201,6 +203,10 @@ class Driver:
             self.log(f"ch{chapter['chapter']}: record-attempt failed: "
                      f"{(result.stdout or result.stderr).strip()[:200]}")
 
+    def render_dir(self, chapter: dict) -> pathlib.Path:
+        """The chapter's page-render folder, shared by the responder and the worker (contract §5b)."""
+        return self.work / f"ch{chapter['chapter']}.pages"
+
     def harvest(self, chapter: dict) -> list[str]:
         """Harvest the chapter's owner annotations and answer their questions; return prompt fields."""
         tag, key = f"ch{chapter['chapter']}", self.job.get("zotero_key", "none")
@@ -239,8 +245,8 @@ class Driver:
             f"RESPONDER_ID: {self.model}", f"PDF: `{self.job['pdf']}`",
             f"page offset: printed_page = PDF_page - {self.job['offset']}",
             f"Vault root / cwd: `{self.vault}`",
-            ("Render pages into the folder that holds RESPONSES_FILE. Call each shell command "
-             "directly, one per call."),
+            f"RENDER_DIR: `{self.render_dir(chapter)}`",
+            "Call each shell command directly, one per call.",
         ])
         argv = ["claude", "--model", self.model, "--agent", "owner-question-responder", "-p", prompt,
                 "--output-format", "json", "--permission-mode", "acceptEdits",
