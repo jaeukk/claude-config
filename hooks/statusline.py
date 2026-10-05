@@ -2,7 +2,7 @@
 """Claude Code status line: three stacked lines (plus wrap).
 
   1. user@host:/cwd │  branch*            (PS1 prefix + git branch, * = dirty)
-  2. model · effort │ ctx used │ out │ pony:<mode> │ $cost
+  2. model · effort │ ctx used │ pony:<mode> │ tokens used this session
   3. skills: every skill invoked this session (wraps onto line 4+ when long)
 
 Quota bars were retired 2026-09-08 (Orca shows them natively); the previous
@@ -16,7 +16,6 @@ too wide pushes them underneath.
 Status JSON schema (subset we use):
   { "model": {"id", "display_name"}, "effort": {"level"},
     "transcript_path": "...",
-    "cost": {"total_cost_usd"},
     "context_window": {"context_window_size": int, "current_usage": {...}} }
 """
 import json
@@ -134,7 +133,7 @@ PERSISTENT_SKILLS = {
 
 
 def _scan_transcript(transcript_path: str):
-    """(latest assistant `message.usage`, skills invoked in order) from the transcript.
+    """(latest `message.usage`, session tokens used, skills in order) from the transcript.
 
     Skills arrive two ways: as `Skill` tool_use blocks (model-invoked) and as
     `<command-name>/x</command-name>` in user turns (typed slash commands). Only
@@ -142,16 +141,19 @@ def _scan_transcript(transcript_path: str):
 
     The last turn's context size is input_tokens + cache_read + cache_creation
     (all tokens sent to the model for that turn); output_tokens is the reply.
+    Tokens used = those four summed over every API call. One call spans several
+    JSONL lines that repeat its usage, so calls are keyed by message id.
+    Subagent transcripts are separate files and are not counted.
     """
     if not transcript_path:
-        return None, []
+        return None, 0, []
     try:
         with open(transcript_path, "r", encoding="utf-8") as fh:
             lines = fh.readlines()
     except OSError:
-        return None, []
+        return None, 0, []
 
-    usage, skills, known = None, [], PERSISTENT_SKILLS
+    usage, per_call, skills, known = None, {}, [], PERSISTENT_SKILLS
     for line in lines:
         line = line.strip()
         if not line:
@@ -167,6 +169,10 @@ def _scan_transcript(transcript_path: str):
         u = msg.get("usage")
         if isinstance(u, dict) and u.get("input_tokens") is not None:
             usage = u  # keep overwriting: the last one wins
+            per_call[msg.get("id") or len(per_call)] = sum(
+                u.get(k) or 0 for k in ("input_tokens", "output_tokens",
+                                        "cache_read_input_tokens",
+                                        "cache_creation_input_tokens"))
         content = msg.get("content")
         if isinstance(content, list):
             for block in content:
@@ -176,7 +182,7 @@ def _scan_transcript(transcript_path: str):
                     if (isinstance(name, str) and name.rsplit(":", 1)[-1] in known
                             and name not in skills):
                         skills.append(name)
-    return usage, skills
+    return usage, sum(per_call.values()), skills
 
 
 def _skills_lines(skills: list, budget: int) -> list:
@@ -203,9 +209,6 @@ def main() -> None:
         model_name = f"{model_name} · {effort}"
     model_id = model.get("id") or ""
 
-    cost = data.get("cost") or {}
-    total_cost = cost.get("total_cost_usd") or 0.0
-
     cwd = (data.get("workspace") or {}).get("current_dir") or data.get("cwd", "")
 
     sep = _ansi("90", " │ ")
@@ -218,7 +221,7 @@ def main() -> None:
         line1.append(_ansi("35", f" {branch}"))
 
     # line 2: model, context — compact, and trimmed to leave room for the pills
-    usage, skills = _scan_transcript(data.get("transcript_path", ""))
+    usage, used, skills = _scan_transcript(data.get("transcript_path", ""))
     usage = (data.get("context_window") or {}).get("current_usage") or usage
     line2 = [("model", _ansi("1;36", model_name.replace(" context)", ")")))]
     if usage:
@@ -227,20 +230,18 @@ def main() -> None:
             + (usage.get("cache_read_input_tokens") or 0)
             + (usage.get("cache_creation_input_tokens") or 0)
         )
-        out = usage.get("output_tokens") or 0
         limit = _context_limit(data, model_id)
         pct = (ctx / limit * 100) if limit else 0.0
         # color the context fraction by how full it is
         color = "32" if pct < 50 else ("33" if pct < 80 else "31")
-        line2.append(("ctx", _ansi(color, f"ctx {_human(ctx)}/{_human(limit)} ({pct:.0f}%)")))
-        line2.append(("out", _ansi("90", f"out {_human(out)}")))
+        line2.append(("ctx", _ansi(color, f"ctx {pct:.0f}%")))
     mode = _ponytail_mode()
     if mode:
         line2.append(("pony", _ansi("33", f"pony:{mode}")))
-    line2.append(("cost", _ansi("90", f"${total_cost:.2f}")))
+    line2.append(("used", _ansi("90", f"used {_human(used)}")))
 
     # lines 3+: every skill invoked this session
-    lines = [sep.join(line1), _fit(line2, ("out", "cost", "pony"), budget)]
+    lines = [sep.join(line1), _fit(line2, ("used", "pony"), budget)]
     lines += _skills_lines(skills, budget)
     sys.stdout.write("\n".join(lines))
 
