@@ -64,29 +64,27 @@ def numbers(text: str) -> set[str]:
     return out
 
 
-# TeX whose backslashes JavaScript dropped: '\\approx' becomes 'approx'; '\\beta', '\\varepsilon', '\\frac' and
-# '\\rho' become control characters. Long command names are found anywhere in a run of letters; short
-# ones only as a whole run (so a variable like "pi_x" in \\text{} or a subscript does not trip it).
-LONG_CMDS = ("approx", "frac", "sqrt", "langle", "rangle", "infty", "propto", "simeq", "lesssim", "gtrsim",
-             "equiv", "times", "cdot", "partial", "nabla", "alpha", "gamma", "delta", "epsilon", "theta",
-             "lambda", "sigma", "omega", "mathbf", "mathrm", "mathcal", "operatorname", "begin", "widetilde",
-             "overline", "Delta", "Sigma", "Omega", "Lambda")
-SHORT_CMDS = {"pi", "to", "le", "ge", "leq", "geq", "ll", "gg", "sim", "chi", "phi", "rho", "ell", "eta", "nu",
-              "mu", "xi", "tau", "int", "sum", "exp", "log", "sin", "cos", "neq", "Phi", "vb", "abs", "dd"}
 TEXT_GROUPS = re.compile(r"\\(?:text|textrm|textit|textbf|mathrm|operatorname|mbox|mathit)\s*\{[^{}]*\}|\\rm\s*[A-Za-z]+")
 
 
-def lost_backslashes(tex: str) -> str | None:
-    """Return why `tex` looks like TeX whose backslashes were dropped by JavaScript, or None."""
+def lost_backslashes(tex: str, cmds: set[str]) -> str | None:
+    """Return why `tex` looks like TeX whose backslashes JavaScript dropped, or None.
+
+    `cmds` are the command names (2+ letters) written in the page source, where any stripped command
+    came from. A stripped command leaves its name at the end of a bare letter run ('x\\le y' becomes
+    'xle y'); '\\nu' and '\\to' leave a newline or tab before the rest; '\\beta', '\\varepsilon',
+    '\\frac' and '\\rho' leave control characters.
+    """
     if re.search(r"[\x08\x0b\x0c\r]", tex):
         return "a control character (\\b, \\v, \\f or \\r from \\beta, \\varepsilon, \\frac, \\rho)"
-    # tabs and newlines are legitimate in display math, but not followed by the rest of \\to, \\nu, …
-    if m := re.search(r"\t(?:o(?![A-Za-z])|heta|au(?![A-Za-z])|imes|ilde|ext)|\n(?:u(?![A-Za-z])|abla|eq(?![A-Za-z])|ot(?![A-Za-z]))", tex):
-        return f"a tab or newline where a TeX command was ({m.group(0)!r})"
-    for run in re.findall(r"(?<![\\A-Za-z])[A-Za-z]+", TEXT_GROUPS.sub(" ", tex)):
-        hit = next((c for c in LONG_CMDS if c in run), None) or (run if run in SHORT_CMDS else None)
-        if hit:
-            return f"'{hit}' without its backslash"
+    t = TEXT_GROUPS.sub(" ", tex)
+    alt = lambda names: "|".join(map(re.escape, sorted(names, key=len, reverse=True)))
+    if cmds and (m := re.search(r"(?<![\\A-Za-z])[A-Za-z]*?(" + alt(cmds) + r")(?![A-Za-z])", t)):
+        return f"'{m.group(1)}' without its backslash"
+    for esc, ch in (("n", "\n"), ("t", "\t")):
+        rest = {c[1:] for c in cmds if c[0] == esc}
+        if rest and (m := re.search(ch + "(" + alt(rest) + r")(?![A-Za-z])", t)):
+            return f"a {'newline' if esc == 'n' else 'tab'} where \\{esc}{m.group(1)} was"
     return None
 
 
@@ -282,9 +280,15 @@ def check_accuracy(src_html: str, dom_html: str, audit: dict, sources: dict[str,
                 if re.sub(r"\W+", "", "".join(t for t, _ in text_runs(el))) and scope_of(el) is None:
                     probs.append(f"UNSOURCED block <{el.tag}> has no data-src: “{el.text().strip()[:60]}”")
 
+    # TeX found verbatim in the page source or a note never passed through JS, so it kept its backslashes
+    # (a match right after a letter or backslash is a stripped command: "u_c" inside "\nu_c")
+    written = norm_tex(htmllib.unescape(src_html)) + "§" + "§".join(maths.values())
+    cmds = set(re.findall(r"\\([A-Za-z]{2,})", htmllib.unescape(src_html)))
+    handwritten = lambda t: bool(t) and re.search(("(?<![\\\\A-Za-z])" if t[0].isalpha() else "") + re.escape(t), written) is not None
+
     # formulas: TeX that lost its backslashes (any scope), numbers, and relations must be the notes' own math
     for m in audit.get("math", []):
-        if why := lost_backslashes(m["tex"]):
+        if (why := lost_backslashes(m["tex"], cmds)) and not handwritten(norm_tex(m["tex"])):
             probs.append(f"TEXLOST  ${m['tex'][:60]}$ has {why}: write TeX in JavaScript with String.raw")
         if m.get("illustrative"):
             continue
@@ -463,10 +467,14 @@ def _selftest() -> None:
          "$$\\xi\\sim\\ell_t\\,e^{\\pi^2\\ell_t/\\lambda_e}$$\nThe window widens with stealthiness. Power is 3 mW.\n"
          "The invalid model y=x is rejected; use $y=-x$. A loss of $-30$ dB. Holds for $2k\\le K$ only.\n")
     srcs = {"A": A, "B": "Gap at 0.45. See [[A|the first note]].\n", "C": "Unrelated note, 99.\n",
-            "D": "> [!formula] x\n> $$\n> \\frac{\\left\\langle P_a\\right\\rangle}{P_0}\n> \\simeq 1-\\exp\\!\\left(-\\frac{L}{\\ell_a^B}\\right).\n> $$\n"}
+            "D": "> [!formula] x\n> $$\n> \\frac{\\left\\langle P_a\\right\\rangle}{P_0}\n> \\simeq 1-\\exp\\!\\left(-\\frac{L}{\\ell_a^B}\\right).\n> $$\n",
+            "E": "$$\nu(x)=\\sigma_{abs}\n$$\n"}
 
-    def run(body: str, copy: bool = False, plots: list | None = None) -> list[str]:
-        """Check `body` as if rendered: $…$ become typeset math items, q/blockquote become quotes."""
+    def run(body: str, copy: bool = False, plots: list | None = None, js: str | None = None) -> list[str]:
+        """Check `body` as if rendered: $…$ become typeset math items, q/blockquote become quotes.
+
+        With `js`, the page source is that script alone, as if it had written `body`.
+        """
         root, math = parse(body), []
         for n in root.iter():
             for c in n.children:
@@ -478,7 +486,7 @@ def _selftest() -> None:
         quotes = [{"text": q.text(), "src": " ".join(scope_of(q) or []) or None} for q in root.iter() if q.tag in ("q", "blockquote")]
         dom = re.sub(r"\$[^$]+\$", "<mjx-container></mjx-container>", body)
         page = f"<html><body><main>{dom}</main></body></html>"
-        return check_accuracy(f"<main>{body}</main>", page, {"math": math, "quotes": quotes, "plots": plots or []}, srcs, copy)
+        return check_accuracy(f"<main></main><script>{js}</script>" if js else f"<main>{body}</main>", page, {"math": math, "quotes": quotes, "plots": plots or []}, srcs, copy)
 
     has = lambda probs, kind: any(p.startswith(kind) for p in probs)
     # numbers: scoped, unsourced, editorial, illustrative, unknown source
@@ -518,14 +526,18 @@ def _selftest() -> None:
     assert run('<p data-src="A">intensity <span data-src="editorial">$|x|^2/N=1$</span></p>') == []
     assert run('<p data-src="D">$\\frac{\\langle P_a\\rangle}{P_0}\\simeq 1-\\exp(-\\frac{L}{\\ell_a^B})$</p>') == []
     # TeX that JavaScript stripped of its backslashes, however the string was written
-    assert has(run('<p data-src="A">$xapprox y$</p>'), "TEXLOST")                     # `$x\approx y$` in a nested template
-    assert has(run('<p data-src="A">$qaapprox2pi$</p>'), "TEXLOST")
-    assert has(run('<p data-src="A">$S(q\to0)$</p>'.replace("\\t", "\t")), "TEXLOST")      # \to became a tab + 'o'
-    assert has(run('<p data-src="A">$\x0crac{1}{2}$</p>'), "TEXLOST")                 # \frac became a form feed
-    assert has(run('<p data-src="A">$\nu_c$</p>'.replace("\\n", "\n")), "TEXLOST")      # \nu became a newline + 'u'
-    for ok in ("a=b\n+c", "x\n\\to y", r"a \text{ to } b", r"\phi_{\rm sigma}", r"\Sigma_{\rm ISA}", r"n_{\text{eff}}", r"\left\langle P_a\right\rangle", r"f_c=0.41\,\mathrm{MHz}",
-               r"k_r\ell_s^0", r"\mathrm{Var}[\ln g]", r"\phi_{\rm paper}"):
-        assert lost_backslashes(ok) is None, ok
+    T = lambda tex, js: has(run(f'<p data-src="A">${tex}$</p>', js=js), "TEXLOST")
+    assert T("xapprox y", r"`${`$x\approx y$`}`")                         # the nested template
+    assert T("xle y", r"`${`$x\le y$`}`") and T("psi", r"'$\psi$'")       # glued short command; any command
+    assert T("qaapprox2pi", r"'$qa\approx2\pi$'") and T("lambda_e", r"'$\lambda_e$'")  # A's \lambda_e: no exemption
+    assert T("S(q\to0)", r"'$S(q\to0)$'") and T("\nu_c", r"'$\nu_c$'")    # tab + 'o', newline + 'u'
+    assert T("\x0crac{1}{2}", r"'$\frac{1}{2}$'")                         # form feed
+    # TeX written in the page or found in a note is exempt, so verbatim H_{int} or a line starting with u passes
+    assert not has(run(r'<p data-src="A">$H_{int}$ by $\int f$</p>'), "TEXLOST")
+    assert run('<p data-src="E">$\nu(x)=\\sigma_{abs}$</p>', js=r"String.raw`$\abs{x}$, $\nu$`") == []
+    for ok in ("a=b\n+c", "x\n\\to y", r"a \text{ to } b", r"\phi_{\rm sigma}", r"\Sigma_{\rm ISA}", r"n_{\text{eff}}", r"\angle x", r"\Delta_{let}",
+               r"\left\langle P_a\right\rangle", r"f_c=0.41\,\mathrm{MHz}", r"k_r\ell_s^0", r"\mathrm{Var}[\ln g]", r"\phi_{\rm paper}"):
+        assert lost_backslashes(ok, {"to", "text", "rm", "le", "sigma", "angle", "ln", "nu", "approx"}) is None, ok
     # plot labels and citekeys
     assert has(run('<p data-src="A">x</p>', plots=[{"texts": ["Measured gain 999"], "src": "A"}]), "NUMBER   999")
     assert run('<p data-src="A">x</p>', plots=[{"texts": ["onset 0.35"], "src": "A"}]) == []
