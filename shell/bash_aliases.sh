@@ -207,7 +207,8 @@ backupVault() {
 }
 
 _rsyncRun() {
-    local -a opts=(-avul --no-owner --no-group --no-perms --info=progress2)
+    # --no-links: the exFAT backup drive cannot store symlinks.
+    local -a opts=(-avul --no-links --no-owner --no-group --no-perms --info=progress2)
 
     if [ -f "${HOME}/.rsync-exclude" ]; then
         opts+=("--exclude-from=${HOME}/.rsync-exclude")
@@ -230,7 +231,6 @@ sync2L() {
         echo "$BACKUP_VOLUME_LABEL is not mounted at $src; run mountBackup first."
         return 1
     fi
-    _rsyncRun "${src}/.rsync-exclude" "${HOME}/.rsync-exclude" || return 1
     for dir in "${SYNC_DIRS[@]}"; do
         echo "-- Syncing $dir --"
         mkdir -p "${rsync_dst}/${dir}" || return 1
@@ -259,7 +259,6 @@ sync2E() {
         echo "$BACKUP_VOLUME_LABEL is not mounted at $dst; run mountBackup first."
         return 1
     fi
-    _rsyncRun "${HOME}/.rsync-exclude" "${dst}/.rsync-exclude" || return 1
     for dir in "${SYNC_DIRS[@]}"; do
         echo "-- Backing up $dir to $BACKUP_VOLUME_LABEL --"
         mkdir -p "${dst}/${dir}" "${backup_dir}/${dir}" || return 1

@@ -127,6 +127,19 @@ Under every `<root>`:
 - `40_Manuscript/` — manuscript-related notes
 - `ResearchPlan.md` — overall research plan and pomodoro tasks
 
+**Wording in research notes** (adopted 2026-10-15). Notes are records for later
+use (paper writing, future work), read by someone without this session's context.
+
+- **Straightforward terms, understandable with the least context.** A reader should
+  not need to scan earlier notes or the chat history. Describe the operation itself
+  ("fit the even-indexed λ, predict the odd-indexed λ") rather than session jargon,
+  code identifiers, or shorthand ("slots", "aliasing", "1-SE rule"); if a term is
+  unavoidable, define it where it is used.
+- **No terms that overstate what was done.** Don't borrow vocabulary from a method
+  that hasn't been carried out — e.g. "training", "held-out", "ML target/slots"
+  for least-squares fits when no machine-learning model exists yet. It gives the
+  wrong impression. Name planned methods only as plans.
+
 # Zotero
 
 Zotero **is writable**, despite the local REST API (`localhost:23119/api`) being
@@ -196,6 +209,37 @@ Other recurring traps:
 - `qstat -x` history is purged quickly. For a job it no longer knows, fall back to
   the Gmail **`HPC notices/Nurion`** label — query by label *display name*, since
   the label-ID form returns nothing.
+
+# HPC — Princeton Della
+
+Princeton Research Computing's general-purpose **Slurm** cluster (in use since 2026-10).
+Official docs are distilled in the vault at
+`40_Resources/20_LongForms/40_Manuals/Princeton_DellaManual_2026/` (wiki page `[[Della]]`);
+the live commands `qos`, `checkquota`, `shownodes`, `gfree` override them — on 2026-10-14
+the live QOS limits were already higher than the web tables.
+
+- **Access:** `ssh della` (user `jaeukk`) jumps through `tigressgateway.princeton.edu`, so no
+  VPN is needed from KAIST. Auth is **Duo** (interactive), which I cannot supply — same rule
+  as KISTI: `ssh -O check della` first; if dead, ask the user to open it; never retry. GPU
+  work and GPU builds belong on `della-gpu`.
+- **Paths:** Slurm account `torquato`. Work in `/scratch/gpfs/TORQUATO/jaeukk/` (fast, **not
+  backed up**, not purged). Archive finished output to `/tigress/jaeukk/` or
+  `/projects/TORQUATO/` (backed up) — never write a running job's output there. `/home` is
+  ~50 GiB and was ~89% full on 2026-10-14; keep environments and caches off it.
+- **Slurm traps:** don't pass `--qos` (assigned from `--time`); `--time` ≤ 61 min lands in
+  `test` (2 running / 200 queued per user), so use ≥ 62 min for many short jobs; the longest
+  CPU QOS is `vlong` at 144 h; `MaxArraySize` 2501; default memory 4 GB/core; launch MPI with
+  `srun`, never `mpirun`; **compute nodes have no internet** (stage dependencies on the login
+  node); `--constraint=genoa|amd|intel` picks the CPU type, and `-march=native` builds on
+  della9 can hit "Illegal instruction" on other node types.
+- **Suspension policies:** zero-GPU-utilization jobs are killed after 2 h; overallocated CPU
+  memory and multi-core serial jobs get warnings, then ≥ 7 days blocked. Check with
+  `jobstats <id>`.
+- **Maintenance:** second Tuesday of every month, ~06:00–14:00 US Eastern (19:00–03:00 KST
+  in US daylight time, 20:00–04:00 in winter); jobs whose `--time` crosses it stay pending
+  with `ReqNodeNotAvail, Reserved for maintenance`.
+- **Monitoring:** `sim-tracker`'s PBS-mail/`qstat` path does not apply; poll with
+  `squeue`/`sacct`/`jobstats`.
 
 # Common Python modules (`~/30_Codes/python/Common/`)
 

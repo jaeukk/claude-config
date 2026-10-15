@@ -62,6 +62,9 @@ w:raw-build <KEY> [<KEY> ...]` — does steps 1–2, is idempotent ("already tag
 `PATCH 204` on success. The owner approved Web API tag writes on 2026-09-30 through a Bash allow
 rule for exactly this command in the vault's `.claude/settings.local.json`; auto mode's classifier
 blocks other forms of the same write (inline `python3 -` / `curl -X PATCH`) as external writes.
+Its companion `python3 99_SYSTEM/scripts/zotero_add_collection.py <COLLECTION_KEY> <KEY> ...` files
+existing items into a collection the same way (resends the full `collections` list; idempotent).
+First used 2026-10-09 at the owner's request; the Connector cannot file an item that already exists.
 
 **API key.** The write-enabled key lives in `~/.config/zotero/api_key` (chmod 600, may end in a
 newline — strip it). Read it from that file inside the script that makes the call; never put it in
