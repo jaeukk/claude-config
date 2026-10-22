@@ -1,97 +1,56 @@
 ---
 name: sim-update
-description: Reconcile a project's HPC simulation registry (20_Progress/SimulationRegistry.md) against the sim-tracker blocks in its research notes, poll the scheduler (PBS on Nurion, SLURM on Neuron), verify finished jobs fail-closed (exit status plus output/log checks), write results back, and close only trackers that are provably done. Use when the user invokes /sim-update or asks to reconcile, verify, or close simulation trackers. For a cheap status-only poll, use sim-tracker instead.
+description: Reconcile a project's simulation registry with research-note trackers, poll PBS, Slurm, or explicitly identified local runs, verify terminal jobs against scheduler and application evidence, and close only proven or owner-overridden trackers. Use for /sim-update or requests to reconcile, verify, or close simulations. Use sim-tracker for a cheap status-only poll.
 ---
 
-**Locate first.** `<root>` is the project's Obsidian notes root, recorded in the project's
-`CLAUDE.md` (or `AGENTS.md`); the global notes convention puts research notes in
-`<root>/10_ResearchNotes/{01_NotConfirmed,02_Confirmed}/` and the registry at
-`<root>/20_Progress/SimulationRegistry.md`. All relative paths below are under `<root>`. If the
-project records no `<root>`, or has no registry, ask; do not guess. Remote access follows the
-HPC section of the global instructions (socket check first, never retry ssh after an auth
-failure, file I/O only through the `-dm` host).
+# sim-update
 
-Poll the project's HPC jobs, reconcile the registry against the notes, and close only what
-is provably finished.
+Locate the project's notes root from its `CLAUDE.md` or `AGENTS.md`. Research notes are under `<root>/10_ResearchNotes/{01_NotConfirmed,02_Confirmed}/`; the derived registry is `<root>/20_Progress/SimulationRegistry.md`. Ask if the root or registry is absent; do not guess. Parse fenced `sim-tracker` YAML, not prose. `id` and `tracker_id` are aliases for the tracker key: accept either, reject a block where both differ, and preserve its existing spelling. Read historical timestamps as written, but use timezone-aware timestamps for new observations, verification, and closure. Preserve native job state vocabulary. `scheduler:` is authoritative; never infer it from `host:`.
 
-# 0. Reconcile FIRST — halt on any drift
+| `host` | `scheduler` | Scheduler access | Workdir, outputs, logs, receipts |
+| --- | --- | --- | --- |
+| `nurion` | `pbs` | SSH `nurion` | SSH `nurion-dm` |
+| `neuron` | `slurm` | SSH `neuron` | SSH `neuron-dm` |
+| `della` | `slurm` | SSH `della` | SSH `della` (no `della-dm`) |
+| `office-desktop` | `local` | Directly or through an explicitly mapped SSH endpoint on the identified office desktop | That execution machine |
+| `laptop` | `local` | Directly or through an explicitly mapped SSH endpoint on the identified laptop | That execution machine |
 
-Before polling or writing anything:
+Reject unsupported host/scheduler pairs instead of silently changing them. For `scheduler: local`, require a block `machine: {hostname: ..., machine_id: ...}` and establish the **execution machine's** identity from the project's endpoint mapping and its durable machine ID (for Linux/WSL, `/etc/machine-id`). Read process and files directly only when **both** current hostname and machine ID match; otherwise use only an explicitly mapped SSH endpoint, verify both remote identifiers first, and do all subsequent process/file checks there. The present office desktop hostname `MZ-42-office` is informative, not sufficient by itself; the laptop has its own identity. `ssh localhost -p 2022` reaches a laptop reverse tunnel and does **not** make that laptop the current machine: use it only when mapped to that laptop and its identity matches. `labws` is separate. The local process contract supports Linux/WSL; another OS needs a documented identity and receipt adapter. If mapping or identity is uncertain, mark local evidence `UNKNOWN` and do not write a conclusion for it. For SSH, follow the project's socket/auth rules, never block on OTP or retry after an auth failure. Use the table's file endpoint; do not assume `-dm` exists for Della.
 
-1. Parse every ```sim-tracker``` block in **BOTH** `01_NotConfirmed/` and `02_Confirmed/`
-   under `10_ResearchNotes/`. Scanning only NotConfirmed is what hid a stale `state: R`
-   for four days on 2026-08-21: a note can be promoted while its jobs are still live.
-2. Project the blocks with any non-verified-terminal job into the registry's shape.
-3. Compare against `20_Progress/SimulationRegistry.md` on `tracker_id`, note path, `host`,
-   `scheduler`.
-4. **If anything differs, stop. Change nothing.** Report with these labels:
-   `ORPHAN_NOTE` (block active, absent from registry) · `ORPHAN_REGISTRY` (row points at a
-   missing block) · `PATH_MISMATCH` (note link no longer resolves) ·
-   `STATIC_MISMATCH` (host/scheduler differ) · `DUPLICATE_TRACKER_ID`.
-   Then offer a repair direction — rebuild registry from notes, or fix notes from scheduler
-   evidence — and let the user choose. **Never pick silently.**
+## 0. Reconcile first; halt on drift
 
-The registry is a derived index, never an authority. On disagreement the block wins unless
-the scheduler says otherwise.
+Read **all** blocks in both research-note folders, including confirmed notes and historical closures. Require an active registry row for each block with any job that is **not a verified terminal job** (including queued or running jobs), or an explicitly unresolved controller, successor, or ledger. Compare those rows by tracker key, resolving note path, `host`, and `scheduler`. A fully verified block without closure needs a closure decision but need not have an active row under the registry's existing membership rule; if it does have a row, validate its fields and retain it pending closure. A block with no job rows is `NO_JOBS`, remains open, and must not be treated as fully verified. Validate closed rows that remain in `Closed since` against their blocks, but do not require old closed blocks to have rows: closed rows may be pruned. A workdir is not unique and cannot identify a tracker. Report `ORPHAN_NOTE`, `ORPHAN_REGISTRY`, `PATH_MISMATCH`, `STATIC_MISMATCH`, `DUPLICATE_TRACKER_ID`, or `CONFLICTING_ID_FIELDS` with the exact rows/blocks. On any drift, stop before polling or writing. Propose the evidence needed to repair it and let the owner choose the repair direction; never silently rebuild the registry or rewrite a note. The block is the source record and the registry is a derived index, subject to actual scheduler evidence.
 
-# 1. Poll
+## 1. Poll unresolved work
 
-For each active tracker, read its job ids from the block (they are not in the registry —
-duplicating state is what caused the incident). Poll only jobs not already
-verified-terminal. `scheduler:` is authoritative; do NOT infer it from `host`.
+From reconciled blocks, select trackers with an unverified job **or** an explicitly unresolved controller, successor, or ledger, regardless of cached top-level `complete`/`failed`. Skip already verified terminal jobs; a fully verified block without closure needs a closure decision, not another scheduler poll. Batch queries by endpoint and use only the selected full job IDs. `last_polled` changes only after an actual observation, using the real observation time with a timezone offset; do not imply that every job was observed when an endpoint is partially unavailable. Never replace verified terminal provenance with stale or weaker evidence.
 
-# 2. Decide "finished without errors" — fail-closed, in this order
+- **PBS / Nurion:** Query bounded `qstat -x` and `qstat -xf` for live/history state, requiring `job_state=F` and numeric `Exit_status`. If history is purged, search Gmail label **`HPC notices/Nurion`** by display name and exact job ID for end/abort mail. Missing history and mail is `UNKNOWN`, not successful. A begin mail is not terminal evidence.
+- **Slurm / Neuron or Della:** Batch bounded `squeue -h -r -j <IDs>` and `sacct --array -P -n -j <IDs> -o JobID,State,ExitCode,DerivedExitCode` or equivalent fields carrying array indices. If `--array` is unavailable, omit it; grouped/pending rows remain unresolved until every task has its own row. A `squeue` error is no state evidence; continue to `sacct` if available. Keep the native state in `state`, `ExitCode` in `exit`, and `DerivedExitCode` in `derived_exit`; legacy cached `Q` is merely an initial value for a Slurm block. Disappearance from `squeue` is not completion. Separate allocation/array task rows from `.batch`/`.extern` steps. Record the submitted `array: <expression>` on the job row or reference an authoritative submission manifest; determine expected indices from it. `JobID` carries the `_<index>` suffix; `JobIDRaw` does not. The throttle suffix (such as `%5`) does not reduce expected coverage. If expected coverage cannot be established, or any expected task/accounting row is missing, the job is unresolved even if the parent says `COMPLETED`.
+- **Local / office desktop or laptop:** Match the job's unique run ID, execution hostname and machine ID, wrapper PID, Linux boot ID, start ticks (the 20th whitespace-separated token after the last `)` in `/proc/<pid>/stat`, field 22 in `proc_pid_stat(5)` numbering), and absolute receipt path. A live process is `RUNNING` only when hostname, machine ID, PID, boot ID, and start ticks all match. PID existence, `kill -0`, tmux, logs, or process disappearance alone cannot prove completion. On process exit, require the final atomic wrapper receipt described below. No valid receipt gives `UNKNOWN`, never success.
 
-A job is successful only if **every** stage passes. Anything else leaves it registered.
+## 2. Verify terminal work, fail closed
 
-1. **`verify:` block present and valid?** If not → `UNVERIFIABLE`. Never auto-close.
-   Do not infer criteria from `note:` prose.
-2. **Scheduler termination**
-   - **PBS**: live `qstat`, then `qstat -xf`. Require `job_state=F` **and** numeric
-     `Exit_status=0`. `wt`, negatives, any nonzero → failed. **History missing →
-     `UNKNOWN`, not success** (`qstat -x` purges in ~2 days; fall back to the Gmail label
-     `HPC notices/Nurion`, queried by display name).
-   - **SLURM**: `squeue` first (presence = unfinished), then `sacct`. Require `COMPLETED`
-     for the allocation *and every array element*, with **both** `ExitCode=0:0` and
-     `DerivedExitCode=0:0`.
-3. **Application checks** — exit 0 is NOT sufficient. These jobs pack many runs into
-   parallel lanes and `wait`, so the exit status reflects only the last lane. Two real
-   cases exited 0 while (a) all 18 runs died on a `KeyError`, 0 outputs, and (b) 8 of 12
-   lanes were silently lost. So: expand `verify.outputs.glob` and require exactly
-   `count`; same for `verify.logs`; grep every log for `reject_regex`. Zero matches never
-   pass vacuously.
+A job passes only when **all** applicable gates pass. Keep an unresolved or failed job in the active registry and record the exact missing evidence. A terminal state without `verified: <source>@<timezone-aware timestamp>` is `UNVERIFIED_TERMINAL`, not verified success.
 
-Record provenance on the job line when it passes: `verified: <source>@<timestamp>`.
-A terminal state without provenance is `UNVERIFIED_TERMINAL`, not terminal.
+1. `verify:` must be present, well formed, and specific to this job/campaign. Do not infer requirements from note prose. If an `additional` condition exists, perform every stated check or mark `UNVERIFIABLE`; it is not optional commentary.
+2. **Scheduler/process outcome:** PBS requires `F` with numeric exit `0` from qstat history or matching end mail retrieved in this run. Slurm requires each non-array allocation, or **every expected array task** for an array, to be `COMPLETED` with `ExitCode=0:0` **and** `DerivedExitCode=0:0` from a fresh `sacct` query in this run. Cached `state`, `exit`, `derived_exit`, `tasks_expected`, or `tasks_missing` from an earlier poll are not verification evidence. If no fresh scheduler or mail evidence is available, this gate fails. Missing fields, nonzero signals, failed states, and incomplete array coverage fail this gate. A local run requires a valid wrapper receipt with integer `exit_code: 0`. A zero exit alone is not an application verdict.
+3. **Application checks:** Resolve `verify.outputs` and `verify.logs` `paths` or `glob` under `workdir` (allow explicit absolute paths) on the table's file endpoint. Require each declared exact path and exact `count`; empty matches never pass vacuously. Inspect every required log against its `reject_regex` (whether nested under `logs` or at `verify` level). Honor other declared checks such as metadata, hashes, convergence, row counts, manifest identities, receipt contents, and all `verify.additional` conditions. A present marker or output file alone does not prove valid content. Preserve evidence and source names in `verified` only after all checks pass.
+4. **Successor/ledger gate:** Treat `job_registry: <path>` or `controller: {ledger: <path>}` as a declaration of dynamic successors. A controller job named in `jobs`, `verify.additional`, or the campaign note also triggers this gate even if no ledger field was supplied. Resolve its authoritative job ledger/manifest against all actually submitted IDs and their tracker blocks. Every required successor must be accounted for and verified or explicitly resolved under a durable owner override. A controller's own zero exit, completion marker, or closed parent array does not imply successor completion. Do not close while the ledger or successor set is unknown.
 
-# 3. Close
+PBS `.e`/`.o` may be empty when scripts redirect output; inspect the declared application logs, often `*_o.log` in the workdir. The same principle applies to Slurm and local wrappers.
 
-Close a tracker only when **all** its jobs are verified-successful, or the owner says so
-explicitly. Owner closure needs a durable reason, or the record of *why* a failed campaign
-vanished is lost:
+### Local final receipt
 
-```
-closure: {mode: owner_override, by: <who>, at: <ts>, reason: "<non-empty>"}
+The launch record must contain a `machine` map with hostname and machine ID plus job `id` (a never-reused run ID), `pid`, `boot_id`, `start_ticks`, and an absolute `receipt` path whose filename includes the run ID. The wrapper must await **every required child** and aggregate outcomes so any child's failure yields a nonzero `exit_code`, even if the last child succeeds. It commits a UTF-8 JSON receipt in the same directory via temporary file, flush and `fsync`, atomic no-replace commit (for example, `renameat2` with `RENAME_NOREPLACE`), then directory `fsync`. Required fields are `schema: 1`, `run_id`, `host` (`office-desktop` or `laptop`), `machine_id`, `boot_id`, integer `pid`, integer `start_ticks`, `started_at`, `finished_at` (timezone-aware timestamps), and integer `exit_code`. Extra application metadata is allowed. Accept it only if read at the recorded path, its identity fields **including machine ID** exactly match the launch record and the current execution machine's hostname and machine ID match the block; the receipt's boot ID must match the launch record, not the current boot. Timestamps must be coherent. An absent, partial, mismatched, or uncommitted receipt is `UNKNOWN`; its absence can never be repaired by an output file or log. The receipt records wrapper outcome; application checks still apply.
+
+## 3. Close and write back
+
+Close as `verified_success` only when `jobs` is **nonempty**, every listed job has verified success, and all controller/ledger successors are resolved. A `NO_JOBS` block remains open. An owner may explicitly direct an `owner_override` with a nonempty durable reason. Record one of:
+
+```yaml
+closure: {mode: verified_success, by: <who>, at: <actual timestamp>, reason: "<evidence summary>"}
+closure: {mode: owner_override, by: <owner>, at: <actual timestamp>, reason: "<nonempty decision and unresolved evidence>"}
 ```
 
-Verified closure is recorded the same way with `mode: verified_success`. On close, move the
-row to the registry's "Closed since" table; prune after a few days.
-
-# 4. Write back
-
-Write results into the block that owns the job. **If that note is in `02_Confirmed/`, do
-not edit it** — a PDF was exported from it. Report the correction and let the user decide
-whether to amend and re-export.
-
-# 5. Diagnose failures
-
-Cause → concrete fix, per failure. Remember: PBS `.e`/`.o` are usually empty (`-k eo` plus
-a redirect); the real traceback is in the workdir as `./*_o.log`.
-
-# Conventions
-
-- Inside a `sim-tracker` fence, references to other notes are **bare dates** —
-  `2026-03-20`, or `2026-03-20:multi-stealthy` for another project. No wikilinks: a fence
-  is not indexed, so brackets never render and never survive a move.
-- `tracker_id` is `<submission-date>-<campaign-slug>`. `workdir` is **not** unique — six
-  blocks share one.
+Write observations and provenance into the owning block. Only after the block records closure, move its active registry row to `Closed since`; if a fully verified unclosed block had no active row under the registry's membership rule, add its closed row directly. Never mutate the registry into a state that disagrees with the block. Do **not** edit a note under `02_Confirmed/` because an exported PDF may depend on it; report the proposed correction and request an amendment/re-export decision. Keep a failed or uncertain tracker open absent an explicit owner override. Diagnose each failed check with a concrete repair path. Inside a tracker fence, references to other notes are bare dates (`2026-03-20` or `2026-03-20:multi-stealthy`), not Obsidian wikilinks.

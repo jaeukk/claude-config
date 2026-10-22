@@ -107,6 +107,12 @@ deletion converges, added mechanism does not.
 
 # Research notes — Obsidian vault folder convention
 
+**Before writing or editing anything under `10_ResearchNotes/` or `30_Literature/`, load
+the `research-note` skill (`/research-note`).** It resolves which project's note to write
+(`scripts/find_root.py`), holds the full note contract, and runs `check_note.py`; a
+PostToolUse hook re-runs that checker on every daily-note edit. The rules below are the
+always-on minimum, not a substitute.
+
 Each project keeps its notes in an Obsidian-vault **Notes root** `<root>`. Resolve
 the vault base with the **`zotero-obsidian-sync`** skill — the Windows
 user-profile segment varies per machine, so never hardcode it. A project's own
