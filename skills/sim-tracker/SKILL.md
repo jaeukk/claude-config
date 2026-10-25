@@ -19,6 +19,14 @@ Parse the fenced YAML, never a prose table. `id` and `tracker_id` are aliases fo
 
 Before a local poll, establish the **execution machine's** identity from the block's `machine.hostname` and durable `machine.machine_id` (for Linux/WSL, `/etc/machine-id`) and the project's endpoint mapping. Read process and files directly only when **both** hostname and machine ID match. Otherwise use SSH only through an explicitly mapped endpoint, verify both identifiers before reading its `/proc` or files, and keep the result tied to that remote execution machine. The current office desktop hostname `MZ-42-office` is informative, not a substitute for the machine ID; the laptop's identity must be recorded separately. `ssh localhost -p 2022` is a reverse tunnel to the laptop, **not** the current local machine; use it only if the project maps that endpoint to the laptop and its remote identity matches. `labws` is distinct. The local process contract below supports Linux/WSL; another OS needs a documented identity and receipt adapter. With no mapping or identity match, report `UNKNOWN` and do not poll or edit that local block.
 
+## Registration handoff
+
+When a workflow creates a tracker, its submitting session must also register the Active row under sim-update's **Registration** rule; cheap polling itself never edits the registry. Record the submission manifest, full job IDs, array expression, and specific verification paths/counts before handing off. Strictly parse the new block with duplicate-key rejection and require identity, host, scheduler, specific `verify`, and nonempty jobs (or `jobs: []`, `registration: incomplete`, and a submission-receipt path). Submission failure or interruption leaves an explicit incomplete registration to reconcile from submission receipts, never a fabricated job ID.
+
+For a staged campaign, the submitting session should validate that every downstream input is produced by the upstream manifest, using one shared case identity and output-path definition. Record the case-manifest path and expected case IDs per lane in `verify`. Isolate MPI and other child-process stdin from manifest streams. Record expected cases per lane and compare actual started/finished case IDs with that manifest: `all lanes finished` alone can hide omitted cases. A scheduler dependency guarantees an exit condition only, not file coverage or scientific acceptance. These checks do not authorize the polling session to submit jobs.
+
+Reject duplicate YAML keys and malformed blocks; report exact locations and skip them rather than guessing job states. Use sim-update's raw-text independence test (IDs, numeric/array parent forms, tracker keys, and controller/ledger paths; record searched terms and hashes) to isolate affected trackers and their dependency/controller connections; independent valid campaigns can still be polled. A status question does not authorize launching, repairing, or resubmitting simulations.
+
 ## Cheap polling
 
 - Group unverified jobs by endpoint and batch the scheduler query by their **full IDs**, including array IDs. Bound each query to the IDs in the selected blocks. Never run one SSH command per job or search an entire queue/accounting history.
@@ -51,7 +59,7 @@ last_polled: "2026-10-21T17:05:00+09:00"
 verify:
   outputs: {glob: spectrum.csv, count: 1}
   logs: {glob: run.log, count: 1, reject_regex: "Traceback|Error|Aborted"}
-  additional: Require 61 finite spectrum rows and convergence of both drives.
+  additional: "Require 61 finite spectrum rows and convergence of both drives."
 jobs:
   - id: square-020-r4000-20261021T170500
     file: run.sh
@@ -63,8 +71,18 @@ jobs:
     receipt: /absolute/path/to/square-phi0.20-res4000/square-020-r4000-20261021T170500.receipt.json
 ```
 
+## Evidence and array summaries
+
+Save raw scheduler responses with query, endpoint, full IDs, endpoint timestamps bracketing the query, the query's own exit status, and SHA-256 of raw UTF-8 bytes in a durable project evidence directory. Do not fabricate raw responses from summaries. Record the evidence path and hash in the tracker at collection time; verification remains sim-update's job. Capture query status before the trailing timestamp, for example `date -Is; <query> 2>&1; sim_query_rc=$?; date -Is; echo "rc=$sim_query_rc"` inside one remote command; stderr must also be retained.
+
+If the tracker cannot be edited, append the capture path, SHA-256, endpoint, full IDs, command exit status, and bracketing timestamps to a dated evidence index under `<root>/20_Progress/` at collection time. sim-update accepts this as a contemporaneous provenance record, not as verification or a source-state change.
+
+For mixed Slurm arrays, retain per-index native states (or link a durable per-index receipt) and counts for completed, running, pending, failed, and unknown tasks. Do not assign a parent's exit code from completed children while others remain unresolved. `tasks_missing` counts missing expected sacct allocation rows; report squeue coverage separately. Never turn missing accounting fields into zero exits. Record `exit`/`derived_exit` only for terminal tasks; zero fields for pending/running tasks are scheduler placeholders, not successful exits. Update the timestamp and observed states together; a timestamp-only edit must not imply that stale fields were refreshed.
+
+If scheduler history is purged, never replace a recorded `state`/`exit` (dated or not) with UNKNOWN. Add `last_query: {at: <timestamp with offset>, source: <command>, result: NOT_FOUND, evidence: <path>}` to each affected job and preserve other fields. Preserve known observation dates; do not invent unknown dates. Application logs may be recorded with source and time even then, but cannot supply scheduler state, scheduler exit, or verification. A partial application inventory never proves the entire campaign finished.
+
 ## Writeback
 
-Update only states and exit fields supported by **fresh observations**. Use the real observation time with a timezone offset for `last_polled` only if at least one selected job was actually observed; it is a block-level time, not proof that every job was observed. With no observation, leave it unchanged. Set top-level `failed` for an observed nonzero/failed terminal outcome; otherwise keep `running` while any job is queued/running or unresolved. All observed zero exits are only *ready for sim-update*, not verified success or automatic closure; leave the top-level status as is pending verification. Preserve `verified` provenance and never regress a verified terminal job. Do not rewrite unchanged job lines.
+Update only states and exit fields supported by **fresh observations**. Use the real observation time with a timezone offset for `last_polled` only if at least one selected job was actually observed; it is a block-level time, not proof that every job was observed. With no observation, leave it unchanged. Set top-level `failed` for an observed nonzero/failed terminal outcome; otherwise keep `running` while any job is queued/running or unresolved. All observed zero exits are only *ready for sim-update*, not verified success or automatic closure; leave the top-level status as is pending verification. Preserve `verified` provenance and never regress a verified terminal job. Do not rewrite unchanged job lines. Quote new/changed job IDs, Slurm exit-code strings, timestamps, and flow-map strings; compare their parsed types/values with the intended values (YAML 1.1 can coerce numeric-looking IDs or exit codes). Existing numeric PBS IDs need not be rewritten. Write free text as quoted or literal block scalars, never unquoted plain scalars containing `: ` or ` #`. Before saving, strictly re-parse the entire edited fence with duplicate-key rejection and compare job IDs, `verified`, and `closure` with the original. Reject unintended changes; preserve original bytes if validation fails.
 
-Never edit a note in `02_Confirmed/` (an exported PDF may depend on it); report the proposed state instead. Never add `verified` or `closure`, move notes, or touch `SimulationRegistry.md`. Report concise per-endpoint results and any unobserved IDs. A scheduled invocation does not grant extra write or SSH authority.
+Never edit a note in `02_Confirmed/` (an exported PDF may depend on it); report the proposed state instead. Never add `verified` or `closure`, move notes, or touch `SimulationRegistry.md` while polling. New-tracker registration is a separate sim-update operation under its Registration rule. Report concise per-endpoint results and any unobserved IDs. A scheduled invocation does not grant extra write or SSH authority.

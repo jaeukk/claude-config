@@ -107,8 +107,8 @@ deletion converges, added mechanism does not.
 
 # Research notes — Obsidian vault folder convention
 
-**Before writing or editing anything under `10_ResearchNotes/` or `30_Literature/`, load
-the `research-note` skill (`/research-note`).** It resolves which project's note to write
+**Before writing or editing anything under `10_ResearchNotes/` or `30_Literature/`, or a
+project's `ResearchPlan.md`, load the `research-note` skill (`/research-note`).** It resolves which project's note to write
 (`scripts/find_root.py`), holds the full note contract, and runs `check_note.py`; a
 PostToolUse hook re-runs that checker on every daily-note edit. The rules below are the
 always-on minimum, not a substitute.
@@ -131,7 +131,10 @@ Under every `<root>`:
 - `20_Progress/` — compiled / progress notes
 - `30_Literature/` — literature-search results
 - `40_Manuscript/` — manuscript-related notes
-- `ResearchPlan.md` — overall research plan and pomodoro tasks
+- `ResearchPlan.md` — the project's task list (Pomodoro timer, daily-note Objectives): one
+  concise, descriptive `#task` line per task, linking to its details elsewhere. Never a
+  home for protocols, run settings, job IDs, or decision logs; "make a plan" means a
+  protocol document, not this file.
 
 **Wording in research notes** (adopted 2026-10-15). Notes are records for later
 use (paper writing, future work), read by someone without this session's context.
