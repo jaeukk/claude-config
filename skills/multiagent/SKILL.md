@@ -115,9 +115,9 @@ Backends are named `<family>-<tier>`. A tier is a routing role, not an effort le
 |---|---|---|---|---|
 | ceiling | critic | Fable 5.1, high | Astra, medium | — |
 | frontier | conductor | Opus 5.5, high (session assertion) | Astra, medium | — |
-| core | implementer | Opus 5.5, high | GPT-6 Sol, high | `claude-core-team` |
-| mid | verifier | Sonnet 5.5, medium | Terra, medium | `claude-mid-team` |
-| fast | bulk_worker, runner | Haiku 4.5, low | Terra, low | `claude-fast-team` |
+| core | implementer | Opus 5.5, high | GPT-6.1 Sol, high | `claude-core-team` |
+| mid | verifier | Sonnet 5.5, medium | GPT-6.1 Terra, medium | `claude-mid-team` |
+| fast | bulk_worker, runner | Haiku 4.5, low | GPT-6.1 Terra, low | `claude-fast-team` |
 
 - `implementer`: `claude-core-team`, `claude-core`, `codex-core`, all at high effort (the
   validator enforces it). A native spawn skips account-bound candidates, so it gets `claude-core`.
@@ -133,7 +133,7 @@ During a Codex outage, pass `--required-family claude`.
 `dispatch-worker` transmits effort on every CLI path. A native Claude spawn takes model and effort from its agent frontmatter,
 not from the binding; the hook checks only that a compatible binding exists. Keep the frontmatter
 in sync, and never report the resolved backend as the model that ran unless the frontmatter says
-so. Model evidence: `references/model-refresh-2026-09-27.md`.
+so. Model versions refreshed 2026-10-29 from the [OpenAI model catalog](https://developers.openai.com/api/docs/models): `gpt-6-astra`, `gpt-6.1-sol`, and `gpt-6.1-terra`. Effort and tier assignments are unchanged. Historical model evidence: `references/model-refresh-2026-09-27.md`.
 
 **Native spawns: choose the type and model by tier.** A `general-purpose` subagent with no
 `model` runs at the session's model (Opus or Fable) on the private login. Use `Explore` or

@@ -134,12 +134,12 @@
       "writes_mediated": false,
       "write_mode": "host-approval",
       "supports_subagents": true,
-      "note": "Astra was verified working 2026-09-05 on this ChatGPT-account auth. Model IDs are explicit: gpt-6-astra and gpt-6-sol; the retained Terra backend uses gpt-5.6-terra. Do not infer IDs from another tier's version. The historical probe returned the same generic refusal for unknown IDs; a refusal alone does not confirm model identity or account availability."
+      "note": "Astra was verified working 2026-09-05 on this ChatGPT-account auth. Model IDs are explicit: gpt-6-astra and gpt-6.1-sol; the Terra backends use gpt-6.1-terra. Model IDs refreshed 2026-10-29 from https://developers.openai.com/api/docs/models; no new account execution probe was run. Do not infer IDs from another tier's version. The historical probe returned the same generic refusal for unknown IDs; a refusal alone does not confirm model identity or account availability."
     },
     "codex-core": {
       "host": "codex",
       "family": "codex",
-      "model": "gpt-6-sol",
+      "model": "gpt-6.1-sol",
       "capabilities": [
         "implementation",
         "review",
@@ -154,7 +154,7 @@
     "codex-mid": {
       "host": "codex",
       "family": "codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-6.1-terra",
       "capabilities": [
         "verification",
         "structured_result"
@@ -167,7 +167,7 @@
     "codex-fast": {
       "host": "codex",
       "family": "codex",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-6.1-terra",
       "capabilities": [
         "bulk",
         "mechanical",
