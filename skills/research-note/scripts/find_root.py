@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Resolve which project's research note a session should write, from any cwd.
 
-Usage: find_root.py [--cwd DIR] [--project NAME] [--note] [--selftest]
-Prints the project's vault notes root <root> (or, with --note, today's note path)
-and exits 0. Exit 1: no match; candidate projects are listed on stderr. Exit 2:
+Usage: find_root.py [--cwd DIR] [--project NAME] [--note] [--vault] [--selftest]
+Prints the project's vault notes root <root> (or, with --note, today's note path;
+with --vault, the vault base) and exits 0. Exit 1: no match; candidate projects are listed on stderr. Exit 2:
 today's note is already in 02_Confirmed (frozen).
 
 Order: --project name > cwd inside the vault > a code-side CLAUDE.md/AGENTS.md/
@@ -135,9 +135,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--cwd", default=os.getcwd()); ap.add_argument("--project")
     ap.add_argument("--note", action="store_true"); ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--vault", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         selftest(); sys.exit(0)
+    if a.vault:
+        v = vault(Path.home())
+        print(v if v else "no vault found", file=sys.stdout if v else sys.stderr)
+        sys.exit(0 if v else 1)
     r = resolve(Path(a.cwd), Path.home(), a.project)
     if isinstance(r, list):
         print("unresolved; candidates:\n" + "\n".join(f"  {p.name}  ({p.parent.name})" for p in r)
