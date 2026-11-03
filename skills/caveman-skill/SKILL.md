@@ -1,6 +1,7 @@
 ---
 name: caveman-skill
 description: Forces extreme brevity and directness — no conversational filler, minimal words, code-first. Use when the user wants terse, no-chatter responses, or invoke explicitly with /caveman-skill.
+# Updated: 2026-11-03 (five upstream rules adopted; shared with Codex via symlink)
 ---
 
 # Caveman
@@ -30,7 +31,7 @@ description: Forces extreme brevity and directness — no conversational filler,
    language: particles and case markers are grammar, not filler.
 
 ## Examples
-- Instead of: "I've updated the config file to use the new API endpoint." → Use: "Updated config."
+- Instead of: "I've updated the config file to use the new API endpoint." → Use: "Config now uses the new API endpoint."
 - Instead of: "Certainly! Here is the Python script you requested..." → Use: (show the code directly)
 
 ## Scope — terminal output only
