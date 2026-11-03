@@ -52,7 +52,7 @@ Several sessions (Claude, Codex, different working directories) append to the sa
 
 **Plain words, no overstatement.** Describe the operation itself ("fit the even-indexed $\lambda$, predict the odd-indexed $\lambda$"), not session jargon or shorthand; define an unavoidable term where it is used. When a job ID, file, or script is needed as evidence, say what it identifies or contains. Do not borrow vocabulary from a method that was not carried out: no "training" or "held-out" for a least-squares fit. Name planned methods only as plans. American spelling.
 
-**Self-contained.** Each note should make sense without the chat or earlier notes. In `# Context`, state the question today's work addresses and define essential symbols on first use. State what each number applies to (per trial, task, or wave), connect related numbers, and account for any difference between totals. Explain why a method changed and use one name and symbol per quantity. State each relation once; leave routine detail in the linked records.
+**Self-contained.** Each note should make sense without the chat or earlier notes. In `# Context`, give only the prior situation needed for today's work; define essential symbols at their first substantive use. State what each number applies to (per trial, task, or wave), connect related numbers, and account for any difference between totals. Explain why a method changed and use one name and symbol per quantity. State each relation once; leave routine detail in the linked records.
 
 **Math.** LaTeX only, `$inline$` and `$$display$$`, `\tag{}` never `\eqno`. Follow `00_Index/Math_Notation.md`: macros that name the object (`\vect{r}`, `\dd{x}`, `\fn{f}{x}`, `\expval{X}`); the note's `preamble:` property loads them. Show a derived number as its construction, not only its value:
 
@@ -63,7 +63,7 @@ $$K = \frac{\pi}{2\cdot 26\cdot 1560}\left(\frac{2600}{8580}\right)^2 \times 2 =
 Define a generating function (`$f(x,y) = [1+\cos K(x^2+y^2)]/2$, level cut at $1/2$), not only its consequences.
 
 **Sections.**
-- `# Context`: what is known going in. Link the previous note.
+- `# Context`: use a few short bullets, one per topic, to identify what carries over from earlier work. Link the relevant prior note or record in each bullet. Leave measurements and explanation to `# Notes` or `# Findings`; do not repeat the bullets in prose. The owner's 2026-10-26 Multistealthy note is the model for this format.
 - `# Plan`: what will be tried today.
 - `# Notes`: the work, in order. Enumerate the design axes of an experiment grid as numbered lists before any prose ("40 samples = 2 ratios × 4 masks × 5 arrangements", then one list per axis). Failed attempts stay in: a trial that did not work is a result.
 - `# Findings`: the physics, stated as physics. Estimator-noise hedges and caveats that are really future work go to Next Steps.
@@ -95,7 +95,7 @@ The vault describes; the code side (`~/10_Projects/<slug>/`) holds data, scripts
 
 **Links.** Another research note in the same project: full vault path, bare date as display text, `[[10_Projects/10_Active/<Project>/10_ResearchNotes/01_NotConfirmed/2026-08-20|2026-08-20]]`. The short `[[2026-08-20]]` is safe only for a sibling in the same folder: every project and the daily log (`60_Logs/01_Daily/`) share these basenames, so a bare link can resolve to the wrong file once a note moves to `02_Confirmed/`. Inside a table cell escape the pipe: `[[…/2026-08-20\|2026-08-20]]`. Inside a ```sim-tracker``` fence, no wikilinks at all: bare `2026-08-20`, or `2026-08-20:multi-stealthy` for another project.
 
-**Simulations.** Each batch gets one ```sim-tracker``` YAML block (schema in the `sim-tracker` skill) and, directly below it, its own processing plan: what to do with the outputs once the jobs finish. Job state in the block is written only by sim-tracker and sim-update.
+**Simulations.** Each batch gets one ```sim-tracker``` YAML block (schema in the `sim-tracker` skill) and, directly below it, its own processing plan: what to do with the outputs once the jobs finish. Job state in the block is written only by sim-tracker and sim-update. Outside the block, describe each group of runs that share a question (e.g. a $\phi_2$ sweep at one number ratio) with only: its purpose, requested tasks and resources, run time with CPU and memory efficiency, completion status (completed, or failed with its cause), and its tracker link; a table per wave works well. Polling and supervision sessions do not append status entries to the note; they add a short summary or intermediate report only when the owner asks (owner's rule, 2026-11-02).
 
 **Literature.** Crude literature-search results go in `<root>/30_Literature/<Topic>.md` (new file names per policy §4: no spaces or hyphens, at most four words) under a date heading `## YYYY-MM-DD`. The day's note transcludes that heading instead of copying it, by full path: `![[10_Projects/10_Active/<Project>/30_Literature/<Topic>#2026-10-22]]`. One copy of the text: the raw search stays in `30_Literature`, condensed knowledge later goes to the wiki.
 

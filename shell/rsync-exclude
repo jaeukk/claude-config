@@ -50,3 +50,6 @@ Thumbs.db
 
 # C++
 *.o
+
+# Sandbox home copies (hold locked credential files)
+.preflight-state/
