@@ -122,3 +122,17 @@
   here separates the two on hard work, and the vendor's hardest coding benchmark (FrontierCode 1.1:
   Opus 5.5 54.4% vs Sonnet 5.5 46.2% at max effort) favors Opus. The vault agents'
   `model: sonnet` alias had already floated to Sonnet 5.5 (CLI 2.1.284) before this check.
+
+- **2026-11-10**: `claude-ceiling` (critic) moves from `claude-fable-5-1` to `claude-fable-5-2`
+  (released 2026-11-09); effort stays high. Evidence: the vendor announcement
+  (https://www.anthropic.com/claude-fable-and-mythos-5-2), self-reported, no local run. Fable 5.2
+  leads Fable 5.1 on every published row (FrontierCode 2.0 49.1% vs 32.4%, FrontierSWE v2 69.9% vs
+  56.3%, Humanity's Last Exam with tools 74.2% vs 65.6%), costs less ($8/$40 vs $10/$50 per MTok),
+  and generates output up to 30% faster. No row measures review, which is the critic's job, so the
+  case is "the successor is better and cheaper on everything measured," not a measured review gain.
+  Anthropic's effort guidance for Fable 5.2 is to start at high and use xhigh only where a gain is
+  measured, which matches the binding. Core and frontier stay on Opus 5.5: at high effort, Fable 5.2
+  scores 45.3% on FrontierCode 2.0 against Opus 5.5's 45.5% at xhigh, the "half the cost per task"
+  claim compares against Opus at xhigh rather than the high effort the implementer runs, and moving
+  core would take `claude-core-team` off the team login unless it serves Fable (unprobed, OPEN_ITEMS
+  A15).

@@ -4,7 +4,7 @@
     "claude-ceiling": {
       "host": "claude-code",
       "family": "claude",
-      "model": "claude-fable-5-1",
+      "model": "claude-fable-5-2",
       "capabilities": [
         "planning",
         "routing",
