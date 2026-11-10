@@ -22,13 +22,13 @@ Claude Code를 오케스트레이터로 두고 Claude·Codex를 워커로 호출
 ## Accounts — team first, private fallback (2026-09-16)
 
 Two Claude logins: private (`~/.claude`, Max, Fable; the conductor, unrestricted) and team
-(`~/.claude-team`, KAIST; Fable unverified, OPEN_ITEMS A15). A Claude backend may carry `account` (`private`|`team`) and
+(`~/.claude-team`, KAIST, no Fable). A Claude backend may carry `account` (`private`|`team`) and
 `config_dir`. A team backend leads wherever nothing argues against it: `claude-core-team`
 heads `implementer` (a native spawn skips account-bound backends and gets `claude-core`),
 `claude-fast-team` heads `bulk_worker`, and `claude-mid-team` precedes `claude-mid` in
 `verifier`. `runner` keeps `codex-fast` first (recorded benchmark: equal accuracy at 26x fewer
 tokens, and a Claude CLI runner cannot run commands); team is its Claude-side second choice.
-`critic` (claude-ceiling, Fable) stays private: team-seat Fable availability is unverified (OPEN_ITEMS A15).
+`critic` (claude-ceiling, Fable) stays private: the team login has no Fable (re-confirmed by the user 2026-11-10, after the Fable 5.2 announcement said standard Team seats include it).
 `dispatch-worker` probes the team quota once per dispatch (`engine/accounts.py`, usage API,
 cutoff 95%, 60 s cache), skips team candidates only when that probe says exhausted (an
 unreadable probe routes to team anyway), launches the CLI worker with `CLAUDE_CONFIG_DIR`, and

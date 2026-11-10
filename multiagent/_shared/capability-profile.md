@@ -134,5 +134,5 @@
   measured, which matches the binding. Core and frontier stay on Opus 5.5: at high effort, Fable 5.2
   scores 45.3% on FrontierCode 2.0 against Opus 5.5's 45.5% at xhigh, the "half the cost per task"
   claim compares against Opus at xhigh rather than the high effort the implementer runs, and moving
-  core would take `claude-core-team` off the team login unless it serves Fable (unprobed, OPEN_ITEMS
-  A15).
+  core would take `claude-core-team` off the team login unless it serves Fable, and it does not (the user confirmed
+  on 2026-11-10 that the team login has no Fable).
