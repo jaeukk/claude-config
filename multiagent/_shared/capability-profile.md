@@ -150,3 +150,7 @@
   better, on harder work", not a direct measurement of lookups or extraction; 3 repeats of the
   same items are not independent samples. `runner` keeps `codex-fast` first: that order rests on
   the 2026-07-31 token-efficiency measurement, which this check did not repeat (OPEN_ITEMS A18).
+
+- **2026-11-15 (2nd)**: the `runner` order stays `codex-fast` first, and OPEN_ITEMS A18 (named in
+  the entry above) is closed without a re-measurement: the order rests on capability, not price
+  (design-basis D19).

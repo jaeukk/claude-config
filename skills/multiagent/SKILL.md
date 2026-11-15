@@ -131,7 +131,10 @@ Backends are named `<family>-<tier>`. A tier is a routing role, not an effort le
   session started with `claude-team` ("Fan-outs" under Accounts); one `dispatch-worker` call per
   shard is for single recorded jobs.
 - `runner`: information for the conductor (a search, a command result, metadata), not a
-  deliverable. `codex-fast` first (cheapest at equal accuracy, `_shared/capability-profile.md`), then `claude-fast-team`, then `claude-fast`.
+  deliverable. `codex-fast` first, because a dispatched Codex runner can run commands (read-only
+  sandbox) and a dispatched Claude one gets only `Read,Grep,Glob`; then `claude-fast-team`, then
+  `claude-fast`. A native `runner` spawn ignores this order. (On 2026-07-31 Codex was also
+  cheaper at equal accuracy, against Haiku 4.5; not re-measured against Haiku 5.5, design-basis D19.)
 
 "First, then" is preference, not failover: `resolve_binding` returns the first compatible
 candidate without a health check, and a failed worker is reported, not retried on the next one.

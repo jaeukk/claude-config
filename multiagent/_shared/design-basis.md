@@ -220,6 +220,18 @@
   `model: "haiku"` subagents in a session started with `claude-team` (SKILL "Fan-outs"); a
   `dispatch-worker` call per shard is for single recorded jobs. (2026-11-15)
 
+- **D19 `runner` keeps `codex-fast` first for capability, not price** = an engine-dispatched Codex
+  runner can run commands (read-only sandbox); an engine-dispatched Claude runner gets only
+  `Read,Grep,Glob`, and running commands is part of the role. The 2026-07-31 measurement (equal
+  accuracy, 9 to 26 times fewer tokens) compared Codex with Haiku 4.5 and was not repeated after
+  the fast tier moved to Haiku 5.5 on 2026-11-15 (OPEN_ITEMS A18, closed by this entry without a
+  re-measurement). A re-measurement would settle nothing: a cheaper Haiku 5.5 would still not
+  justify a Claude-first order that cannot run commands, and the path has almost no traffic (one
+  engine runner dispatch on record; runner work runs as native spawns, which ignore this order,
+  can run commands and already use Haiku 5.5). **Revisit when** a dispatched Claude worker gains
+  command execution (the Claude half of OPEN_ITEMS A2), or engine-dispatched runner volume becomes
+  real. (2026-11-15)
+
 ## 4. 불변식
 
 구체 항목·검증 명령은 `_shared/system-invariants.md`. 시스템 수정 후 그 자가점검을 돌린다.

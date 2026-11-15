@@ -26,8 +26,9 @@ Two Claude logins: private (`~/.claude`, Max, Fable; the conductor, unrestricted
 `config_dir`. A team backend leads wherever nothing argues against it: `claude-core-team`
 heads `implementer` (a native spawn skips account-bound backends and gets `claude-core`),
 `claude-fast-team` heads `bulk_worker` (then `codex-fast`, then private `claude-fast`), and `claude-mid-team` precedes `claude-mid` in
-`verifier`. `runner` keeps `codex-fast` first (recorded benchmark: equal accuracy at 26x fewer
-tokens, and a Claude CLI runner cannot run commands); team is its Claude-side second choice.
+`verifier`. `runner` keeps `codex-fast` first (a Claude CLI runner cannot run commands; a 2026-07-31
+benchmark against Haiku 4.5 also showed equal accuracy at 26x fewer tokens, not re-measured
+against Haiku 5.5); team is its Claude-side second choice.
 `critic` (claude-ceiling, Fable) stays private: the team login must never use Fable (the owner's rule, restated 2026-11-15). Nothing enforces it: a native `model: "fable"` spawn in a team session ran on 2026-11-15.
 `dispatch-worker` probes the team quota once per dispatch (`engine/accounts.py`, usage API,
 cutoff 95%, 60 s cache), skips team candidates only when that probe says exhausted (an
