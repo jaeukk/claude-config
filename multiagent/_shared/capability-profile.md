@@ -136,3 +136,17 @@
   claim compares against Opus at xhigh rather than the high effort the implementer runs, and moving
   core would take `claude-core-team` off the team login unless it serves Fable, and it does not (the user confirmed
   on 2026-11-10 that the team login has no Fable).
+
+- **2026-11-15**: the fast tier (`claude-fast`, `claude-fast-team`; roles `runner` and
+  `bulk_worker`) moves from `claude-haiku-4-5` to `claude-haiku-5-5`; effort stays low. Evidence:
+  `tasks/2026-11-15-haiku-55-check/` (plan fixed before the run; the 09-23 harness, same frozen 10
+  items and hidden graders, team account, 60 calls, 0 failed). `haiku45-low` 24/30 = 80.0%
+  (per repeat 9/7/8, spread 2), `haiku55-low` 30/30 (spread 0); contract 100% in both arms, so
+  all three pre-registered gates pass against same-day `haiku45-low`. Per call: $0.0318 against
+  $0.0012 (26x); median 16.2 s against 8.3 s; output 4880 against 1630 tokens. Both logins serve
+  the model, and the `haiku` alias already resolved to it (CLI 2.1.325), so native
+  `model: "haiku"` spawns were already on Haiku 5.5 and only the engine pin was behind. Limits:
+  the items are small code changes, harder than fast-tier work, so this says "not worse, and here
+  better, on harder work", not a direct measurement of lookups or extraction; 3 repeats of the
+  same items are not independent samples. `runner` keeps `codex-fast` first: that order rests on
+  the 2026-07-31 token-efficiency measurement, which this check did not repeat (OPEN_ITEMS A18).
