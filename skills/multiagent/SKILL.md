@@ -124,6 +124,8 @@ Backends are named `<family>-<tier>`. A tier is a routing role, not an effort le
 - `critic`: the other family's ceiling. `verifier`: `codex-mid` for Claude-authored work;
   `claude-mid-team`, then `claude-mid`, for Codex-authored work.
 - `bulk_worker`: one pool led by `claude-fast-team`; the validator requires both families in it.
+  Unused: no dispatch 2026-10-01 to 11-15, because bulk page work needs the core tier, not Haiku.
+  Removal is open item A16.
 - `runner`: `codex-fast` first (cheapest at equal accuracy, `_shared/capability-profile.md`), then `claude-fast-team`, then `claude-fast`.
 
 "First, then" is preference, not failover: `resolve_binding` returns the first compatible
@@ -136,15 +138,17 @@ in sync, and never report the resolved backend as the model that ran unless the 
 so. Model versions refreshed 2026-10-29 from the [OpenAI model catalog](https://developers.openai.com/api/docs/models): `gpt-6-astra`, `gpt-6.1-sol`, and `gpt-6.1-terra`. Effort and tier assignments are unchanged. `claude-ceiling` moved to `claude-fable-5-2` on 2026-11-10 (evidence in `_shared/capability-profile.md`). Historical model evidence: `references/model-refresh-2026-09-27.md`.
 
 **Native spawns: choose the type and model by tier.** A `general-purpose` subagent with no
-`model` runs at the session's model (Opus or Fable) on the private login. Use `Explore` or
+`model` runs at the session's model on the session's login: private, unless the session was
+started with `claude-team` (see "Fan-outs" under Accounts). Use `Explore` or
 `runner` (Haiku, no edit tools) for lookups and searches; pass `model: "haiku"` for mechanical shards
 and `model: "sonnet"` for routine production; keep the session's model only for judgment-heavy
 work. On Codex, set `model` and `reasoning_effort` on `spawn_agent` (with `fork_turns: "none"`).
 
 ## Accounts
 
-Two Claude logins: **private** (`~/.claude`, this session's, the only one with Fable) and
-**team** (`~/.claude-team`). The account is fixed per process:
+Two Claude logins: **private** (`~/.claude`, the default for interactive sessions, with Fable)
+and **team** (`~/.claude-team`; whether its Fable may be used is open item A17). The account is
+fixed per process:
 
 - A native subagent always bills the session's login; no binding changes that.
 - The routes to team are `dispatch-worker` (it sets `CLAUDE_CONFIG_DIR` for the `*-team`
@@ -166,6 +170,20 @@ Two Claude logins: **private** (`~/.claude`, this session's, the only one with F
   It writes a contract (one planned producer, `audit_cycles` 0) under `tasks/<id>`, takes and
   releases the lease, dispatches, and prints the account, model and cost on stderr. Use the full
   procedure for review, several producers, or a contract you need to edit.
+- **Fan-outs: start the session on team.** For many self-contained jobs (wiki page builds,
+  literature searches, raw-builds; about ten or more), start the session with `claude-team`. Its
+  native subagents then bill team with no engine call, and the engine still reaches the private
+  and Codex backends, because it sets `CLAUDE_CONFIG_DIR` per backend. Before this rule
+  (2026-10-01 to 11-15), multiagent sessions made about 880 native spawns, all on private, and no
+  `bulk_worker` dispatch. A running session cannot switch accounts: when a fan-out appears
+  mid-session, say so and offer the relaunch, or move a few jobs with `produce`. A team session
+  passes `CLAUDE_CONFIG_DIR=~/.claude-team` to every shell command, so a private call from it
+  must set it explicitly, e.g. a Fable consult:
+  `CLAUDE_CONFIG_DIR="$HOME/.claude" claude --model claude-fable-5-2 --tools Read,Grep,Glob -p`.
+  Use that route for Fable until A17 is settled, even though a native `model: "fable"` spawn ran
+  on team on 2026-11-15. Unattended pipelines launch producers with
+  `CLAUDE_CONFIG_DIR="$HOME/.claude-team"` and no private fallback, as the vault's night runner
+  does.
 - **Cost records.** Every `worker_attempt` event carries account, model, outcome, and what the CLI
   reported (Claude `usage` and `total_cost_usd`, Codex `tokens_used`). `python3 $E cost-report
   [--tasks-root <dir>]... [--since <date>]` sums them by account and model; `uncosted` counts
