@@ -147,7 +147,7 @@ work. On Codex, set `model` and `reasoning_effort` on `spawn_agent` (with `fork_
 ## Accounts
 
 Two Claude logins: **private** (`~/.claude`, the default for interactive sessions, with Fable)
-and **team** (`~/.claude-team`; whether its Fable may be used is open item A17). The account is
+and **team** (`~/.claude-team`), which must never use Fable (the owner's rule). The account is
 fixed per process:
 
 - A native subagent always bills the session's login; no binding changes that.
@@ -180,8 +180,8 @@ fixed per process:
   passes `CLAUDE_CONFIG_DIR=~/.claude-team` to every shell command, so a private call from it
   must set it explicitly, e.g. a Fable consult:
   `CLAUDE_CONFIG_DIR="$HOME/.claude" claude --model claude-fable-5-2 --tools Read,Grep,Glob -p`.
-  Use that route for Fable until A17 is settled, even though a native `model: "fable"` spawn ran
-  on team on 2026-11-15. Unattended pipelines launch producers with
+  Team must never use Fable, and nothing enforces that: a native `model: "fable"` spawn in a team
+  session ran on 2026-11-15. So never spawn `fable` from a team session; use the route above. Unattended pipelines launch producers with
   `CLAUDE_CONFIG_DIR="$HOME/.claude-team"` and no private fallback, as the vault's night runner
   does.
 - **Cost records.** Every `worker_attempt` event carries account, model, outcome, and what the CLI
