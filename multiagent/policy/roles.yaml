@@ -20,7 +20,7 @@
       "required_capabilities": ["review", "structured_result"]
     },
     "bulk_worker": {
-      "purpose": "Process independent shards and return schema-compatible results.",
+      "purpose": "Produce high-volume, low-judgment output: each shard is simple enough for a fast-tier model and its result can be checked against a schema. A shard that needs judgment is implementer work.",
       "may_spawn": false,
       "may_write": false,
       "required_capabilities": ["bulk", "structured_result"]
@@ -32,7 +32,7 @@
       "required_capabilities": ["verification", "structured_result"]
     },
     "runner": {
-      "purpose": "Perform bounded mechanical searches, commands, and metadata collection.",
+      "purpose": "Perform bounded mechanical searches, commands, and metadata collection for the conductor; the result is information, not a deliverable.",
       "may_spawn": false,
       "may_write": false,
       "required_capabilities": ["mechanical", "structured_result"]

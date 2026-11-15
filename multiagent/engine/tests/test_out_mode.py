@@ -929,13 +929,14 @@ class OutDispatchTest(unittest.TestCase):
     def test_publication_comes_from_the_final_attempt_after_a_retry(self):
         # Team rate-limited, private retried: the record must describe the attempt that
         # actually produced the bytes, not the one that failed.
-        self.write_contract(role="bulk_worker")
+        # implementer is the vehicle: its next candidate after team is private Claude.
+        self.write_contract(role="implementer")
         contract = pe.load_document(self.contract_path)
-        team = {"backend": "claude-fast-team", "host": "claude-code", "family": "claude",
-                "model": "claude-haiku-5", "effort": "low", "account": "team",
+        team = {"backend": "claude-core-team", "host": "claude-code", "family": "claude",
+                "model": "claude-opus-5-5", "effort": "high", "account": "team",
                 "config_dir": "/tmp/team"}
         limited = accounts.Attempt(
-            "team", "/tmp/team", "claude-haiku-5", 1, "rate_limited",
+            "team", "/tmp/team", "claude-opus-5-5", 1, "rate_limited",
             {"type": "result", "is_error": True, "api_error_status": 429, "result": "limit",
              "usage": {"output_tokens": 1}, "total_cost_usd": 0.01},
             "", "",
@@ -952,18 +953,18 @@ class OutDispatchTest(unittest.TestCase):
         with mock.patch.object(pe, "_run_worker", runner),                 mock.patch.object(pe, "build_worker_command", side_effect=record_build),                 mock.patch.object(pe, "_resolve_with_account",
                                   return_value=(pe.Decision(True, "resolved", team), "stubbed")),                 mock.patch.object(pe.accounts, "note_run_rate_limited"),                 mock.patch.object(pe.sys, "stdout"), mock.patch.object(pe.sys, "stderr"):
             code = pe.dispatch_worker(
-                self.bundle, contract, "bulk_worker", self.brief, "native", False,
+                self.bundle, contract, "implementer", self.brief, "native", False,
                 None, self.task_dir, self.task_dir, "docs/retry.md", self.contract_path, 0,
             )
         self.assertEqual(code, 0)
         self.assertEqual(runner.call_count, 2)
-        self.assertEqual(seen, ["claude-fast-team", "claude-fast"])
+        self.assertEqual(seen, ["claude-core-team", "claude-core"])
         self.assertEqual(
             (self.repo / "docs" / "retry.md").read_text(encoding="utf-8"), "the second try"
         )
         record = json.loads(self.records()[0].read_text(encoding="utf-8"))
         self.assertEqual(record["attempt"], 2)
-        self.assertEqual(record["backend"], "claude-fast")
+        self.assertEqual(record["backend"], "claude-core")
         self.assertEqual(record["account"], "private")
         self.assertEqual(record["status"], "succeeded")
         # Both attempts are recorded under the one dispatch id.

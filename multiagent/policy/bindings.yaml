@@ -52,11 +52,11 @@
           "effort": "low"
         },
         {
-          "backend": "claude-fast",
+          "backend": "codex-fast",
           "effort": "low"
         },
         {
-          "backend": "codex-fast",
+          "backend": "claude-fast",
           "effort": "low"
         }
       ]

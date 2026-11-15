@@ -51,11 +51,16 @@ class ResolveBindingTest(unittest.TestCase):
         self.assertEqual(binding.details["backend"], "claude-fast-team")
         self.assertIn("unknown", reason)
 
-    def test_exhausted_quota_falls_back_to_private(self):
-        with mock.patch.object(accounts, "probe", return_value=accounts.Availability("exhausted", "exhausted: session at 97%")):
-            binding, reason = pe._resolve_with_account(self.bundle, "bulk_worker", False)
-        self.assertEqual(binding.details["backend"], "claude-fast")
-        self.assertIn("exhausted", reason)
+    def test_exhausted_quota_falls_to_the_next_candidate(self):
+        # implementer ranks private next; bulk_worker ranks Codex ahead of private Haiku.
+        for role, expected in (("implementer", "claude-core"), ("bulk_worker", "codex-fast")):
+            with self.subTest(role), mock.patch.object(
+                accounts, "probe",
+                return_value=accounts.Availability("exhausted", "exhausted: session at 97%"),
+            ):
+                binding, reason = pe._resolve_with_account(self.bundle, role, False)
+                self.assertEqual(binding.details["backend"], expected)
+                self.assertIn("exhausted", reason)
 
     def test_exhausted_team_falls_to_private(self):
         decision = pe.resolve_binding(self.bundle, "verifier", author_family="codex", availability={"team": False})
@@ -83,14 +88,24 @@ class ResolveBindingTest(unittest.TestCase):
         )
 
     def test_bulk_worker_falls_back_in_list_order(self):
+        # Volume work spares private quota: team, then Codex, then private Haiku.
         exhausted = {"team": False}
         self.assertEqual(
             pe.resolve_binding(self.bundle, "bulk_worker", availability=exhausted).details["backend"],
+            "codex-fast",
+        )
+        self.assertEqual(
+            pe.resolve_binding(
+                self.bundle, "bulk_worker", required_family="claude", availability=exhausted
+            ).details["backend"],
             "claude-fast",
         )
-        # Native Task-tool children never reach team either.
+        # A native Task-tool child (resolved as the hook does, by the session's family)
+        # never reaches team or Codex.
         self.assertEqual(
-            pe.resolve_binding(self.bundle, "bulk_worker", exclude_account_bound=True).details["backend"],
+            pe.resolve_binding(
+                self.bundle, "bulk_worker", required_family="claude", exclude_account_bound=True
+            ).details["backend"],
             "claude-fast",
         )
 

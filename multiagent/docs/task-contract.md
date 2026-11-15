@@ -25,7 +25,8 @@ no behavior.
 - `implementer`: produces scoped changes or an applicable patch.
 - `critic`: independently challenges correctness and scope.
 - `verifier`: runs checks and records reproducible evidence.
-- `bulk_worker`: processes one independent shard.
+- `bulk_worker`: produces one low-judgment shard of high-volume work; a shard that needs
+  judgment is `implementer` work.
 - `runner`: performs a bounded mechanical lookup or command.
 
 ## Contract fields

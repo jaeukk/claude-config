@@ -203,6 +203,23 @@
   approval prompts ask about side effects, not about which vendor reviews whom, so they do not
   substitute for the independence check. (2026-09-30)
 
+- **D18 `bulk_worker` is defined by what its output is for, not by the shape of the work** =
+  `runner` returns information to the conductor (a search, a command result, metadata);
+  `bulk_worker` produces the deliverable itself, in volume, where each shard is simple enough for
+  a fast-tier model and a schema can check the result; a shard that needs judgment is
+  `implementer` work. **Why**: the earlier wording ("process independent shards") described only
+  the shape, so conductors planned `bulk_worker` for judgment work. Three contracts of
+  2026-09-16 to 09-18 (equation-fidelity checks, literature relevance, page builds) planned it
+  and then ran the shards as native Opus subagents; from 2026-10-01 to 11-15 it was never
+  dispatched, while about 880 native spawns billed the private login. Removal was considered
+  (OPEN_ITEMS A16, closed by this entry) and rejected by the owner: high-volume simple production
+  is a real need and is not `runner` work. **Order**: `claude-fast-team`, `codex-fast`,
+  `claude-fast`: team first to spare private quota, and when team is exhausted or rate-limited
+  the shard goes to Codex before private Haiku. The one retry after a team rate limit can
+  therefore cross families; it stays read-only. **Volume route**: many shards run as native
+  `model: "haiku"` subagents in a session started with `claude-team` (SKILL "Fan-outs"); a
+  `dispatch-worker` call per shard is for single recorded jobs. (2026-11-15)
+
 ## 4. 불변식
 
 구체 항목·검증 명령은 `_shared/system-invariants.md`. 시스템 수정 후 그 자가점검을 돌린다.

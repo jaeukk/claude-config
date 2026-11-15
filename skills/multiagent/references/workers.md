@@ -7,7 +7,7 @@ Moved verbatim from SKILL.md (2026-09-30) to keep the skill's core short. `$E` i
 When a worker's returned text is the deliverable (a note, a summary, a review), `--out <path>`
 has the engine write it instead of the conductor:
 
-    python3 $E dispatch-worker --task … --role bulk_worker --brief … --out notes/paper-x.md
+    python3 $E dispatch-worker --task … --role implementer --brief … --out notes/paper-x.md
 
 It refuses before launch when the suffix is code, the destination is reserved
 (engine state of any task, any `.git*` component, `.claude`, `.codex`, `.vscode`, `.mcp.json`),

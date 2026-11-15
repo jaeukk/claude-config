@@ -123,10 +123,15 @@ Backends are named `<family>-<tier>`. A tier is a routing role, not an effort le
   validator enforces it). A native spawn skips account-bound candidates, so it gets `claude-core`.
 - `critic`: the other family's ceiling. `verifier`: `codex-mid` for Claude-authored work;
   `claude-mid-team`, then `claude-mid`, for Codex-authored work.
-- `bulk_worker`: one pool led by `claude-fast-team`; the validator requires both families in it.
-  Unused: no dispatch 2026-10-01 to 11-15, because bulk page work needs the core tier, not Haiku.
-  Removal is open item A16.
-- `runner`: `codex-fast` first (cheapest at equal accuracy, `_shared/capability-profile.md`), then `claude-fast-team`, then `claude-fast`.
+- `bulk_worker`: high-volume, low-judgment production (extraction, reformatting, tagging,
+  per-item summaries a schema can check). Its output is the deliverable; a shard that needs
+  judgment is `implementer` work, however many shards there are. Order: `claude-fast-team`,
+  `codex-fast`, `claude-fast`, so exhausted team quota goes to Codex before private; the validator
+  requires both families. At volume, run the shards as native `model: "haiku"` subagents in a
+  session started with `claude-team` ("Fan-outs" under Accounts); one `dispatch-worker` call per
+  shard is for single recorded jobs.
+- `runner`: information for the conductor (a search, a command result, metadata), not a
+  deliverable. `codex-fast` first (cheapest at equal accuracy, `_shared/capability-profile.md`), then `claude-fast-team`, then `claude-fast`.
 
 "First, then" is preference, not failover: `resolve_binding` returns the first compatible
 candidate without a health check, and a failed worker is reported, not retried on the next one.
@@ -155,9 +160,10 @@ fixed per process:
   backends), the `claude-worker` CLI (`~/.local/bin/claude-worker`, no contract or record), and
   the headless team driver (`references/workers.md`).
 - Quota routing is not a health check. Before selecting a team backend the engine probes that
-  account: `available` routes there, `exhausted` (a window at or past 95%) falls to private, and
-  `unknown` (an unreadable or rate-limited probe) routes to team anyway. A team run that comes
-  back rate-limited gets one private retry, never in write mode; nothing else is retried.
+  account: `available` routes there, `exhausted` (a window at or past 95%) falls to the role's
+  next candidate (private; Codex for `bulk_worker`), and `unknown` (an unreadable or rate-limited
+  probe) routes to team anyway. A team run that comes back rate-limited gets one retry on that
+  next candidate, never in write mode; nothing else is retried.
   `claude-worker` routes the same way.
 - **When to push a job to team.** Hand it to one team producer when it is self-contained (the
   brief and readable files suffice; one destination), substantial (minutes of work, not a quick

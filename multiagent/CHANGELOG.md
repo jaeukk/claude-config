@@ -16,6 +16,9 @@
   copy of `target_repo`, so the reviewer can run the tests; the original stays read-only.
 
 ### Changed
+- `bulk_worker` redefined (design-basis D18): high-volume, low-judgment production, told apart
+  from `runner` by what the output is for. Order is now `claude-fast-team`, `codex-fast`,
+  `claude-fast`, so exhausted team quota goes to Codex before private Haiku.
 - A Codex usage-limit exit is recorded as `rate_limited`, not `error` (only the last stderr lines are
   read).
 - SKILL.md: a review round that leaves nothing to fix (no findings, or all deferred or rejected)

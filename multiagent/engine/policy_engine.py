@@ -2939,9 +2939,11 @@ def dispatch_worker(
         )
         attempt_number = 1
         if attempt.classification == "rate_limited" and backend.get("account") == "team":
-            # Exactly one private retry, and only here: CLI Claude workers are
-            # read-only by construction (``--tools Read,Grep,Glob``), so replaying
-            # the same brief duplicates computation, never side effects.
+            # Exactly one retry, on the next candidate (private Claude, or Codex where the
+            # binding ranks it ahead, as bulk_worker does), and only here: CLI workers are
+            # read-only by construction (Claude ``--tools Read,Grep,Glob``, Codex
+            # ``--sandbox read-only``), so replaying the same brief duplicates computation,
+            # never side effects.
             accounts.note_run_rate_limited(backend["config_dir"])
             if write_target is not None:
                 # The retry below exists because a repeated brief duplicates computation and
