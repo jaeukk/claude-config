@@ -54,9 +54,12 @@ Old contracts carrying them are accepted and ignored.
    work, `review` does the same with a critic of the other family. `dispatch-worker` refuses without a live lease you own,
    since that is where it counts CLI workers. A natively spawned worker is not stopped by a
    missing lease: there, holding the lease first is the cooperating-conductor protocol.
-3. Put only the task ID in `tasks/.active-task` while the hook should enforce the task.
-4. Before a native spawn, set `dispatch.current_role` to its role. Dispatch CLI workers with
-   `dispatch-worker --role <role>`.
+3. If a native spawn is planned, set `dispatch.current_role` to its role now: once the task is
+   active the hook refuses writes to `task.yaml`. Then put only the task ID in
+   `tasks/.active-task` while the hook should enforce the task.
+4. Dispatch CLI workers with `dispatch-worker --role <role>`. To change the native role later,
+   `release-lease` (it clears the pointer), edit, then acquire the lease and write the pointer
+   again.
 5. Store each worker result separately; only the lease owner appends events, except a headless
    driver's `record-attempt`, which is marked `source: external`. A CLI producer
    records its family in `observed-author.json` beside the contract (the hook records a native

@@ -32,6 +32,24 @@ Everything else under `~/.claude` (credentials, `sessions/`, `projects/`, caches
 - **`organizer`** — read and reorganize files in the filesystem.
 - **`zotero-obsidian-sync`** — Zotero ↔ Obsidian conventions with per-machine vault-path resolution.
 
+### Which venue sees which skill
+
+`skills/` is the one source copy for Claude Code, Codex and the Antigravity CLI (`agy`). Each
+venue sees only the skills that work there; `scripts/link-skills.sh` holds the two lists and
+applies them (symlinks in `~/.codex/skills`, an `include_only` allowlist in
+`~/.gemini/config/skills.json`). Run it after adding, renaming or removing a skill. Never copy a
+skill into another venue's directory: a copy drifts.
+
+| Skill | Claude Code | Codex | agy |
+|---|---|---|---|
+| `multiagent` | yes | yes | no (agy is not a conductor host) |
+| `karpathy-guidelines` | yes | no | yes |
+| `math-unicode` | yes | yes, through `~/.agents/skills` | yes |
+| every other skill here | yes | yes | yes |
+
+A skill body is venue-neutral; where tools differ it carries a short venue note (`md-report`
+publishing, `research-note` checking, `sim-update` Gmail fallback, Zotero MCP tools).
+
 ## Subagents
 
 - **`searcher`** — read-only research: search Zotero, read Obsidian notes, retrieve metadata.

@@ -1,6 +1,6 @@
 # md-report reference
 
-Read this file for syntax. Read `example/main.html` and `example/visuals.js` for a working page that passes `verify.py`. Never read `template.html` or the scripts: everything a report needs is described here.
+Read this file for syntax. Read `example/main.html` and `example/visuals.js` for a working page that passes `verify.py`. Everything a report needs is described here, so `template.html` and the scripts stay unread unless a build or verify failure cannot be resolved from their output.
 
 ## Page skeleton (`main.html`)
 

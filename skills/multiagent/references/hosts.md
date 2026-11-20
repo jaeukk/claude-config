@@ -7,8 +7,7 @@ Moved verbatim from SKILL.md (2026-09-30). `$E` is `engine/policy_engine.py`, ru
 - **Claude Code:** several spawns in one message run concurrently.
 - **Codex:** no batch spawn; one `spawn_agent` at a time, at most three live
   (`max_active_children: 3`). `fork_turns` defaults to `all`, and a full-history fork accepts no
-  `model` or `reasoning_effort`; when setting either, pass `fork_turns: "none"` or a positive
-  integer string.
+  `model` or `reasoning_effort`; when setting either, pass `fork_turns: "none"`.
 - Codex's child API reaches Codex models only. Fill a cross-family role with `dispatch-worker`,
   which runs the resolved backend's CLI with the brief on stdin, never with `spawn_agent`.
 

@@ -429,6 +429,12 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     page, out, srcs = Path(args[0]).resolve(), Path(args[1]), [Path(a) for a in args[2:]]
+    stems = [p.stem for p in srcs]
+    clash = sorted({s for s in stems if stems.count(s) > 1})
+    if clash:  # data-src names a note by its stem; two sources sharing one would silently merge
+        print(f"source notes share a file stem ({', '.join(clash)}): pass copies with distinct names",
+              file=sys.stderr)
+        return 2
     out.mkdir(parents=True, exist_ok=True)
     stem, url = page.stem, page.as_uri()
     problems: list[str] = []

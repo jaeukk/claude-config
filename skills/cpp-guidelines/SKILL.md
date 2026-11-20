@@ -1,6 +1,6 @@
 ---
 name: cpp-guidelines
-description: C++ coding standards for computational-physics work — C++23 idioms, RAII/ownership, Doxygen documentation for every function, numerical-code practices (units, floating-point, reproducibility), performance rules (algorithm choice, allocation-free hot loops, vectorization, OpenMP), code-reuse/anti-duplication rules, CMake and testing conventions. Use whenever writing, editing, reviewing, refactoring, optimizing, or deduplicating ANY C++ code (.cpp, .cc, .hpp, .h, CMakeLists.txt) or answering C++ build/compiler questions, even if the user doesn't explicitly say "C++" — e.g. "add a module", "speed up this simulation", "clean up this kernel", "fix this segfault".
+description: C++ coding standards for computational-physics work — C++23 idioms, RAII/ownership, Doxygen documentation for every function, numerical-code practices (units, floating-point, reproducibility), performance rules (algorithm choice, allocation-free hot loops, vectorization, OpenMP), code-reuse/anti-duplication rules, CMake and testing conventions. Use whenever writing, editing, reviewing, refactoring, optimizing, or deduplicating C++ code (.cpp, .cc, .hpp, .h, CMakeLists.txt) or answering C++ build/compiler questions, even if the user doesn't explicitly say "C++" — e.g. "add a module", "speed up this simulation", "clean up this kernel", "fix this segfault".
 license: MIT
 ---
 
@@ -62,14 +62,11 @@ already carries it.
 Leave exactly **one blank line** between the end of a function and the next
 function's doc-comment; no blank line between a doc-comment and its function.
 
-**Never strip a documented parameter's name to silence `-Wunused-parameter`.**
-`-Wunused-parameter` is a `-Wextra` diagnostic, *not* part of `-Wall`, so an
-unused-but-named parameter does **not** warn under a normal `-Wall` build. Removing
-the name (`f(const T&)`) — or commenting it out (`f(const T& /*x*/)`) — breaks the
-Doxygen `\param x` match (Doxygen sees no parameter `x` and warns), so the name and
-its documentation must stay in sync. Keep the name whenever a `\param` documents it,
-and accept the `-Wextra`-only unused-parameter note as out of the normal-bar scope.
-Only drop a parameter name where nothing documents it (e.g. a fixed-signature
+**Keep the name of every parameter a `@param` documents.** Removing the name
+(`f(const T&)`) or commenting it out (`f(const T& /*x*/)`) to silence
+`-Wunused-parameter` breaks the Doxygen match: Doxygen sees no parameter `x` and
+warns. Mark an intentionally unused parameter `[[maybe_unused]]` and keep its name.
+Drop a name only where nothing documents the parameter (e.g. a fixed-signature
 callback lambda like the `IterateThroughNeighbors` visitor, which has no doc block).
 
 ```cpp
@@ -104,8 +101,11 @@ Inside function bodies, comment only what the code cannot say: literature refere
 
 ## 6. Numerical-physics specifics
 
-- **Floating-point comparison:** never `==`. Compare with a relative tolerance
-  scaled to the magnitudes involved, plus an absolute floor near zero.
+- **Floating-point comparison:** no `==` between computed values. Compare with a
+  relative tolerance scaled to the magnitudes involved, plus an absolute floor
+  near zero. An exact test stays only where exactness is the contract (a zero
+  guard before a division, a sentinel value): say so in a comment, and never swap
+  it for a tolerance that changes the result.
 - **Summation:** for long reductions where accuracy matters, prefer pairwise
   summation (or Kahan) over naive left-to-right accumulation; note the choice in a
   comment.
@@ -119,16 +119,12 @@ Inside function bodies, comment only what the code cannot say: literature refere
 - **Indices and sizes:** use `std::size_t` (or `ssize`/`std::ptrdiff_t` when
   differences appear); beware `-Wconversion` warnings — they catch real bugs in
   index arithmetic.
-- **Loop-variable type follows the bound.** In a `for` loop, the counter and the
-  variable it is compared against must be the **same type** — take the loop
-  variable's type from the external variable that bounds it. Comparing against a
-  `.size()` (a `std::size_t`) ⇒ declare the counter `std::size_t` and compare it
-  directly: `for (std::size_t i = 0; i < v.size(); i++)`. Do **not** fix a
-  `-Wsign-compare` by casting the bound to `int` (`i < (int)v.size()`) or, worse,
-  by mixing a `size_t` counter with a `static_cast<int>` bound — that is
-  inconsistent and doesn't fix the signedness. Keep a signed counter only for a
-  genuinely signed loop (reverse `for (int i = n-1; i >= 0; --i)`), and then keep
-  the whole loop signed. Be consistent across sibling loops in a file.
+- **A loop counter takes the type of its bound.** Against a `.size()` that is
+  `std::size_t`: `for (std::size_t i = 0; i < v.size(); i++)`. Do not silence
+  `-Wsign-compare` by casting the bound (`i < (int)v.size()`), and do not mix a
+  `size_t` counter with a `static_cast<int>` bound. Keep a signed counter only for
+  a genuinely signed loop (reverse `for (int i = n-1; i >= 0; --i)`), signed
+  throughout. Be consistent across sibling loops in a file.
 
 ## 7. Performance
 
@@ -194,12 +190,3 @@ Unit-test kernels against **physics, not just spot values**:
 
 A test that encodes a physical invariant survives refactoring; a test that pins a
 magic number to 12 decimals breaks on the first legitimate change.
-
-## Review checklist
-
-Before calling C++ work done: every function has a Doxygen comment with units ·
-blank-line spacing between functions · no raw `new`/`delete` · `const`/`[[nodiscard]]`
-where they belong · no `==` on floats · RNG seeding explicit · no allocations inside
-hot loops · no reimplemented library math · repeated geometry/binning logic extracted
-into a shared helper, not copy-pasted · compiles warning-free at
-`-Wall -Wextra -Wpedantic`.

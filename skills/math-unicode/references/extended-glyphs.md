@@ -38,8 +38,8 @@ glyph. It does not touch any other rule.
 ## The set
 
 Counts are `fonts carrying the glyph / fonts measured`, from the same twelve
-monospace fonts as the *Font coverage* table in `SKILL.md`. Regenerate with
-`node scripts/measure-font-coverage.mjs <font-file>...`.
+monospace fonts as the *Font coverage* table in `glyph-tables.md`. The measuring script
+belongs to the upstream repository and is not shipped in this copy.
 
 ### Greek subscripts
 

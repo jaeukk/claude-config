@@ -14,11 +14,14 @@ Notes are exported to PDF and filed in a government research archive as proof of
 First command, from wherever the session runs:
 
 ```
-python3 <skill dir>/scripts/find_root.py --note            # prints today's note path
-python3 <skill dir>/scripts/find_root.py --note --project <name>   # when the user names a project
+python3 <skill dir>/scripts/find_root.py --note            # a daily note: prints today's note path
+python3 <skill dir>/scripts/find_root.py                   # ResearchPlan.md or 30_Literature/: prints <root>
+python3 <skill dir>/scripts/find_root.py [--note] --project <name>   # when the user names a project
 ```
 
-Exit 0: write there (it creates nothing; the file may not exist yet). Exit 2: today's note is already in `02_Confirmed/`, frozen (see below). Exit 1: unresolved; it lists the candidate projects on stderr, so ask the user which one and rerun with `--project`. Never guess a project from the conversation topic.
+`<skill dir>` is the directory this SKILL.md was loaded from (on this machine `~/.claude/skills/research-note`, which every venue links to).
+
+Exit 0: write there (it creates nothing; the file may not exist yet). Exit 2 (`--note` only): today's note is already in `02_Confirmed/`, frozen (see below). Exit 1: unresolved; it lists the candidate projects on stderr, so ask the user which one and rerun with `--project`. Never guess a project from the conversation topic.
 
 How it decides, in order: `--project` (vault folder or code-side folder name) → cwd inside the vault (the `10_Projects/<bucket>/<Project>` prefix) → a code-side `CLAUDE.md`/`AGENTS.md`/`README.md` above cwd with a `Notes root (WSL)` row or `notes_root:` → a vault project `README.md` whose `code_root:` contains cwd. `--project` also accepts `<bucket>/<name>` when a name exists in two buckets. The resolver only finds projects that already have a vault folder; a project with none yet is scaffolded first (the `project-manager` agent does this), and a code-side project gets one of the two markers so later sessions resolve it without `--project`. The vault base itself comes from the `zotero-obsidian-sync` rules (`$OBSIDIAN_VAULT`, the pin file, the Drive glob), never a hardcoded Windows user segment.
 
@@ -40,7 +43,7 @@ The date is the note's identity. Never rename a note or change its `created:` or
 Several sessions (Claude, Codex, different working directories) append to the same note during a day, and Google Drive syncs the file underneath them.
 
 - Before a session's first edit, read the whole note and confirm that what was written earlier today (by you or another session) is still there; Drive reverts arrive minutes to hours after the write. Report a gap before appending. Re-read again immediately before each edit; never edit from an earlier read.
-- Append to an existing note with an anchored Edit under the right `#` section, never a whole-file Write.
+- Append to an existing note with an anchored in-place edit under the right `#` section, never a whole-file rewrite.
 - New content is a new `##`/`###` subsection. Never add frontmatter, a second H1, or a top-level `#` heading outside the template's set.
 - Revise only the section the user names. Other sections and every ```sim-tracker``` fence belong to their authors (the fences to sim-tracker and sim-update).
 - Update `last_modified:`. Then re-read the edited region once to confirm it persisted; Drive has silently reverted fresh edits before.
@@ -90,14 +93,14 @@ Define a generating function (`$f(x,y) = [1+\cos K(x^2+y^2)]/2$, level cut at $1
 The vault describes; the code side (`~/10_Projects/<slug>/`) holds data, scripts, and runs. Every result names what produced it.
 
 - Pointer form (policy §5): `code: 30_Codes/dithering2/Lloyd.py`, `data: 20_Data/color_mixing/2026-10-15_run/`, `run: experiments/2026-10-21_matched-tetramers/`, relative to the project's `code_root:` in the vault project `README.md` frontmatter. Plain text in backticks, never an Obsidian link, never an absolute path (`/home`, `/mnt`, `C:\`). Remote HPC paths appear only inside sim-tracker fences.
-- Name the post-processing script and the dataset directory together; the script sits beside its data (global research-code workflow).
+- Name the post-processing script and the dataset directory together, each where it actually lives: a single-use script sits beside its data, reusable code is in the repo (global research-code workflow).
 - The two trees share one numbering: a two-digit prefix means one thing on one side and nothing else on the other. Do not create data or figure folders in the vault. Where a prefix already collides (`20_Progress` vs `20_Data`, `25_Figures` vs `25_Figs`), say so in the note and leave renaming to the user.
 
 **Figures.** Copy a frozen snapshot into `<root>/10_ResearchNotes/_assets/<project>_YYYYMMDD_<n>.png` at citation time; code-side figures change, the note must not. Take the next unused index. Embed, blank line, then the caption **directly below**: `**Fig. 3** — …`; a blank line between consecutive embeds. Group embeds by what they show (Figs. 3–4 under one caption, Fig. 5 alone). Name the script that drew it.
 
 **Links.** Another research note in the same project: full vault path, bare date as display text, `[[10_Projects/10_Active/<Project>/10_ResearchNotes/01_NotConfirmed/2026-08-20|2026-08-20]]`. The short `[[2026-08-20]]` is safe only for a sibling in the same folder: every project and the daily log (`60_Logs/01_Daily/`) share these basenames, so a bare link can resolve to the wrong file once a note moves to `02_Confirmed/`. Inside a table cell escape the pipe: `[[…/2026-08-20\|2026-08-20]]`. Inside a ```sim-tracker``` fence, no wikilinks at all: bare `2026-08-20`, or `2026-08-20:multi-stealthy` for another project.
 
-**Simulations.** Each batch gets one ```sim-tracker``` YAML block (schema in the `sim-tracker` skill) and, directly below it, its own processing plan: what to do with the outputs once the jobs finish. Job state in the block is written only by sim-tracker and sim-update. Outside the block, describe each group of runs that share a question (e.g. a $\phi_2$ sweep at one number ratio) with only: its purpose, requested tasks and resources, run time with CPU and memory efficiency, completion status (completed, or failed with its cause), and its tracker link; a table per wave works well. Polling and supervision sessions do not append status entries to the note; they add a short summary or intermediate report only when the owner asks (owner's rule, 2026-11-02).
+**Simulations.** Each batch gets one ```sim-tracker``` YAML block (required fields, registration and an example: `references/tracker-block.md` in the `sim-tracker` skill) and, directly below it, its own processing plan: what to do with the outputs once the jobs finish. Start the fence at column one: the poller does not see an indented fence. Job state in the block is written only by sim-tracker and sim-update. Outside the block, describe each group of runs that share a question (e.g. a $\phi_2$ sweep at one number ratio) with only: its purpose, requested tasks and resources, run time with CPU and memory efficiency, completion status (completed, or failed with its cause), and its tracker link; a table per wave works well. Polling and supervision sessions do not append status entries to the note; they add a short summary or intermediate report only when the owner asks (owner's rule, 2026-11-02).
 
 **Literature.** Crude literature-search results go in `<root>/30_Literature/<Topic>.md` (new file names per policy §4: no spaces or hyphens, at most four words) under a date heading `## YYYY-MM-DD`. The day's note transcludes that heading instead of copying it, by full path: `![[10_Projects/10_Active/<Project>/30_Literature/<Topic>#2026-10-22]]`. One copy of the text: the raw search stays in `30_Literature`, condensed knowledge later goes to the wiki.
 
@@ -109,13 +112,13 @@ The vault describes; the code side (`~/10_Projects/<slug>/`) holds data, scripts
 
 ## Verify
 
-After every edit run
+After every edit to a daily note run
 
 ```
 python3 <skill dir>/scripts/check_note.py <note.md>
 ```
 
-`<skill dir>` is where this SKILL.md was loaded from (`~/.claude/skills/research-note` on Claude Code, `~/.codex/skills/research-note` on Codex); the same for `find_root.py` above.
+It checks daily notes only; do not run it on `ResearchPlan.md` or a `30_Literature/` file. On Claude Code a hook also runs it after each daily-note edit; on Codex and agy this explicit run is the only check.
 
 Fix every ERROR on lines you wrote; report, do not fix, findings on lines you did not touch (legacy notes have their own history). Judge each WARN. It checks only the mechanical rules: filename and date identity, single frontmatter, allowed H1 set, one Next Steps, absolute paths, link display text, wikilinks in fences, caption placement, `\eqno`. Concision, wording, and physics-not-error-analysis are checked by rereading the diff as a stranger would.
 
