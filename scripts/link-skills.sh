@@ -26,6 +26,8 @@ CODEX=(caveman-skill cpp-guidelines finding-unknowns md-report multiagent organi
        zotero-obsidian-sync)
 
 # agy: no multiagent (agy is not a conductor host and has no backend in the engine).
+# computer-use, orca-cli and orchestration are Orca's skills, linked into ~/.claude/skills from
+# ~/.agents/skills on a machine that runs Orca; drop them from this list on one that does not.
 AGY=(caveman-skill computer-use cpp-guidelines finding-unknowns karpathy-guidelines math-unicode
      md-report orca-cli orchestration organizer prepare-arxiv-submission python-guidelines
      research-note sim-tracker sim-update zotero-obsidian-sync)
@@ -64,6 +66,9 @@ if [ -d "$HOME/.agents/skills" ]; then
 fi
 
 if [ -d "$HOME/.gemini/config" ]; then
+  for s in "${AGY[@]}"; do  # a name with no skill behind it would be allowlisted to nothing
+    if [ ! -f "$SRC/$s/SKILL.md" ]; then echo "MISSING $SRC/$s/SKILL.md: listed for agy" >&2; status=1; fi
+  done
   python3 -c '
 import json, os, sys
 path, src, names = sys.argv[1], sys.argv[2], sys.argv[3:]

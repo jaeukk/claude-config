@@ -5,8 +5,8 @@ Read this file when the initial clean build fails, bibliography embedding is unc
 ## Useful inspections
 
 ```bash
-rg -n '\\bibliography|\\bibliographystyle|\\begin\{thebibliography\}|\\bibitem' paper.tex
-rg -n 'fontspec|setmainfont|newfontfamily|ifluatex|ifxetex|ifPDFTeX|reserveinserts' . -g '*.tex' -g '*.cls' -g '*.sty'
+grep -nE '\\bibliography|\\bibliographystyle|\\begin\{thebibliography\}|\\bibitem' paper.tex
+grep -rnE 'fontspec|setmainfont|newfontfamily|ifluatex|ifxetex|ifPDFTeX|reserveinserts' . --include='*.tex' --include='*.cls' --include='*.sty'
 pdftotext -f 1 -l 2 -layout build/paper.pdf -
 pdfinfo build/paper.pdf
 ```

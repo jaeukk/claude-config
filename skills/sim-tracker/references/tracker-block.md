@@ -1,6 +1,6 @@
 # Creating a tracker block: submitting sessions and launchers
 
-Moved verbatim from the `sim-update` skill (2026-11-20), with the three placement rules below added.
+Moved verbatim from the `sim-update` skill (2026-11-20), with the placement rules below added. `simupdate.py` is `~/.claude/skills/sim-tracker/scripts/simupdate.py`; a scope flag (`--project NAME`, `--root DIR`) goes after the subcommand and KEY.
 
 - Start the fence at column one: `simtrack.py` does not see an indented fence.
 - Quote any job ID that YAML would read as something else, above all a Slurm array-task ID:

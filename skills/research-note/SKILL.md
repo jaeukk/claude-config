@@ -19,7 +19,7 @@ python3 <skill dir>/scripts/find_root.py                   # ResearchPlan.md or 
 python3 <skill dir>/scripts/find_root.py [--note] --project <name>   # when the user names a project
 ```
 
-`<skill dir>` is the directory this SKILL.md was loaded from (on this machine `~/.claude/skills/research-note`, which every venue links to).
+`<skill dir>` is the directory this SKILL.md was loaded from (on this machine `~/.claude/skills/research-note`, which every venue reads).
 
 Exit 0: write there (it creates nothing; the file may not exist yet). Exit 2 (`--note` only): today's note is already in `02_Confirmed/`, frozen (see below). Exit 1: unresolved; it lists the candidate projects on stderr, so ask the user which one and rerun with `--project`. Never guess a project from the conversation topic.
 

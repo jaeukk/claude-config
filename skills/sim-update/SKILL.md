@@ -34,9 +34,10 @@ it whenever the run needed it; if KEY exists in several projects, use `--project
    A default run is write-enabled and closes whatever passes, and the script sees a controller
    only when the block declares one (the controller item in step 4). So unless you have already
    read the notes whose trackers are in scope, run `--dry-run` first and read the note text
-   around each tracker it would close. If the prose says a tracked job submits successors and the
-   block does not declare that, report the tracker and have the owner declare the controller in
-   the block (or decide otherwise) before any write-enabled run.
+   around each tracker it would close or lists as `JUDGMENT NEEDED`. If the prose says a tracked
+   job submits successors and the block does not declare that, run neither a write-enabled `run`
+   nor `accept` for it: report the tracker and have the owner declare the controller in the block
+   (or decide otherwise) first.
 3. **Report lines and what to do with each:**
    - `VERIFIED_SUCCESS -> WRITTEN`, `registry row moved`: done. `-> PROPOSED ONLY`: the block is in
      `02_Confirmed/` (never edited, an exported PDF may depend on it); report the proposed closure and
@@ -80,7 +81,8 @@ it whenever the run needed it; if KEY exists in several projects, use `--project
      command, endpoint timestamps, and terminal record. An empty mail search alone establishes nothing.
    - **controller/ledger declared** (`job_registry` or `controller` in the block, a job whose role,
      file or name says controller, or `verify.additional` naming a controller, successors or a
-     ledger): resolve the
+     ledger; a controller described only in the note's prose is yours to notice before any
+     `accept`, see step 2): resolve the
      authoritative ledger against every submitted ID. Each required successor must be listed in a
      tracker and verified, or resolved by an owner override. A controller's own zero exit or a closed
      parent array does not imply successor completion. Then pass `--ledger-checked`.

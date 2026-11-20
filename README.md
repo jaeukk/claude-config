@@ -46,6 +46,7 @@ skill into another venue's directory: a copy drifts.
 | `karpathy-guidelines` | yes | no | yes |
 | `math-unicode` | yes | yes, through `~/.agents/skills` | yes |
 | every other skill here | yes | yes | yes |
+| Orca's `computer-use`, `orca-cli`, `orchestration` (installed in `~/.agents/skills`; this repo tracks only the links) | yes, linked | yes, read there directly | yes |
 
 A skill body is venue-neutral; where tools differ it carries a short venue note (`md-report`
 publishing, `research-note` checking, `sim-update` Gmail fallback, Zotero MCP tools).

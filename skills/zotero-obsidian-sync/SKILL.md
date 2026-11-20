@@ -96,8 +96,7 @@ VAULT=$(python3 ~/.claude/skills/research-note/scripts/find_root.py --vault)
 It takes the first of: `$OBSIDIAN_VAULT`; the path pinned in `~/.claude/zotero-obsidian.local`
 (gitignored, one per machine, read by every venue); then the stable suffix globbed under
 `/mnt/<drive>/Users/*/` and `/mnt/<drive>/`, together with `~/20_Notes`. A candidate counts only
-if it holds `20_Notes_Policy.md`. (This replaces the earlier recipe that guessed from the Windows
-username.) It exits 1 with nothing on stdout when no vault is found, or when several
+if it holds `20_Notes_Policy.md`. It exits 1 with nothing on stdout when no vault is found, or when several
 distinct vaults match (it lists them on stderr). In either case ask the user which path to use
 and offer to pin the answer in `~/.claude/zotero-obsidian.local`; never pick one yourself.
 

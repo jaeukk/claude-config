@@ -26,7 +26,8 @@ Runs the page in headless Chrome at desktop and phone width with the template's 
     exist; in a synthesis every text block needs a ``data-src`` scope.
 
 It saves figure-only contact sheets (desktop, light theme) for one visual look, and phone sheets
-with ``--phone-shots``. Exit status 1 if any problem is found, 2 if Chrome cannot run.
+with ``--phone-shots``. Exit status 1 if any problem is found, 2 if Chrome cannot run or two
+different source notes share a file stem.
 """
 from __future__ import annotations
 
@@ -419,6 +420,26 @@ def figure_sheets(png: Path, figures: list[dict], out: Path, stem: str, scale: f
     return paths
 
 
+def unique_sources(paths: list[str]) -> tuple[list[Path], list[str]]:
+    """Source notes with repeats of one file dropped, and the stems that different files share.
+
+    Parameters
+    ----------
+    paths : list of str
+        Source-note paths as given on the command line.
+
+    Returns
+    -------
+    srcs : list of Path
+        One path per distinct (file, stem) pair, in the order given.
+    clash : list of str
+        Stems carried by more than one source; non-empty means ``data-src`` would be ambiguous.
+    """
+    srcs = list({(Path(a).resolve(), Path(a).stem): Path(a) for a in paths}.values())
+    stems = [p.stem for p in srcs]
+    return srcs, sorted({s for s in stems if stems.count(s) > 1})
+
+
 def main(argv: list[str]) -> int:
     if argv == ["--selftest"]:
         _selftest()
@@ -429,9 +450,7 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     page, out = Path(args[0]).resolve(), Path(args[1])
-    srcs = list(dict.fromkeys(Path(a).resolve() for a in args[2:]))  # one note passed twice is one source
-    stems = [p.stem for p in srcs]
-    clash = sorted({s for s in stems if stems.count(s) > 1})
+    srcs, clash = unique_sources(args[2:])
     if clash:  # data-src names a note by its stem; two sources sharing one would silently merge
         print(f"source notes share a file stem ({', '.join(clash)}): pass copies with distinct names",
               file=sys.stderr)
@@ -557,6 +576,8 @@ def _selftest() -> None:
     assert has(run(f'<script type="application/json" class="concept-map">{bad}</script>'), "EDGE")
     # reading copy: missing numbers are counted from what the reader sees, not from scripts
     assert has(run("<p>0.3 0.52 0.35 0.45 2025</p><script>const n = 99;</script>", copy=True), "MISSING  99")
+    assert [len(unique_sources(["a/n.md", "./a/n.md", "b/m.md"])[0]), unique_sources(["a/n.md", "./a/n.md"])[1]] == [2, []]
+    assert unique_sources(["a/n.md", "b/n.md"])[1] == ["n"]                    # two notes, one stem
     print("selftest ok")
 
 

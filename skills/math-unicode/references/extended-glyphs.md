@@ -12,7 +12,7 @@ point the portable rules leave on the table.
 
 ## Opting in
 
-Nothing here applies unless you ask for it. Neither Claude Code nor Codex exposes
+Nothing here applies unless you ask for it. No venue here (Claude Code, Codex, agy) exposes
 per-skill settings, so say it once and it holds for the session:
 
 > Use extended glyph coverage from math-unicode.
