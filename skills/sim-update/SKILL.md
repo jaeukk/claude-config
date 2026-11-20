@@ -32,12 +32,12 @@ it whenever the run needed it; if KEY exists in several projects, use `--project
 2. **Run it** and relay its report. Exit 3 means an SSH endpoint was unavailable: ask the user to open
    it (`ssh <host>`, OTP or Duo, leave it open), never retry SSH yourself, then rerun.
    A default run is write-enabled and closes whatever passes, and the script sees a controller
-   only when the block declares one (the controller item in step 4). So unless you have already
-   read the notes whose trackers are in scope, run `--dry-run` first and read the note text
-   around each tracker it would close or lists as `JUDGMENT NEEDED`. If the prose says a tracked
-   job submits successors and the block does not declare that, run neither a write-enabled `run`
-   nor `accept` for it: report the tracker and have the owner declare the controller in the block
-   (or decide otherwise) first.
+   only when the block declares one (the controller item in step 4). So before a write-enabled
+   `run`, read the note text around every open tracker in its scope (`--dry-run` lists them with
+   note and line), and before `accept KEY` read it for KEY. If the request or the note says a
+   tracked job submits successors and the block does not declare that, do not close it: report
+   the tracker and have the owner declare the controller in the block (or decide otherwise)
+   first.
 3. **Report lines and what to do with each:**
    - `VERIFIED_SUCCESS -> WRITTEN`, `registry row moved`: done. `-> PROPOSED ONLY`: the block is in
      `02_Confirmed/` (never edited, an exported PDF may depend on it); report the proposed closure and

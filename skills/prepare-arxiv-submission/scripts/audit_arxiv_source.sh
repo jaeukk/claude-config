@@ -46,13 +46,13 @@ find "$source_dir" -type f \( \
 \) -print | sort
 
 printf '\nBibliography directives in main TeX file:\n'
-grep -nE '\\bibliography|\\bibliographystyle|\\begin\{thebibliography\}|\\end\{thebibliography\}' \
+grep -anE '\\bibliography|\\bibliographystyle|\\begin\{thebibliography\}|\\end\{thebibliography\}' \
   "$source_dir/$main_tex" || true
-bibitem_count=$(grep -c '\\bibitem' "$source_dir/$main_tex" 2>/dev/null || true)
+bibitem_count=$(grep -ac '\\bibitem' "$source_dir/$main_tex" 2>/dev/null || true)
 printf 'Embedded bibitems: %s\n' "${bibitem_count:-0}"
 
 printf '\nPotential engine-specific constructs:\n'
-grep -rnE 'fontspec|setmainfont|newfontfamily|directlua|ifluatex|ifxetex|ifPDFTeX|reserveinserts' \
+grep -arnE 'fontspec|setmainfont|newfontfamily|directlua|ifluatex|ifxetex|ifPDFTeX|reserveinserts' \
   "$source_dir" --include='*.tex' --include='*.cls' --include='*.sty' || true
 
 if [[ "$engine" == none ]]; then
@@ -103,7 +103,7 @@ printf 'BUILD SUCCEEDED\n'
 
 printf '\nSerious log diagnostics:\n'
 if [[ -f "$log_file" ]]; then
-  grep -nE 'Citation.*undefined|Reference.*undefined|There were undefined|LaTeX Error|Undefined control sequence|Emergency stop|Fatal error|^!' \
+  grep -anE 'Citation.*undefined|Reference.*undefined|There were undefined|LaTeX Error|Undefined control sequence|Emergency stop|Fatal error|^!' \
     "$log_file" || true
 else
   printf 'WARNING: expected log file not found: %s\n' "$log_file"
@@ -120,7 +120,7 @@ fi
 
 printf '\nRecorded bibliography/font inputs of interest:\n'
 if [[ -f "$fls_file" ]]; then
-  grep -nE '(^|/)(fontspec[^/]*|[^/]+\.(bib|bst|bbl|ttf|otf))$|fontspec' "$fls_file" || true
+  grep -anE '(^|/)(fontspec[^/]*|[^/]+\.(bib|bst|bbl|ttf|otf))$|fontspec' "$fls_file" || true
 else
   printf 'WARNING: expected recorder file not found: %s\n' "$fls_file"
 fi

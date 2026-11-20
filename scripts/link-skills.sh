@@ -8,8 +8,9 @@
 #
 # Idempotent, and it touches only what is its own:
 #   - it creates a missing link for each listed skill and leaves a correct one alone;
-#   - in ~/.codex/skills it removes a link only when that link points into ~/.claude/skills and
-#     its skill is no longer listed for Codex or no longer exists;
+#   - in ~/.codex/skills it removes a link only when it is one this script writes (named
+#     <skill>, pointing at ~/.claude/skills/<skill>) and that skill is no longer listed for
+#     Codex or no longer exists;
 #   - in skills.json it sets include_only on the entry for ~/.claude/skills and keeps every
 #     other entry and key.
 # Anything else in the way (a real directory, a file, a link to somewhere else) is reported,
@@ -39,7 +40,7 @@ link() {
   if [ ! -f "$1/SKILL.md" ]; then
     echo "MISSING $1/SKILL.md: not linked" >&2; status=1
   elif [ -L "$2" ]; then
-    if [ "$(readlink "$2")" != "$1" ]; then
+    if ! [ "$2" -ef "$1" ]; then
       echo "SKIP $2: it links to $(readlink "$2"); remove that link and rerun" >&2; status=1
     fi
   elif [ -e "$2" ]; then
@@ -54,7 +55,7 @@ if [ -d "$HOME/.codex" ]; then
   for s in "${CODEX[@]}"; do link "$SRC/$s" "$HOME/.codex/skills/$s"; done
   for l in "$HOME/.codex/skills"/*; do  # our own links: drop one that is unlisted or dangling
     [ -L "$l" ] || continue
-    [[ "$(readlink "$l")" == "$SRC"/* ]] || continue
+    [[ "$(readlink "$l")" == "$SRC/$(basename "$l")" ]] || continue
     if [ ! -e "$l" ] || [[ " ${CODEX[*]} " != *" $(basename "$l") "* ]]; then
       rm "$l"; echo "removed link $l"
     fi
