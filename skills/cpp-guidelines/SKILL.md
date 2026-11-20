@@ -141,9 +141,11 @@ intuition about hot spots is wrong often enough to be expensive.
   function calls inside — and let the compiler do the SIMD. Verify with
   `-fopt-info-vec` (GCC) / `-Rpass=loop-vectorize` (Clang) when it matters, rather
   than hand-writing intrinsics.
-- **Release flags:** `-O3 -DNDEBUG`, plus `-march=native` for runs on this machine
-  and LTO for release builds. `-ffast-math` changes IEEE semantics (NaN handling,
-  reassociation) — enable it only deliberately and note it in the build file.
+- **Release flags:** `-O3 -DNDEBUG` and LTO for release builds. `-march=native` only for a
+  binary that runs on the machine that built it: on a heterogeneous cluster (Della) a
+  login-node build hits "Illegal instruction" on other node types, so name the target
+  architecture there. `-ffast-math` changes IEEE semantics (NaN handling, reassociation) —
+  enable it only deliberately and note it in the build file.
 - **Parallelism:** OpenMP or `std::execution::par` for independent iterations.
   Parallel reductions reorder floating-point sums, so results shift in the last
   digits — decide whether that's acceptable and say so where the pragma lives.

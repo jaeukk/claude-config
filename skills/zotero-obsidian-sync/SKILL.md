@@ -45,9 +45,10 @@ The local REST API cannot write, but the Zotero Connector (the channel behind th
    `publicationTitle`/`proceedingsTitle`, `volume`, `issue`, `pages`, `DOI`, `url`,
    `tags:[{tag}]`. It takes no `collections` field.
 
-Take the fields from CrossRef (`https://api.crossref.org/works/<DOI>`), send all items in one
-`saveItems` call, then verify with `GET /api/users/5872032/collections/<KEY>/items/top`. A
-collection cannot be created over either API: ask the user to make it in the Zotero app.
+For a work with a DOI, take the fields from CrossRef (`https://api.crossref.org/works/<DOI>`);
+otherwise use the item's own authoritative record. Send all items in one `saveItems` call, then
+verify with `GET /api/users/5872032/collections/<KEY>/items/top`. The Connector and the local API
+cannot create a collection: ask the user to make it in the Zotero app.
 
 ### Change existing items: the Web API, through the vault scripts
 
@@ -60,10 +61,11 @@ scripts at the vault root:
 - `python3 99_SYSTEM/scripts/zotero_add_collection.py <COLLECTION_KEY> <KEY> ...` files existing
   items into a collection (the Connector cannot file an item that already exists). Idempotent.
 
-Use these commands in exactly this form. The owner approved Web API writes for them
-(2026-09-30); on Claude Code the vault's `.claude/settings.local.json` allows exactly these
-commands, and auto mode blocks the same write done another way (inline `python3 -`,
-`curl -X PATCH`).
+Use these commands in exactly this form. The standing approval is for tag writes: the owner
+approved them on 2026-09-30, and on Claude Code the vault's `.claude/settings.local.json` allows
+exactly the `zotero_add_tag.py` command, while auto mode blocks the same write done another way
+(inline `python3 -`, `curl -X PATCH`). Filing into a collection changes the cloud library's
+collection membership: run `zotero_add_collection.py` only when the owner asks for that filing.
 
 What the scripts do, for when one has to be extended: `GET
 https://api.zotero.org/users/5872032/items/<KEY>` for the item's `version` and current field,
@@ -92,13 +94,15 @@ VAULT=$(python3 ~/.claude/skills/research-note/scripts/find_root.py --vault)
 ```
 
 It takes the first of: `$OBSIDIAN_VAULT`; the path pinned in `~/.claude/zotero-obsidian.local`
-(gitignored, one per machine, read by every venue); a glob of the stable suffix under
-`/mnt/<drive>/Users/*/` or `/mnt/<drive>/`. A candidate counts only if it holds
-`20_Notes_Policy.md`. It exits 1 with nothing on stdout when no vault is found, or when several
+(gitignored, one per machine, read by every venue); then the stable suffix globbed under
+`/mnt/<drive>/Users/*/` and `/mnt/<drive>/`, together with `~/20_Notes`. A candidate counts only
+if it holds `20_Notes_Policy.md`. (This replaces the earlier recipe that guessed from the Windows
+username.) It exits 1 with nothing on stdout when no vault is found, or when several
 distinct vaults match (it lists them on stderr). In either case ask the user which path to use
 and offer to pin the answer in `~/.claude/zotero-obsidian.local`; never pick one yourself.
 
 ## Translate Windows paths to WSL
 
 Zotero returns Windows paths for PDFs and attachments. Convert them with `wslpath -u
-'C:\Users\Foo\paper.pdf'` (gives `/mnt/c/Users/Foo/paper.pdf`).
+'C:\Users\Foo\paper.pdf'` (gives `/mnt/c/Users/Foo/paper.pdf`). By hand: `<DRIVE>:\a\b` is
+`/mnt/<drive letter, lowercase>/a/b`.

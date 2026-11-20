@@ -46,20 +46,20 @@ find "$source_dir" -type f \( \
 \) -print | sort
 
 printf '\nBibliography directives in main TeX file:\n'
-rg -n '\\bibliography|\\bibliographystyle|\\begin\{thebibliography\}|\\end\{thebibliography\}' \
+grep -nE '\\bibliography|\\bibliographystyle|\\begin\{thebibliography\}|\\end\{thebibliography\}' \
   "$source_dir/$main_tex" || true
-bibitem_count=$(rg -c '\\bibitem' "$source_dir/$main_tex" 2>/dev/null || true)
+bibitem_count=$(grep -c '\\bibitem' "$source_dir/$main_tex" 2>/dev/null || true)
 printf 'Embedded bibitems: %s\n' "${bibitem_count:-0}"
 
 printf '\nPotential engine-specific constructs:\n'
-rg -n 'fontspec|setmainfont|newfontfamily|directlua|ifluatex|ifxetex|ifPDFTeX|reserveinserts' \
-  "$source_dir" -g '*.tex' -g '*.cls' -g '*.sty' || true
+grep -rnE 'fontspec|setmainfont|newfontfamily|directlua|ifluatex|ifxetex|ifPDFTeX|reserveinserts' \
+  "$source_dir" --include='*.tex' --include='*.cls' --include='*.sty' || true
 
 if [[ "$engine" == none ]]; then
   exit 0
 fi
 
-for command_name in latexmk rg pdfinfo pdftotext; do
+for command_name in latexmk pdfinfo pdftotext; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf 'ERROR: required command is unavailable: %s\n' "$command_name" >&2
     exit 69
@@ -103,7 +103,7 @@ printf 'BUILD SUCCEEDED\n'
 
 printf '\nSerious log diagnostics:\n'
 if [[ -f "$log_file" ]]; then
-  rg -n 'Citation.*undefined|Reference.*undefined|There were undefined|LaTeX Error|Undefined control sequence|Emergency stop|Fatal error|^!' \
+  grep -nE 'Citation.*undefined|Reference.*undefined|There were undefined|LaTeX Error|Undefined control sequence|Emergency stop|Fatal error|^!' \
     "$log_file" || true
 else
   printf 'WARNING: expected log file not found: %s\n' "$log_file"
@@ -111,7 +111,7 @@ fi
 
 printf '\nPDF summary:\n'
 if [[ -f "$pdf_file" ]]; then
-  pdfinfo "$pdf_file" | rg '^(Pages|File size|PDF version):' || true
+  pdfinfo "$pdf_file" | grep -E '^(Pages|File size|PDF version):' || true
   printf '\nFirst-page text (first 20 lines):\n'
   pdftotext -f 1 -l 1 -layout "$pdf_file" - | sed -n '1,20p'
 else
@@ -120,7 +120,7 @@ fi
 
 printf '\nRecorded bibliography/font inputs of interest:\n'
 if [[ -f "$fls_file" ]]; then
-  rg -n '(^|/)(fontspec[^/]*|[^/]+\.(bib|bst|bbl|ttf|otf))$|fontspec' "$fls_file" || true
+  grep -nE '(^|/)(fontspec[^/]*|[^/]+\.(bib|bst|bbl|ttf|otf))$|fontspec' "$fls_file" || true
 else
   printf 'WARNING: expected recorder file not found: %s\n' "$fls_file"
 fi

@@ -21,7 +21,7 @@ Never inside the vault (`~/20_Notes`): its policy allows only `.md` and png/jpg/
 
 ## Procedure
 
-1. **Read every note once, in full.** For a synthesis, also read the notes the folder keeps linking to for its structure (a hub or phase-diagram note) and pass them to `verify.py` as sources. A reading copy passes only the notes being copied, because `--copy` requires every number of every source on the page. Sources are identified by file stem: when two share one (daily notes of two projects), pass copies with distinct names. Find images with `find -L <vault> -name <file>`.
+1. **Read every note once, in full.** For a synthesis, also read the notes the folder keeps linking to for its structure (a hub or phase-diagram note) and pass them to `verify.py` as sources. A reading copy passes only the notes being copied, because `--copy` requires every number of every source on the page. Sources are identified by file stem, and `verify.py` refuses two different notes that share one (daily notes of two projects). Pass copies with distinct names; a concept-map edge to a renamed copy then fails its wikilink check, so leave that note out of the map and tell the user, rather than editing a copy to match. Find images with `find -L <vault> -name <file>`.
 2. **Plan the claims, then the visuals** (*Visual menu*). One visual per claim that benefits from one: a reading copy gets at most about 2 beyond its tables, a synthesis about 4–8. A section that is honestly prose stays prose.
 3. **Write `main.html` and `visuals.js` in a scratch directory** (the session scratchpad where the venue has one), following `reference.md` and the rules below.
 4. **Build:** `python3 ~/.claude/skills/md-report/scripts/build.py --out <path> --title "…" --eyebrow "…" --meta "…" --main main.html --js visuals.js [--preamble <LatexPreamble.md>] [--asset <img> …]`.
@@ -48,7 +48,7 @@ The notes passed to `verify.py` are the only source: no background knowledge, no
 ## Token rules
 
 - To resolve a `verify.py` problem, grep the note for the lines you need instead of rereading it.
-- **Don't load** the `dataviz` or `artifact-diagramming` skills: `reference.md` holds what applies. Load `dataviz` only for a chart form it doesn't cover.
+- **Don't load** the `dataviz` or `artifact-diagramming` skills (Claude Code only): `reference.md` holds what applies. Where `dataviz` exists, load it only for a chart form `reference.md` doesn't cover.
 - Fix with small edits and rebuild; never regenerate a whole file for a small fix.
 - **Prefer the data-driven components** (`chartFromTable`, `atlasFromTable`, `conceptMap`, `livePlot`) over custom code. A custom demonstration earns its place only by showing a construction nothing else can, in about 80 lines or fewer.
 - **Stay text-first.** `verify.py` output is text and costs little. Read images only as figure sheets, once.

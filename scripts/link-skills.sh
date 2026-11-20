@@ -6,11 +6,15 @@
 #   Codex        reads ~/.codex/skills and ~/.agents/skills: one symlink per listed skill.
 #   agy          reads ~/.gemini/config/skills.json: an include_only allowlist on ~/.claude/skills.
 #
-# Idempotent. It creates or repoints the symlinks named in the lists, removes a Codex link
-# only when it points into ~/.claude/skills at a skill that is gone, and in skills.json touches
-# only the entry for ~/.claude/skills. Anything else in the way (a real directory, a file, a
-# dangling link to somewhere else) is reported or left alone. Run it after adding, renaming or
-# removing a skill, and edit the two lists below to change what a venue sees.
+# Idempotent, and it touches only what is its own:
+#   - it creates a missing link for each listed skill and leaves a correct one alone;
+#   - in ~/.codex/skills it removes a link only when that link points into ~/.claude/skills and
+#     its skill is no longer listed for Codex or no longer exists;
+#   - in skills.json it sets include_only on the entry for ~/.claude/skills and keeps every
+#     other entry and key.
+# Anything else in the way (a real directory, a file, a link to somewhere else) is reported,
+# left as it is, and makes the script exit 1: move it away yourself and rerun.
+# Run it after adding, renaming or removing a skill; edit the two lists to change what a venue sees.
 set -euo pipefail
 
 SRC="$HOME/.claude/skills"
@@ -28,12 +32,14 @@ AGY=(caveman-skill computer-use cpp-guidelines finding-unknowns karpathy-guideli
 
 status=0
 
-# link <target> <link path>: create or repoint a symlink, never replace a real file or directory.
+# link <target> <link path>: create the link if nothing is there; never replace anything.
 link() {
-  if [ ! -d "$1" ]; then
-    echo "MISSING $1: not linked" >&2; status=1
+  if [ ! -f "$1/SKILL.md" ]; then
+    echo "MISSING $1/SKILL.md: not linked" >&2; status=1
   elif [ -L "$2" ]; then
-    ln -sfn "$1" "$2"
+    if [ "$(readlink "$2")" != "$1" ]; then
+      echo "SKIP $2: it links to $(readlink "$2"); remove that link and rerun" >&2; status=1
+    fi
   elif [ -e "$2" ]; then
     echo "SKIP $2: exists and is not a symlink; move it away and rerun" >&2; status=1
   else
@@ -44,9 +50,11 @@ link() {
 if [ -d "$HOME/.codex" ]; then
   mkdir -p "$HOME/.codex/skills"
   for s in "${CODEX[@]}"; do link "$SRC/$s" "$HOME/.codex/skills/$s"; done
-  for l in "$HOME/.codex/skills"/*; do  # one of our links whose skill is gone (renamed or removed)
-    if [ -L "$l" ] && [ ! -e "$l" ] && [[ "$(readlink "$l")" == "$SRC"/* ]]; then
-      rm "$l"; echo "removed dangling link $l"
+  for l in "$HOME/.codex/skills"/*; do  # our own links: drop one that is unlisted or dangling
+    [ -L "$l" ] || continue
+    [[ "$(readlink "$l")" == "$SRC"/* ]] || continue
+    if [ ! -e "$l" ] || [[ " ${CODEX[*]} " != *" $(basename "$l") "* ]]; then
+      rm "$l"; echo "removed link $l"
     fi
   done
 fi
@@ -55,8 +63,6 @@ if [ -d "$HOME/.agents/skills" ]; then
   link "$SRC/math-unicode" "$HOME/.agents/skills/math-unicode"
 fi
 
-# agy: set include_only on the entry for ~/.claude/skills (adding the entry if absent). Every
-# other entry and key of an existing skills.json is kept. Written through a temporary file.
 if [ -d "$HOME/.gemini/config" ]; then
   python3 -c '
 import json, os, sys
@@ -70,10 +76,11 @@ if not mine:
     entries.append(mine[0])
 for e in mine:
     e["include_only"] = names
-    e.pop("exclude", None)
-with open(path + ".tmp", "w") as f:
-    f.write(json.dumps(doc, indent=2) + chr(10))
-os.replace(path + ".tmp", path)
+text = json.dumps(doc, indent=2) + chr(10)
+if not os.path.exists(path) or open(path).read() != text:
+    with open(path + ".tmp", "w") as f:
+        f.write(text)
+    os.replace(path + ".tmp", path)
 ' "$HOME/.gemini/config/skills.json" "$SRC" "${AGY[@]}"
 fi
 

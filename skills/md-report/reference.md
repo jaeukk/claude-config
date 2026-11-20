@@ -42,8 +42,8 @@ Read this file for syntax. Read `example/main.html` and `example/visuals.js` for
 `<div class="chart" data-table="ID" data-x="0" data-y="1,2" data-kind="line|scatter|bar" data-xlabel="…" data-ylabel="…"></div>`, with the table in `<details class="data"><summary>Data table</summary><div class="table-wrap"><table id="ID">…</table></div></details>` under it (add `open` when the table has columns the chart doesn't plot).
 
 - Options: `data-logx`, `data-logy` (1-2-5 ticks; use them when values span more than 2 decades) and `data-lead`, which plots the first number of a cell like `0.4687 (10/10) → 0.4812`.
-- A cell may carry its own `data-src`; the chip is ignored when the cell is read. A non-empty cell that does not parse fails a `check()`.
-- Cell formats: `a ± b` plots an error bar, and `k/n` plots a fraction. A cell that fails to parse becomes a gap; then leave the table unplotted.
+- A cell may carry its own `data-src`; the chip is ignored when the cell is read.
+- Cell formats: `a ± b` plots an error bar, and `k/n` plots a fraction. An empty cell is a gap. A non-empty cell that does not parse fails a `check()`: leave such a table unplotted.
 - Bar charts get a category x-axis.
 
 ## Atlas from a table

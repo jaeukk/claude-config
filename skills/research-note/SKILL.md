@@ -23,7 +23,7 @@ python3 <skill dir>/scripts/find_root.py [--note] --project <name>   # when the 
 
 Exit 0: write there (it creates nothing; the file may not exist yet). Exit 2 (`--note` only): today's note is already in `02_Confirmed/`, frozen (see below). Exit 1: unresolved; it lists the candidate projects on stderr, so ask the user which one and rerun with `--project`. Never guess a project from the conversation topic.
 
-How it decides, in order: `--project` (vault folder or code-side folder name) → cwd inside the vault (the `10_Projects/<bucket>/<Project>` prefix) → a code-side `CLAUDE.md`/`AGENTS.md`/`README.md` above cwd with a `Notes root (WSL)` row or `notes_root:` → a vault project `README.md` whose `code_root:` contains cwd. `--project` also accepts `<bucket>/<name>` when a name exists in two buckets. The resolver only finds projects that already have a vault folder; a project with none yet is scaffolded first (the `project-manager` agent does this), and a code-side project gets one of the two markers so later sessions resolve it without `--project`. The vault base itself comes from the `zotero-obsidian-sync` rules (`$OBSIDIAN_VAULT`, the pin file, the Drive glob), never a hardcoded Windows user segment.
+How it decides, in order: `--project` (vault folder or code-side folder name) → cwd inside the vault (the `10_Projects/<bucket>/<Project>` prefix) → a code-side `CLAUDE.md`/`AGENTS.md`/`README.md` above cwd with a `Notes root (WSL)` row or `notes_root:` → a vault project `README.md` whose `code_root:` contains cwd. `--project` also accepts `<bucket>/<name>` when a name exists in two buckets. The resolver only finds projects that already have a vault folder; a project with none yet is scaffolded first (on Claude Code the vault's `project-manager` agent does this; elsewhere ask the user), and a code-side project gets one of the two markers so later sessions resolve it without `--project`. The vault base itself comes from the `zotero-obsidian-sync` rules (`$OBSIDIAN_VAULT`, the pin file, the Drive glob), never a hardcoded Windows user segment.
 
 - `<root>` is the project folder the path shows; a date lives in exactly one of `01_NotConfirmed/` and `02_Confirmed/`. Not every date has a note (working days only).
 - `02_Confirmed/` holds notes already published to the archive. **Never edit them.** A correction is a new dated note in `01_NotConfirmed/` that links to the old one.
@@ -65,14 +65,14 @@ Several sessions (Claude, Codex, different working directories) append to the sa
 $$K = \frac{\pi}{2\cdot 26\cdot 1560}\left(\frac{2600}{8580}\right)^2 \times 2 = 7.11\times10^{-6}\ \mu\mathrm{m}^{-2}$$
 ```
 
-Define a generating function (`$f(x,y) = [1+\cos K(x^2+y^2)]/2$, level cut at $1/2$), not only its consequences.
+Define a generating function ($f(x,y) = [1+\cos K(x^2+y^2)]/2$, level cut at $1/2$), not only its consequences.
 
 **Sections.**
 - `# Context`: use a few short bullets, one per topic, to identify what carries over from earlier work. Link the relevant prior note or record in each bullet. Leave measurements and explanation to `# Notes` or `# Findings`; do not repeat the bullets in prose. The owner's 2026-10-26 Multistealthy note is the model for this format.
 - `# Plan`: what will be tried today.
 - `# Notes`: the work, in order. Enumerate the design axes of an experiment grid as numbered lists before any prose ("40 samples = 2 ratios × 4 masks × 5 arrangements", then one list per axis). Failed attempts stay in: a trial that did not work is a result.
 - `# Findings`: the physics, stated as physics. Estimator-noise hedges and caveats that are really future work go to Next Steps.
-- `# Next Steps`: the **only** place for next-step items, with one exception: a simulation batch's processing plan stays under its ```sim-tracker``` block (below), and Next Steps points to it. One top-level section near the end; `##` subheadings per part are fine. Each item links to the section that raised it (`[[#II.3 Masking|II.3]]`, or `[[2026-08-19]] I.1` for another note) so a hoisted item keeps its context. Pointer sentences ("jobs are tracked in the sim-tracker block of …") are not next steps.
+- `# Next Steps`: the **only** place for next-step items, with one exception: a simulation batch's processing plan stays under its ```sim-tracker``` block (below), and Next Steps points to it. One top-level section near the end; `##` subheadings per part are fine. Each item links to the section that raised it (`[[#II.3 Masking|II.3]]`, or a full-path link to another note followed by its section, `[[…/2026-08-19|2026-08-19]] I.1`; see *Links*) so a hoisted item keeps its context. Pointer sentences ("jobs are tracked in the sim-tracker block of …") are not next steps.
 - `# References`: papers, concept wikilinks (`[[Nyquist_Shannon_Sampling_Theorem|Aliasing]]`), related notes.
 
 **`<root>/ResearchPlan.md` is a task list, not a plan document** (owner's rule, 2026-10-25). It holds the project's `#task` lines (syntax: the ResearchPlan template header); the Pomodoro picker reads them and the note's `# Objectives` block mirrors them through dataviewjs.
@@ -90,7 +90,7 @@ Define a generating function (`$f(x,y) = [1+\cos K(x^2+y^2)]/2$, level cut at $1
 
 ## Point at data and code: the two trees
 
-The vault describes; the code side (`~/10_Projects/<slug>/`) holds data, scripts, and runs. Every result names what produced it.
+The vault describes; the code side (`~/10_Projects/<bucket>/<slug>/`) holds data, scripts, and runs. Every result names what produced it.
 
 - Pointer form (policy §5): `code: 30_Codes/dithering2/Lloyd.py`, `data: 20_Data/color_mixing/2026-10-15_run/`, `run: experiments/2026-10-21_matched-tetramers/`, relative to the project's `code_root:` in the vault project `README.md` frontmatter. Plain text in backticks, never an Obsidian link, never an absolute path (`/home`, `/mnt`, `C:\`). Remote HPC paths appear only inside sim-tracker fences.
 - Name the post-processing script and the dataset directory together, each where it actually lives: a single-use script sits beside its data, reusable code is in the repo (global research-code workflow).

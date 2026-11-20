@@ -5,6 +5,9 @@ in this file ("Rules 3 and 4", *Glyphs to avoid*) refer to SKILL.md. The measuri
 suite mentioned under *Font coverage* belong to the upstream repository and are not shipped in this
 copy.
 
+Measured coverage of the portable script set: 17/26 lowercase subscripts, 0/26 subscript
+capitals, and 19/26 superscript capitals have a code point that some monospace font ships.
+
 ## Glyph cheatsheet
 
 ### Greek

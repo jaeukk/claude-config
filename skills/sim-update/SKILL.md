@@ -19,8 +19,9 @@ python3 $S override KEY --by OWNER --reason "<decision and unresolved evidence>"
 python3 $S register KEY
 ```
 
-`accept`, `override` and `register` take the same `--project NAME | --root DIR` scope as the run;
-pass it whenever the run needed it.
+`accept`, `override` and `register` take the run's scope flag (`--project NAME`, `--root DIR` or
+`--all`), written after the subcommand and KEY: a flag placed first is parsed as a new `run`. Pass
+it whenever the run needed it; if KEY exists in several projects, use `--project` or `--root`.
 
 ## Procedure
 
@@ -31,10 +32,11 @@ pass it whenever the run needed it.
 2. **Run it** and relay its report. Exit 3 means an SSH endpoint was unavailable: ask the user to open
    it (`ssh <host>`, OTP or Duo, leave it open), never retry SSH yourself, then rerun.
    A default run is write-enabled and closes whatever passes, and the script sees a controller
-   only when the block declares one (the controller item in step 4). When the request or the note
-   says a tracked job submits successors and its block does not declare that, start with
-   `--dry-run`, report the tracker, and have the owner declare the controller in the block (or
-   decide otherwise) before any write-enabled run.
+   only when the block declares one (the controller item in step 4). So unless you have already
+   read the notes whose trackers are in scope, run `--dry-run` first and read the note text
+   around each tracker it would close. If the prose says a tracked job submits successors and the
+   block does not declare that, report the tracker and have the owner declare the controller in
+   the block (or decide otherwise) before any write-enabled run.
 3. **Report lines and what to do with each:**
    - `VERIFIED_SUCCESS -> WRITTEN`, `registry row moved`: done. `-> PROPOSED ONLY`: the block is in
      `02_Confirmed/` (never edited, an exported PDF may depend on it); report the proposed closure and
@@ -53,7 +55,11 @@ pass it whenever the run needed it.
 4. **Judgment items** (read-only on the file endpoint: `nurion-dm`, `neuron-dm`, `della`). The
    script's SSH safeguards do not cover commands you type: before any manual remote command run
    `ssh -O check <host>`, and if the master is not running, ask the user to open it and stop.
-   Never let `ssh` attempt a login (add `-o BatchMode=yes`); repeated failures risk account lockout.
+   Give every manual `ssh` the poller's master-only options, so that a master that drops after
+   the check fails without any login attempt (repeated failed logins risk account lockout), and
+   stop at the first connection failure:
+   `-o BatchMode=yes -o ControlMaster=no -o PubkeyAuthentication=no -o PasswordAuthentication=no
+   -o KbdInteractiveAuthentication=no -o GSSAPIAuthentication=no -o HostbasedAuthentication=no`.
    - **verify items needing judgment** (`additional`, `case_manifest`, `expected_case_counts`,
      `role_outputs`, hashes, and the like): perform every stated check; none is optional commentary.
      For multi-case lane workflows the contract must name a case manifest and expected case IDs or
@@ -61,8 +67,9 @@ pass it whenever the run needed it.
      does not prove valid content. If any check fails or cannot be performed, do not accept: report
      the tracker as failed or `UNVERIFIABLE` with the missing evidence.
    - **no fresh scheduler record** (history purged). Either (PBS jobs only, and only where the
-     venue has Gmail access) search Gmail label **`HPC notices/Nurion`** (by display name) for
-     each exact job ID; only end/abort mail with an
+     venue has Gmail access; elsewhere report the exact job IDs and ask the user for the mail
+     records) search Gmail label **`HPC notices/Nurion`** (by display name) for each exact job
+     ID; only end/abort mail with an
      `Exit_status` counts, a begin mail is not terminal. Write the results as a JSON list
      `[{"id": "<job ID exactly as written in the tracker>", "exit_status": <int>, "message": "<mail ID>",
      "received": "<date>"}]` and pass `--mail FILE` (PBS jobs only; the script saves it as evidence). Or rely on an archived capture: first check

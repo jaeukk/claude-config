@@ -18,7 +18,7 @@ per-skill settings, so say it once and it holds for the session:
 > Use extended glyph coverage from math-unicode.
 
 To make it permanent, put the same line in the memory file your agent already
-reads: `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex. The skill checks for
+reads: `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, `GEMINI.md` for agy. The skill checks for
 that instruction before reaching for anything below.
 
 ## Scope

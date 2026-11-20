@@ -3,6 +3,8 @@
 Moved verbatim from the `sim-update` skill (2026-11-20), with the three placement rules below added.
 
 - Start the fence at column one: `simtrack.py` does not see an indented fence.
+- Quote any job ID that YAML would read as something else, above all a Slurm array-task ID:
+  `"12345678_3"`. Unquoted, it loads as `123456783` and the block is quarantined.
 - Inside `verify.outputs` and `verify.logs` the script reads only `paths` or `glob`, `count` and
   `reject_regex`; any other key nested there is ignored. Put a hash or any other check at the top
   level of `verify` (`additional`, `hashes`, `case_manifest`, …), where it becomes a judgment item.

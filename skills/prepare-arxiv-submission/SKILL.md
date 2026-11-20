@@ -62,7 +62,7 @@ Use `scripts/audit_arxiv_source.sh SOURCE_DIR [MAIN_TEX] [ENGINE]` for a read-on
 
 1. Derive required local inputs from the `.fls` file of a successful fresh build.
 2. Keep the main TeX file, executed class/style files, figures, required fonts, and ancillary/supporting files.
-3. Remove generated files such as `.aux`, `.bbl`, `.blg`, `.fdb_latexmk`, `.fls`, `.log`, `.out`, `.pag`, `.synctex.gz`, and `.toc` from the source directory.
+3. Remove generated files such as `.aux`, `.bbl`, `.blg`, `.fdb_latexmk`, `.fls`, `.log`, `.out`, `.pag`, `.synctex.gz`, and `.toc` from the source directory. One exception: a biblatex/Biber package keeps the `<main>.bbl` its validated build reads (the audit script lists every `.bbl` as generated; that one is not).
 4. Do not remove a PDF merely by extension; figures and supporting information may be required. Remove only a known generated main-document PDF when requested.
 5. Treat deletion as destructive: resolve explicit targets, avoid broad globs where practical, and state whether deletion was direct or recoverable.
 6. Compile once more from a new temporary directory after cleanup.

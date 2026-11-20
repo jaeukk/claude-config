@@ -31,7 +31,7 @@ Rule numbers are stable; `references/` cites them.
 
 1. **Inline math:** Unicode, no delimiters. `The filter f(T; m) = { (s,r) : n_{s,r} ≥ m } produces
    the cohort.`
-2. **Block math:** on its own line(s), still no delimiters. `|Q| / |T|  =  5 238 / 31 075  ≈  16.9 %`
+2. **Block math:** on its own line(s), still no delimiters. `|Q| / |T|  =  5 238 / 31 075  ≈  16.9 %`
 3. **Subscripts.** A single index with a glyph takes the glyph (x₁, xᵢ, xₙ). A single index with
    no glyph takes a bare underscore (`I_ν`, `∂_μ`, `x_c`). A multi-character or grouped subscript
    takes `_{...}` or a plain suffix (`n_{s,r}`, `x_max`, `σ_obs`). Do not mix forms (`x_₁`) or
@@ -60,14 +60,14 @@ Rule numbers are stable; `references/` cites them.
    A  =  ⎡ a  b ⎤        v  =  ( v₁ , v₂ , v₃ )ᵀ
          ⎣ c  d ⎦
    ```
-8. **Tensor indices** are indices, not powers. Keep them ASCII and group only a multi-character
-   index: `R^ρ_{σμν}`, `∂_μ`, `Γ^ρ_{νσ}`.
+8. **Tensor indices** are indices, not powers. Keep an index with no script glyph in bare ASCII
+   and group only a multi-character index: `R^ρ_{σμν}`, `∂_μ`, `Γ^ρ_{νσ}`.
 9. **Piecewise forms and aligned derivations:** brace glyphs `⎧ ⎩` for a short piecewise
    definition (a semicolon-separated sentence where a reader's font lacks them); equals signs in
    one column for a derivation.
 10. **Sets:** set-builder with `:` or `|`.
     `Q  =  { (s,r) ∈ T  :  n_{s,r} ≥ 18  ∧  p⁰_{s,r} < 0.9 }`
-11. **Numbers:** thin space (U+2009) for thousands (`5 238`), not commas; dot decimal; a space
+11. **Numbers:** thin space (U+2009) for thousands (`5 238`), not commas; dot decimal; a space
     before `%` (`16.9 %`); `≈` or `∼` for approximation, `~` for order of magnitude; `x = 5.2 ± 0.3`.
 12. **When Unicode hurts, fall back.** If a glyph chain is denser than the LaTeX it replaces,
     write readable ASCII and annotate it. No combining marks or obscure modifier letters to force
@@ -110,7 +110,7 @@ Greek subscripts       ᵦ ᵧ ᵨ ᵩ ᵪ            → x_β, I_ρ, x_γ
 Greek superscripts     ᵝ ᵞ ᵟ ᵠ ᵡ            → x^β, x^φ
 ```
 
-Operators, Greek letters and digit scripts are drawn by every measured font, so prefer them.
+Operators, Greek letters and digit scripts are drawn by nearly every measured font (9 to 12 of the 12), so prefer them.
 Letter scripts are not: JetBrains Mono, Fira Code, Hack and IBM Plex Mono ship none, so `xᵢ` and
 `xᵀ` arrive there through a fallback font at a different width, which breaks column alignment.
 That is why `x_i` and `x^T` are first-class alternatives, and the better choice inside aligned

@@ -428,7 +428,8 @@ def main(argv: list[str]) -> int:
     if len(args) < 2:
         print(__doc__, file=sys.stderr)
         return 2
-    page, out, srcs = Path(args[0]).resolve(), Path(args[1]), [Path(a) for a in args[2:]]
+    page, out = Path(args[0]).resolve(), Path(args[1])
+    srcs = list(dict.fromkeys(Path(a).resolve() for a in args[2:]))  # one note passed twice is one source
     stems = [p.stem for p in srcs]
     clash = sorted({s for s in stems if stems.count(s) > 1})
     if clash:  # data-src names a note by its stem; two sources sharing one would silently merge
