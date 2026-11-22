@@ -22,16 +22,16 @@ SRC="$HOME/.claude/skills"
 
 # Codex: no karpathy-guidelines (generic coding behavior Codex needs no skill for);
 # math-unicode reaches Codex through ~/.agents/skills below.
-CODEX=(caveman-skill cpp-guidelines finding-unknowns md-report multiagent organizer
+CODEX=(caveman-skill cpp-guidelines finding-unknowns manuscript md-report multiagent organizer
        prepare-arxiv-submission python-guidelines research-note sim-tracker sim-update
        zotero-obsidian-sync)
 
 # agy: no multiagent (agy is not a conductor host and has no backend in the engine).
 # computer-use, orca-cli and orchestration are Orca's skills, linked into ~/.claude/skills from
 # ~/.agents/skills on a machine that runs Orca; drop them from this list on one that does not.
-AGY=(caveman-skill computer-use cpp-guidelines finding-unknowns karpathy-guidelines math-unicode
-     md-report orca-cli orchestration organizer prepare-arxiv-submission python-guidelines
-     research-note sim-tracker sim-update zotero-obsidian-sync)
+AGY=(caveman-skill computer-use cpp-guidelines finding-unknowns karpathy-guidelines manuscript
+     math-unicode md-report orca-cli orchestration organizer prepare-arxiv-submission
+     python-guidelines research-note sim-tracker sim-update zotero-obsidian-sync)
 
 status=0
 

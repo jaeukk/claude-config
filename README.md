@@ -31,6 +31,8 @@ Everything else under `~/.claude` (credentials, `sessions/`, `projects/`, caches
 - **`caveman-skill`** — extreme brevity / code-first output.
 - **`organizer`** — read and reorganize files in the filesystem.
 - **`zotero-obsidian-sync`** — Zotero ↔ Obsidian conventions with per-machine vault-path resolution.
+- **`manuscript`** — writing and revising LaTeX papers: drafting from the research notes, figures
+  and captions, references from Zotero, replies to referees and cover letters.
 
 ### Which venue sees which skill
 
