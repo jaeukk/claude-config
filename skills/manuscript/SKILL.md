@@ -30,8 +30,8 @@ trace to the research record, and what reaches a journal or a referee cannot be 
 
 - A current paper's folder is its own git repository whose `origin` is Overleaf:
   `git rev-parse --show-toplevel` prints that folder. If it prints a parent folder or fails, the
-  paper has no repository of its own: run no git command there, and tell the owner before
-  editing, since nothing in that folder can be undone.
+  paper has no repository of its own: run no git command there, and before editing tell the owner
+  that no pull was run and that the paper has no repository of its own.
 - Before the first edit run `git status`, then `git pull --ff-only`. Uncommitted changes are the
   owner's work in progress: leave them. If the pull fails or refuses (it would overwrite a local
   change, or there are local commits Overleaf does not have), stop and report. Never stash,
@@ -58,7 +58,8 @@ trace to the research record, and what reaches a journal or a referee cannot be 
 - The build is clean when `latexmk` exits 0 and
   `grep -a -E '^! |undefined|multiply.defined' build/<main>.log` prints nothing. When `latexmk`
   fails without a TeX error, and after every change to the `.bib`, read `build/<main>.blg`:
-  BibTeX reports its errors and warnings only there. Report overfull boxes in lines you wrote.
+  BibTeX reports its errors and warnings only there. Report every BibTeX warning with its entry
+  key, and overfull boxes in lines you wrote.
 
 ## Five rules for every stage
 
@@ -79,7 +80,8 @@ trace to the research record, and what reaches a journal or a referee cannot be 
    note, is reported to the owner as unconfirmed when you use it, and its wording in the paper is
    no stronger than in the note: a hypothesis does not become "we show".
 4. **Two notes, two values.** When notes disagree on a quantity, use the later value only if its
-   note says that it corrects or replaces the earlier one, and report both. Otherwise write a
+   note says that it corrects or replaces the earlier one, and report both values and both
+   dates. Otherwise write a
    `[CHECK]` marker with both values and their dates and let the owner choose. Never average them
    and never choose silently.
 5. **The owner decides the science and every outward step:** the claims and their strength, the

@@ -67,8 +67,9 @@ in the text; do not fall back to writing the entry yourself.
    `qmode=everything` is required: the default search does not look at the DOI field. It also
    returns items that merely mention the DOI, in a note or in their full text, so accept only an
    item whose own `data.DOI` equals the DOI (ignore letter case and a `https://doi.org/` prefix).
-   Its cite key is `data.citationKey`. If no item matches, the paper is not in Zotero. Without a
-   DOI, search title words the same way and confirm authors, year and journal before using a hit.
+   Its cite key is `data.citationKey`. If no item matches, or there is no DOI, search title words
+   the same way and confirm authors, year and journal before using a hit: an item can exist with
+   an empty DOI field. Only when that search also finds nothing is the paper not in Zotero.
 3. **Not in Zotero.** Add it with the Connector recipe in `zotero-obsidian-sync`, taking the
    fields from CrossRef. The Connector saves into the collection selected in the Zotero app, so
    confirm first that this is the project's collection. For an arXiv preprint, check whether it
@@ -76,7 +77,9 @@ in the text; do not fall back to writing the entry yourself.
 4. **Export by key,** and append to the paper's `.bib` the entries it lacks:
    `curl -s 'http://localhost:23119/better-bibtex/export/item?translator=bibtex&citationKeys=<key1>,<key2>&useJournalAbbreviation=true'`.
    This call skips an unknown key without an error, so compare the keys returned with the keys
-   requested. `useJournalAbbreviation=true` gives abbreviated journal names ("Nano Lett."); look
+   requested. If a returned key is already in the `.bib` for a different work, do not append or
+   cite it: report the collision and ask the owner to give the new item a distinct key in Zotero.
+   `useJournalAbbreviation=true` gives abbreviated journal names ("Nano Lett."); look
    at an existing entry and drop the flag if the paper's `.bib` uses full names.
 
 A whole collection is

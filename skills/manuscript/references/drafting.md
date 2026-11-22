@@ -10,8 +10,9 @@ The rules cited as "rule N" are the five rules in `SKILL.md`.
    the figure or equation it rests on. For a subsection whose content the owner has already
    specified, go to step 2. The story and the strength of each claim are not yours to choose.
 2. **Find the record for every outline line.** Look first in `<root>/20_Progress/`, then in the
-   dated notes it links to. Then search `01_NotConfirmed/` for later notes on the same quantity:
-   notes in `02_Confirmed/` are frozen, so a correction to one is a newer note there (rule 4).
+   dated notes it links to. Then search both dated-note folders for later notes on the same
+   quantity: a note in `02_Confirmed/` is frozen, so its correction is a newer note, in
+   `01_NotConfirmed/` at first and in `02_Confirmed/` once validated (rule 4).
    Read the note section itself, not a summary of it. A line with no record is a `[CHECK]` item:
    raise it now, while it is still an outline line.
 
@@ -33,12 +34,15 @@ The rules cited as "rule N" are the five rules in `SKILL.md`.
   a recorded failure contradicts.
 - **Methods describe what ran.** Parameter values, system sizes, sample counts, software and
   versions come from the run's own record: the note written at the time, a saved configuration, a
-  log, the output's metadata. A script shows only what it does today; use its defaults only where
-  the record ties that run to that version. Never write what such calculations usually use.
+  log, the output's metadata. A script shows only what it does today: a default in it counts only
+  where the record shows that the run used that setting; otherwise write a `[CHECK]`. Never write
+  what such calculations usually use.
 - **Statements about the literature** ("it is well known that", "Ref. [x] showed") need the cited
-  paper itself opened (its PDF through Zotero; see `zotero-obsidian-sync`). A `30_Literature/`
-  note is a crude search result: use it to find the paper, not as evidence of what the paper
-  says. If you could not open the paper, the sentence carries
+  paper itself opened, through Zotero (`zotero-obsidian-sync`). On a venue without the Zotero MCP
+  tools, the local API serves it: `<local API>/items/<KEY>/children` lists the PDF attachment,
+  and `<local API>/items/<attachment KEY>/fulltext` returns its indexed text in `content`. A
+  `30_Literature/` note is a crude search result: use it to find the paper, not as evidence of
+  what the paper says. If you could not open the paper, the sentence carries
   `\textbf{[CHECK: verify against the reference]}`. For cite keys see `figures-references.md`.
 - **Journal limits** (abstract length, page or word count, required sections, keywords, data
   availability statement) change. Read the journal's current author page instead of recalling
