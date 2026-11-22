@@ -10,9 +10,10 @@ The rules cited as "rule N" are the five rules in `SKILL.md`.
    the figure or equation it rests on. For a subsection whose content the owner has already
    specified, go to step 2. The story and the strength of each claim are not yours to choose.
 2. **Find the record for every outline line.** Look first in `<root>/20_Progress/`, then in the
-   dated notes it links to, `02_Confirmed/` before `01_NotConfirmed/`. Read the note section
-   itself, not a summary of it. A line with no record is a `[CHECK]` item: raise it now, while it
-   is still an outline line.
+   dated notes it links to. Then search `01_NotConfirmed/` for later notes on the same quantity:
+   notes in `02_Confirmed/` are frozen, so a correction to one is a newer note there (rule 4).
+   Read the note section itself, not a summary of it. A line with no record is a `[CHECK]` item:
+   raise it now, while it is still an outline line.
 
 ## Writing
 
@@ -30,19 +31,18 @@ The rules cited as "rule N" are the five rules in `SKILL.md`.
   also uses a short name. Do not borrow vocabulary from a method that was not carried out.
   Attempts that failed stay out unless the outline includes them, but never write a sentence that
   a recorded failure contradicts.
-- **Methods must be reproducible from the record.** Parameter values, system sizes, sample counts,
-  software and versions come from the note or the script (`% src: code ...`), never from what such
-  calculations usually use.
+- **Methods describe what ran.** Parameter values, system sizes, sample counts, software and
+  versions come from the run's own record: the note written at the time, a saved configuration, a
+  log, the output's metadata. A script shows only what it does today; use its defaults only where
+  the record ties that run to that version. Never write what such calculations usually use.
 - **Statements about the literature** ("it is well known that", "Ref. [x] showed") need the cited
-  paper opened: its full text through Zotero, or the project's `30_Literature/` note on it. If you
-  could not open it, the sentence carries `\textbf{[CHECK: verify against the reference]}`. For
-  cite keys see `figures-references.md`.
+  paper itself opened (its PDF through Zotero; see `zotero-obsidian-sync`). A `30_Literature/`
+  note is a crude search result: use it to find the paper, not as evidence of what the paper
+  says. If you could not open the paper, the sentence carries
+  `\textbf{[CHECK: verify against the reference]}`. For cite keys see `figures-references.md`.
 - **Journal limits** (abstract length, page or word count, required sections, keywords, data
   availability statement) change. Read the journal's current author page instead of recalling
   them, and tell the owner which limits you applied.
-- **LaTeX.** `equation` and `align`, never `eqnarray`. Give every numbered equation, figure, table
-  and section you add a `\label` in the paper's existing label style, and refer to it with
-  `\ref` or `\eqref`, never a typed number.
 
 ## Supplementary material
 

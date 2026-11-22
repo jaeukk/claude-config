@@ -27,10 +27,13 @@ answer. Give each item one class:
 | new work | needs a calculation, simulation or data that the record does not contain |
 | disagree | the authors keep their position |
 
-Show the owner this table. Draft the `change` and `clarify` items. For each `new work` and
-`disagree` item, and wherever two referees pull in opposite directions, put the decision to the
-owner with the options and draft nothing in the paper until it is made. Do not start new
-simulations, and do not concede or reject a scientific point, on your own.
+Show the owner this table and wait until the classes are confirmed, unless the owner's notes
+already settle them: calling a comment `change` already concedes it. Until then, edit only what
+alters no claim (a typo, a wrong reference number, a missing definition). Then draft the `change`
+and `clarify` items. For each `new work` and `disagree` item, and wherever two referees pull in
+opposite directions, put the decision to the owner with the options and draft nothing in the
+paper until it is made. Do not start new simulations, and do not concede or reject a scientific
+point, on your own.
 
 ## Revise the paper
 
@@ -44,19 +47,23 @@ simulations, and do not concede or reject a scientific point, on your own.
 
   ```
   git show <submitted commit>:<main>.tex > <scratch dir>/old.tex   # or the file from the submitted archive
-  latexdiff <scratch dir>/old.tex <main>.tex > diff.tex
-  latexmk -pdf -interaction=nonstopmode -outdir=build diff.tex
+  latexdiff <scratch dir>/old.tex <main>.tex > <scratch dir>/diff.tex
+  latexmk -pdf -interaction=nonstopmode -outdir=build <scratch dir>/diff.tex   # run in the paper's folder
   ```
 
-  `diff.tex` sits beside the main file because it needs the figures and the `.bib`. It is a
-  generated file: do not edit or commit it. Look at `build/diff.pdf` and confirm that the changes
-  show (added text blue and underlined, deleted text red and struck out). A paper split over
-  `\input` files needs the whole submitted tree, not one file:
+  Keep `old.tex` and `diff.tex` in a scratch folder of your own, never in the paper's folder: the
+  redirection would erase an existing file of that name, and a generated file does not belong in
+  the Overleaf repository. Run `latexmk` in the paper's folder so that it finds the figures and
+  the `.bib`; the marked copy is `build/diff.pdf`. Look at it and confirm that the changes show
+  (added text blue and underlined, deleted text red and struck out). `latexdiff` cannot see a
+  figure whose file was replaced under the same name: name every replaced figure in the letter to
+  the editor's list of changes. A paper split over `\input` files needs the whole submitted tree,
+  not one file:
   `mkdir <scratch dir>/old && git archive <submitted commit> | tar -x -C <scratch dir>/old`, then
-  `latexdiff --flatten <scratch dir>/old/<main>.tex <main>.tex > diff.tex`. If the build fails
-  inside an equation or a table, rerun `latexdiff` with `--math-markup=whole`, or with
-  `--exclude-textcmd="section,subsection"` for an error in a heading; if it still fails, report
-  the failing lines.
+  `latexdiff --flatten <scratch dir>/old/<main>.tex <main>.tex > <scratch dir>/diff.tex`. If the
+  build fails inside an equation or a table, rerun `latexdiff` with `--math-markup=whole`, or
+  with `--exclude-textcmd="section,subsection"` for an error in a heading; if it still fails,
+  report the failing lines.
 
 ## Write the reply
 
@@ -97,7 +104,9 @@ quoted sentences change. When the paper is final, rebuild it and check every res
 built PDF: each section, equation, figure and reference number cited; each quotation; each item of
 the table answered exactly once. Work from the files, not from your memory of the edits. Where
 the venue has subagents, give one the reports, the reply and the revised paper, without your
-notes, and have it list every claim it cannot find. Then build the reply and read its PDF.
+notes, and have it list every claim it cannot find. Then build the reply and read its PDF. Last,
+generate the marked copy again from the submitted version, so that the marked PDF and the clean
+PDF show the same text.
 
 ## Cover letter for a first submission
 
@@ -105,10 +114,13 @@ Copy the layout of the owner's previous cover letter (`cover/cover.tex` in a pas
 which). Its content comes from the paper's abstract and conclusions, with no claim stronger or
 broader than the paper makes. Suggested and excluded referees with their affiliations and email
 addresses, statements about prior or concurrent submission, and the choice of journal and article
-type come from the owner. Never supply a person's email address or affiliation from memory.
+type come from the owner. Never supply a person's email address or affiliation from memory. As
+for the letter to the editor, ask who signs and with which affiliation: the signature block of
+the previous letter may be out of date.
 
 ## Hand over; send nothing
 
 Do not upload to a submission system, email an editor or a coauthor, or push to Overleaf. Hand
 the owner the PDFs (reply, letter to the editor, marked paper, clean paper), the open `[CHECK]`
-items, and the decisions still needed.
+items, the decisions still needed, and a reminder that the `% src:` comments are still in the
+source (rule 1).
