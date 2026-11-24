@@ -78,6 +78,27 @@ cloud library and reaches the desktop app only while its Sync is on.
 newline). Read it inside the script that makes the call. Never copy it into `~/.claude.json`,
 a settings file, a shell export, a note, or command output.
 
+### On agy (Antigravity)
+
+agy runs shell commands in a sandbox whose proxy passes only standard ports, so a sandboxed call
+to `localhost:23119` returns `403 Port 23119 not allowed for HTTP`. What runs without a prompt is
+set by `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (set up 2026-11-22):
+
+- **MCP:** `mcp(zotero/*)` — tools `zotero_search_items`, `zotero_item_metadata`,
+  `zotero_item_fulltext` from the `zotero` server in `~/.gemini/config/mcp_config.json`. A
+  subagent gets them only with `inheritMcp: true` in its `agent.md`.
+- **Web API, sandboxed:** `read_url(api.zotero.org)` opens the domain and `read_file(<key path>)`
+  mounts the key read-only, so `zotero_add_tag.py` runs as is.
+- **Local API, outside the sandbox (`BypassSandbox`):** pre-approved are
+  `python3 99_SYSTEM/scripts/zotero_annotations.py …`, `curl -s [-m N] <one local-API URL>` with
+  no other flag or pipe, and the paper-reviewer APS one-liner (plain, or after
+  `cd 99_SYSTEM/scripts &&`) without a redirect: save its output with the file tool.
+
+Anything else, including Connector `saveItems` and `zotero_add_collection.py`, asks first, and a
+headless `agy -p` run denies it. Editing the rules: a rule's body ends at its first `)`, so write a
+literal parenthesis in a `regex:` rule as `\x28`/`\x29`; a chain (`cd … && …`) must match one
+regex as a whole line.
+
 Dead ends on the local app, not worth retrying: `PATCH`/`PUT`/`POST` to
 `localhost:23119/api/users/5872032/items/<KEY>` (501, 501, 400); Better BibTeX JSON-RPC has no
 `item.tag.*` method; re-saving an existing item through `saveItems` to merge tags is untested and
