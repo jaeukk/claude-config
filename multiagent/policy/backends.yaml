@@ -1,5 +1,17 @@
 {
   "schema_version": 1,
+  "native_tiers": {
+    "agy": {
+      "family": "gemini",
+      "models": {
+        "ceiling": "gemini-4-carbon-high",
+        "frontier": "gemini-4-neon-high",
+        "core": "gemini-4-neon-high",
+        "mid": "gemini-4-hydrogen-medium",
+        "fast": "gemini-4-hydrogen-low"
+      }
+    }
+  },
   "backends": {
     "claude-ceiling": {
       "host": "claude-code",

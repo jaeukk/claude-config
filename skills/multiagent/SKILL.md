@@ -109,13 +109,19 @@ nothing to fix (no findings, or every one deferred or rejected) ends there: disp
 
 Backends are named `<family>-<tier>`. A tier is a routing role, not an effort level.
 
-| Tier | Role | Claude | Codex | Team backend |
-|---|---|---|---|---|
-| ceiling | critic | Fable 5.2, high | Astra, medium | — |
-| frontier | conductor | Opus 5.5, high (session assertion) | Astra, medium | — |
-| core | implementer | Opus 5.5, high | GPT-6.1 Sol, high | `claude-core-team` |
-| mid | verifier | Sonnet 5.5, medium | GPT-6.1 Terra, medium | `claude-mid-team` |
-| fast | bulk_worker, runner | Haiku 5.5, low | GPT-6.1 Terra, low | `claude-fast-team` |
+| Tier | Role | Claude | Codex | Native agy model | Team backend |
+|---|---|---|---|---|---|
+| ceiling | critic | Fable 5.2, high | Astra, medium | `gemini-4-carbon-high` | — |
+| frontier | conductor | Opus 5.5, high (session assertion) | Astra, medium | `gemini-4-neon-high` | — |
+| core | implementer | Opus 5.5, high | GPT-6.1 Sol, high | `gemini-4-neon-high` | `claude-core-team` |
+| mid | verifier | Sonnet 5.5, medium | GPT-6.1 Terra, medium | `gemini-4-hydrogen-medium` | `claude-mid-team` |
+| fast | bulk_worker, runner | Haiku 5.5, low | GPT-6.1 Terra, low | `gemini-4-hydrogen-low` | `claude-fast-team` |
+
+Native agy workflows read the exact IDs from `native_tiers.agy.models` in
+`multiagent/policy/backends.yaml`. Select the frontier model when starting an agy conductor
+and pass the assigned model ID to `invoke_subagent` for a child. All five assignments share the
+Gemini family for reviewer independence. The policy engine dispatches through its registered
+Claude Code and Codex adapters.
 
 - `implementer`: `claude-core-team`, `claude-core`, `codex-core`, all at high effort (the
   validator enforces it). A native spawn skips account-bound candidates, so it gets `claude-core`.
