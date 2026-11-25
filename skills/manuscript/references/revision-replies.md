@@ -57,10 +57,12 @@ point, on your own.
   Run `latexmk` in the paper's folder so that it finds the figures and the `.bib`; the marked copy
   is `build/diff.pdf`. Look at it and confirm that the changes show (added text blue and
   underlined, deleted text red and struck out). `latexdiff` cannot see a figure whose file was
-  replaced under the same name: name every replaced figure in the letter to the editor's list of
-  changes, and tell the owner that these figures carry no mark in the marked copy, in case the
-  journal wants every change shown there. A paper split over `\input` files needs the whole
-  submitted tree, not one file:
+  replaced under the same name, so such a figure carries no mark in the marked copy: name every
+  replaced figure in the letter to the editor's list of changes. If the editor or the journal
+  requires changed figures to be marked in the marked copy, mark them as the owner directs (ask,
+  if the owner has not said how), by a means that survives regeneration, and confirm each mark in
+  the final `build/diff.pdf`. Otherwise tell the owner that these figures carry no mark there. A
+  paper split over `\input` files needs the whole submitted tree, not one file:
   `mkdir <scratch dir>/old && git archive <submitted commit> | tar -x -C <scratch dir>/old`, then
   `latexdiff --flatten <scratch dir>/old/<main>.tex <main>.tex > <scratch dir>/diff.tex`. If the
   build fails inside an equation or a table, rerun `latexdiff` with `--math-markup=whole`, or

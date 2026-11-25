@@ -16,8 +16,8 @@ side of the project.
   figure, caption and text disagree, the record (note, data) decides which is wrong.
 - **A figure in a paper makes its script depended-on.** A single-use script that sits unversioned
   beside its data must be promoted and committed before its output is depended on
-  (`~/.claude/CLAUDE.md`, "Research-code workflow"). Tell the owner when the figure goes in, not
-  at submission.
+  (`~/.claude/research-conventions.md`, "Research-code workflow"). Tell the owner when the figure
+  goes in, not at submission.
 - **Draw at final size.** In REVTeX `reprint`, one column is 246 pt (3.40 in, 8.65 cm) and the
   full width is 510 pt (7.06 in, 17.9 cm). Set that size in the script and include the file with
   `width=\columnwidth`, or `width=\textwidth` in a `figure*`, so that text prints at the size the
