@@ -81,9 +81,8 @@ trace to the research record, and what reaches a journal or a referee cannot be 
    no stronger than in the note: a hypothesis does not become "we show".
 4. **Two notes, two values.** When notes disagree on a quantity, use the later value only if its
    note says that it corrects or replaces the earlier one, and report both values and both
-   dates. Otherwise write a
-   `[CHECK]` marker with both values and their dates and let the owner choose. Never average them
-   and never choose silently.
+   dates. Otherwise write a `[CHECK]` marker with both values and their dates and let the owner
+   choose. Never average them and never choose silently.
 5. **The owner decides the science and every outward step:** the claims and their strength, the
    author list, the journal, suggested or excluded referees, whether to concede a referee's point,
    and every submission, upload, email and push. Draft these for the owner. Never send, submit, or

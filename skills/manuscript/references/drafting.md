@@ -39,8 +39,9 @@ The rules cited as "rule N" are the five rules in `SKILL.md`.
   what such calculations usually use.
 - **Statements about the literature** ("it is well known that", "Ref. [x] showed") need the cited
   paper itself opened, through Zotero (`zotero-obsidian-sync`). On a venue without the Zotero MCP
-  tools, the local API serves it: `<local API>/items/<KEY>/children` lists the PDF attachment,
-  and `<local API>/items/<attachment KEY>/fulltext` returns its indexed text in `content`. A
+  tools, the local API serves it: `http://localhost:23119/api/users/<userID>/items/<KEY>/children`
+  lists the PDF attachment, and `.../items/<attachment KEY>/fulltext` returns its indexed text in
+  `content`. A
   `30_Literature/` note is a crude search result: use it to find the paper, not as evidence of
   what the paper says. If you could not open the paper, the sentence carries
   `\textbf{[CHECK: verify against the reference]}`. For cite keys see `figures-references.md`.

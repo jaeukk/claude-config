@@ -54,13 +54,13 @@ point, on your own.
   Keep `old.tex` and `diff.tex` in a scratch folder of your own, never in the paper's folder: the
   redirection would erase an existing file of that name, and a generated file does not belong in
   the Overleaf repository. Do not edit `diff.tex` by hand: the final recheck generates it again.
-  Run `latexmk` in the paper's folder so that it finds the figures and
-  the `.bib`; the marked copy is `build/diff.pdf`. Look at it and confirm that the changes show
-  (added text blue and underlined, deleted text red and struck out). `latexdiff` cannot see a
-  figure whose file was replaced under the same name: name every replaced figure in the letter to
-  the editor's list of changes, and tell the owner that these figures carry no mark in the marked
-  copy, in case the journal wants every change shown there. A paper split over `\input` files needs the whole submitted tree,
-  not one file:
+  Run `latexmk` in the paper's folder so that it finds the figures and the `.bib`; the marked copy
+  is `build/diff.pdf`. Look at it and confirm that the changes show (added text blue and
+  underlined, deleted text red and struck out). `latexdiff` cannot see a figure whose file was
+  replaced under the same name: name every replaced figure in the letter to the editor's list of
+  changes, and tell the owner that these figures carry no mark in the marked copy, in case the
+  journal wants every change shown there. A paper split over `\input` files needs the whole
+  submitted tree, not one file:
   `mkdir <scratch dir>/old && git archive <submitted commit> | tar -x -C <scratch dir>/old`, then
   `latexdiff --flatten <scratch dir>/old/<main>.tex <main>.tex > <scratch dir>/diff.tex`. If the
   build fails inside an equation or a table, rerun `latexdiff` with `--math-markup=whole`, or
