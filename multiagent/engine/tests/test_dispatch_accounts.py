@@ -195,6 +195,30 @@ class RunWorkerTest(unittest.TestCase):
         self.assertEqual(attempt.account, "team")
         self.assertEqual(attempt.model, "claude-sonnet-5")
 
+    def test_global_rules_are_bounded_user_brief_content(self):
+        backend = {"host":"claude-code", "model":"m", "effort":"medium"}
+        spec = pe._claude_cli(backend)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/"engine").mkdir()
+            rules = root/"global-instructions.md"
+            brief = root/"brief"
+            brief.write_text("task-specific request")
+            for content in (None, b"", b"x"*8193, bytes([255]), b"global revision"):
+                with self.subTest(content_length=len(content) if content is not None else None):
+                    if content is not None:
+                        rules.write_bytes(content)
+                    reply = subprocess.CompletedProcess([],0,'{"type":"result","result":"ok"}',"")
+                    with mock.patch.object(pe,"__file__",str(root/"engine/policy_engine.py")), \
+                            mock.patch.object(pe.subprocess,"run",return_value=reply) as run, \
+                            mock.patch.object(pe.sys,"stderr") as err:
+                        pe._run_worker(["claude",*spec.args],spec,{"task_id":"t"},"runner",brief,root,backend)
+                    prompt = run.call_args.kwargs["input"]
+                    self.assertIn("task-specific request",prompt)
+                    self.assertEqual("global revision" in prompt, content == b"global revision")
+                    self.assertNotIn("global revision",str(run.call_args.args))
+                    self.assertEqual(err.write.called, content != b"global revision")
+
     def test_rate_limited_envelope_classified(self):
         backend = {"host": "claude-code", "model": "m", "effort": "low", "account": "team",
                    "config_dir": "/tmp/t", "backend": "b", "family": "claude"}

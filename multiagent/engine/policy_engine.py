@@ -3180,6 +3180,17 @@ def _run_worker(
     later dispatch cannot read a previous one's leftovers.
     """
     brief = brief_path.read_text(encoding="utf-8")
+    # The packaged global rules are user guidance. Keep them out of the worker system prompt.
+    shared = Path(__file__).resolve().parents[1] / "global-instructions.md"
+    try:
+        with shared.open(encoding="utf-8") as stream:
+            guidance = stream.read(8193)
+        if not guidance.strip() or len(guidance) > 8192:
+            raise ValueError("expected 1–8192 characters")
+    except (OSError, ValueError) as error:
+        print(f"Shared global instructions unavailable ({error}); using the existing worker baseline.", file=sys.stderr)
+    else:
+        brief = guidance + "\n\n" + brief
     prompt = (
         f"Role: {role}\nTask: {task['task_id']}\n"
         "You are a bounded worker, not a conductor. Do not spawn agents or change scope. "

@@ -53,6 +53,29 @@ skill into another venue's directory: a copy drifts.
 A skill body is venue-neutral; where tools differ it carries a short venue note (`md-report`
 publishing, `research-note` checking, `sim-update` Gmail fallback, Zotero MCP tools).
 
+## Shared global instructions on WSL
+
+The tracked source is `multiagent/global-instructions.md`. It defines folder conventions, language
+and where new settings belong. All clients can consult `research-conventions.md` for detailed
+procedures. Claude imports both. Restricted workers receive the shared rules in the user brief
+and keep their existing system prompt and tool limits. A fresh launch picks up a new revision.
+
+After updating this repository, run `python3 scripts/global-instructions.py check` to list
+pending global entry points. `apply` links the Codex, agy and shared entry points and retains
+the original files in a local recovery journal. It recognizes the previous two-rule Codex file
+and obsolete agy persona by their contents. Resolve an unfamiliar instruction file explicitly.
+After an interrupted apply, rerun it or use `rollback`. Reapplying repairs missing links.
+Rollback preserves a newly written personal Gemini supplement and archives the original
+before-images under `~/.local/state/shared-global-instructions/`. Move a conflicting edited
+instruction file aside before retrying. Roll back the entry points before
+reverting the repository. This operation leaves the per-client skill lists and credentials alone.
+
+For headless jobs, `python3 scripts/shared-skill.py agy --skill NAME --reference FILE --model MODEL
+--prompt TEXT` adds file-specific read rules for a listed skill. For a restricted worker use
+`python3 scripts/shared-skill.py produce --skill NAME --reference FILE --brief BRIEF --target-repo REPO
+--out DEST --conductor-host codex`. Repeat `--reference` for each needed relative file. The worker
+receives a disposable copy of the selected files in its contract read scope.
+
 ## Subagents
 
 - **`searcher`** — read-only research: search Zotero, read Obsidian notes, retrieve metadata.
