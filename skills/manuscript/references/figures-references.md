@@ -68,12 +68,14 @@ in the text; do not fall back to writing the entry yourself.
    returns items that merely mention the DOI, in a note or in their full text, so accept only an
    item whose own `data.DOI` equals the DOI (ignore letter case and a `https://doi.org/` prefix).
    Its cite key is `data.citationKey`. If no item matches, or there is no DOI, search title words
-   the same way and confirm authors, year and journal before using a hit: an item can exist with
-   an empty DOI field. Only when that search also finds nothing is the paper not in Zotero.
-3. **Not in Zotero.** Add it with the Connector recipe in `zotero-obsidian-sync`, taking the
-   fields from CrossRef. The Connector saves into the collection selected in the Zotero app, so
-   confirm first that this is the project's collection. For an arXiv preprint, check whether it
-   has since been published, and add the published version. Then repeat step 2 to get its key.
+   the same way and confirm title, authors, year and journal before using a hit: an item can
+   exist with an empty DOI field, but a hit with a different DOI is a different work (Part I is
+   not Part II). Only when that search also finds nothing is the paper not in Zotero.
+3. **Not in Zotero.** For an arXiv preprint, first check whether it has since been published; if
+   it has, repeat steps 1 and 2 with the published DOI and title, and continue only if they find
+   nothing. Add the published version with the Connector recipe in `zotero-obsidian-sync`, taking
+   the fields from CrossRef. The Connector saves into the collection selected in the Zotero app,
+   so confirm first that this is the project's collection. Then repeat step 2 to get its key.
 4. **Export by key,** and append to the paper's `.bib` the entries it lacks:
    `curl -s 'http://localhost:23119/better-bibtex/export/item?translator=bibtex&citationKeys=<key1>,<key2>&useJournalAbbreviation=true'`.
    This call skips an unknown key without an error, so compare the keys returned with the keys

@@ -35,15 +35,15 @@ The rules cited as "rule N" are the five rules in `SKILL.md`.
 - **Methods describe what ran.** Parameter values, system sizes, sample counts, software and
   versions come from the run's own record: the note written at the time, a saved configuration, a
   log, the output's metadata. A script shows only what it does today: a default in it counts only
-  where the record shows that the run used that setting; otherwise write a `[CHECK]`. Never write
-  what such calculations usually use.
+  where the record shows that the run used that same value; otherwise write a `[CHECK]`. Never
+  write what such calculations usually use.
 - **Statements about the literature** ("it is well known that", "Ref. [x] showed") need the cited
   paper itself opened, through Zotero (`zotero-obsidian-sync`). On a venue without the Zotero MCP
   tools, the local API serves it: `http://localhost:23119/api/users/<userID>/items/<KEY>/children`
   lists the PDF attachment, and `.../items/<attachment KEY>/fulltext` returns its indexed text in
-  `content`. A
-  `30_Literature/` note is a crude search result: use it to find the paper, not as evidence of
-  what the paper says. If you could not open the paper, the sentence carries
+  `content`; if `indexedPages` is below `totalPages`, that text is partial and cannot show what
+  the whole paper does or does not contain. A `30_Literature/` note is a crude search result: use
+  it to find the paper, not as evidence of what the paper says. If you could not open the paper, the sentence carries
   `\textbf{[CHECK: verify against the reference]}`. For cite keys see `figures-references.md`.
 - **Journal limits** (abstract length, page or word count, required sections, keywords, data
   availability statement) change. Read the journal's current author page instead of recalling

@@ -57,9 +57,9 @@ trace to the research record, and what reaches a journal or a referee cannot be 
   paper's `.gitignore`, say so in the report.
 - The build is clean when `latexmk` exits 0 and
   `grep -a -E '^! |undefined|multiply.defined' build/<main>.log` prints nothing. When `latexmk`
-  fails without a TeX error, and after every change to the `.bib`, read `build/<main>.blg`:
-  BibTeX reports its errors and warnings only there. Report every BibTeX warning with its entry
-  key, and overfull boxes in lines you wrote.
+  fails without a TeX error, and after every change to a `\cite` or the `.bib`, read
+  `build/<main>.blg`: BibTeX reports its errors and warnings only there. Report every BibTeX
+  warning with its entry key, and overfull boxes in lines you wrote.
 
 ## Five rules for every stage
 
