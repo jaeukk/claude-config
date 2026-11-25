@@ -74,9 +74,9 @@ in the text; do not fall back to writing the entry yourself.
 3. **Not in Zotero.** For an arXiv preprint, first check whether it has since been published; if
    it has, repeat steps 1 and 2 with the published DOI and title, and go on with this step only
    if they find nothing. Add the work (its published version, if there is one) with the Connector
-   recipe in `zotero-obsidian-sync`, taking the fields from CrossRef. The Connector saves into
-   the collection selected in the Zotero app, so confirm first that this is the project's
-   collection. Then repeat step 2 to get its key.
+   recipe in `zotero-obsidian-sync`. The Connector saves into the collection selected in the
+   Zotero app, so confirm first that this is the project's collection. Then repeat step 2 to get
+   its key.
 4. **Export by key,** and append to the paper's `.bib` the entries it lacks:
    `curl -s 'http://localhost:23119/better-bibtex/export/item?translator=bibtex&citationKeys=<key1>,<key2>&useJournalAbbreviation=true'`.
    This call skips an unknown key without an error, so compare the keys returned with the keys
