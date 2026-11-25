@@ -43,8 +43,9 @@ The rules cited as "rule N" are the five rules in `SKILL.md`.
   lists the PDF attachment, and `.../items/<attachment KEY>/fulltext` returns its indexed text in
   `content`; if `indexedPages` is below `totalPages`, that text is partial and cannot show what
   the whole paper does or does not contain. A `30_Literature/` note is a crude search result: use
-  it to find the paper, not as evidence of what the paper says. If you could not open the paper, the sentence carries
-  `\textbf{[CHECK: verify against the reference]}`. For cite keys see `figures-references.md`.
+  it to find the paper, not as evidence of what the paper says. If you could not open the paper,
+  the sentence carries `\textbf{[CHECK: verify against the reference]}`. For cite keys see
+  `figures-references.md`.
 - **Journal limits** (abstract length, page or word count, required sections, keywords, data
   availability statement) change. Read the journal's current author page instead of recalling
   them, and tell the owner which limits you applied.
