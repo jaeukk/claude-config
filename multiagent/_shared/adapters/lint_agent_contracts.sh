@@ -14,8 +14,6 @@ set -uo pipefail
 VAULT=/home/jaeukk/20_Notes
 CONTRACT=$VAULT/_shared/contracts/document-note.md
 ADAPTERS=(
-  /home/jaeukk/.claude/agents/book-summarizer.md
-  /home/jaeukk/.claude/agents/paper-reviewer.md
   "$VAULT/.claude/agents/book-summarizer.md"
   "$VAULT/.claude/agents/paper-reviewer.md"
   "$VAULT/.codex/agents/book-summarizer.toml"

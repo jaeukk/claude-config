@@ -116,8 +116,12 @@ def make_row(label, used_pct, resets_at, now, window_hours=None):
     }
 
 
-def claude_card(now):
-    creds = json.load(open(os.path.expanduser("~/.claude/.credentials.json")))
+# One Claude card per config dir that exists: private head + KAIST team worker.
+CLAUDE_DIRS = [("Claude private", "~/.claude"), ("Claude team", "~/.claude-team")]
+
+
+def claude_card(now, cfg="~/.claude", name="Claude Code"):
+    creds = json.load(open(os.path.expanduser(f"{cfg}/.credentials.json")))
     oauth = creds.get("claudeAiOauth") or creds
     token = oauth.get("accessToken")
     # plan badge, e.g. subscriptionType "max" + rateLimitTier "..._5x" → "Max 5x"
@@ -154,7 +158,7 @@ def claude_card(now):
             continue  # skip one malformed entry, keep the rest
     if not rows:
         raise RuntimeError(f"no usage windows in response; keys={list(resp)}")
-    return {"provider": "Claude Code", "plan": plan, "updated": "방금", "rows": rows}
+    return {"provider": name, "plan": plan, "updated": "방금", "rows": rows}
 
 
 _CODEX_RPC_CACHE = {"at": 0.0, "value": None}
@@ -578,11 +582,14 @@ def render_card(card, label_w):
 def snapshot():
     now = dt.datetime.now(KST)
     cards, errors = [], []
-    for fn in (claude_card, codex_card, agy_card):
+    sources = [(n, lambda now, d=d, n=n: claude_card(now, d, n))
+               for n, d in CLAUDE_DIRS if os.path.exists(os.path.expanduser(d))]
+    sources += [("codex_card", codex_card), ("agy_card", agy_card)]
+    for name, fn in sources:
         try:
             cards.append(fn(now))
         except Exception as e:  # keep the other card alive
-            errors.append(f"{fn.__name__}: {e}")
+            errors.append(f"{name}: {e}")
     # one label column across every card, so all bars start at the same column
     label_w = max((disp_w(r["label"]) for c in cards for r in c["rows"]), default=0) + 2
     body = "\n\n".join(render_card(c, label_w) for c in cards)

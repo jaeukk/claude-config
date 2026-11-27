@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="generator" content="md-report">
+<title>{{TITLE}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<script>
+// TeX preamble the .md relies on (vault notes: the `$…$` lines of the note named by `preamble:`,
+// without the dollar signs). It is run once before the page is typeset; leave it empty when unused.
+const PREAMBLE = String.raw`{{PREAMBLE}}`;
+window.MathJax = {
+  tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']], tags: 'ams' },
+  svg: { fontCache: 'global' },
+  startup: {
+    pageReady: () => PREAMBLE.trim()
+      ? MathJax.tex2svgPromise(PREAMBLE).then(() => MathJax.startup.defaultPageReady())
+      : MathJax.startup.defaultPageReady(),
+  },
+};
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly-basic.min.js"></script><!--PLOTLY-->
+<style>
+/* Layout: one serif reading column (prose capped near 70ch, charts and tables use the full
+   46rem); a sticky contents rail at >= 1100px, a collapsible contents block above the text below. */
+:root {
+  --bg: #fbfbfa; --fg: #16181d; --muted: #5a5f6b; --rule: #dcdfe5; --panel: #f1f3f6;
+  --accent: #1c58b0; --note: #1c58b0; --caution: #9a5800; --result: #1b6e36; --img-bg: #fff;
+  /* chart series: the dataviz reference palette, in its fixed order */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --serif: "Source Serif 4", "Source Serif Pro", Georgia, "Times New Roman", serif;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+/* "screen and" keeps printouts light even when the OS is in dark mode. */
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131519; --fg: #e6e8ec; --muted: #a0a6b3; --rule: #2c3038; --panel: #1b1e24;
+    --accent: #7fa9ef; --note: #7fa9ef; --caution: #e7a646; --result: #5bc07a;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131519; --fg: #e6e8ec; --muted: #a0a6b3; --rule: #2c3038; --panel: #1b1e24;
+  --accent: #7fa9ef; --note: #7fa9ef; --caution: #e7a646; --result: #5bc07a;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  color-scheme: dark;
+}
+
+/* Base */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 1.0625rem/1.65 var(--serif); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4 { font-family: var(--sans); font-weight: 600; line-height: 1.25; text-wrap: balance; margin: 0; scroll-margin-top: 1.5rem; }
+h2 { font-size: 1.45rem; } h3 { font-size: 1.15rem; } h4 { font-size: 1rem; }
+p, ul, ol, dl, figure, pre, table, details, aside, blockquote { margin: 0; }
+a { color: var(--accent); text-underline-offset: .15em; }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+strong { font-weight: 600; }
+code, pre { font-family: var(--mono); font-size: .86em; }
+:not(pre) > code { background: var(--panel); padding: .1em .3em; border-radius: 3px; overflow-wrap: anywhere; }
+pre { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: .85rem 1rem; overflow-x: auto; line-height: 1.5; }
+mjx-container[display="true"] { overflow-x: auto; overflow-y: hidden; max-width: 100%; padding-block: .2rem; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+/* Page frame */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem; max-width: 46rem; margin-inline: auto; padding-inline: 16px; padding-block: 2.5rem 5rem; }
+@media (min-width: 640px) { .page { padding-inline: 2rem; } }
+@media (min-width: 1100px) {
+  .page { max-width: 68rem; grid-template-columns: 13rem minmax(0, 46rem); column-gap: 3.5rem; justify-content: center; }
+  .doc-head, main { grid-column: 2; }
+  .toc { grid-column: 1; grid-row: 1 / span 2; align-self: start; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 2.5rem); max-height: calc(100vh - 5rem); overflow-y: auto; }
+}
+.eyebrow { font: 600 .75rem/1.4 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: .5rem; }
+.doc-head h1 { font-size: clamp(1.75rem, 1.2rem + 2.2vw, 2.4rem); letter-spacing: -.01em; }
+.meta { font: .875rem/1.5 var(--sans); color: var(--muted); margin-top: .75rem; }
+
+/* Contents */
+.toc { font: .875rem/1.45 var(--sans); }
+.toc summary { cursor: pointer; font-weight: 600; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.toc ol { list-style: none; padding: 0; margin-top: .75rem; display: grid; gap: .2rem; }
+.toc li.h3 { padding-left: .9rem; }
+.toc a { display: block; padding: .15rem 0 .15rem .65rem; border-left: 2px solid var(--rule); color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--fg); }
+.toc a[aria-current="true"] { color: var(--fg); border-left-color: var(--accent); }
+@media (max-width: 1099.98px) { .toc { border-block: 1px solid var(--rule); padding-block: .75rem; } }
+
+/* Flow: spacing between blocks of the report */
+main { min-width: 0; counter-reset: fig; }
+main > * + * { margin-top: 1.1rem; }
+main > h2 { margin-top: 3rem; }
+main > h3 { margin-top: 2rem; }
+main > h4 { margin-top: 1.5rem; }
+main p, main li { max-width: 70ch; }
+main ul, main ol { padding-left: 1.4rem; }
+main li + li { margin-top: .3rem; }
+
+/* Key results */
+.summary { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 1.1rem 1.4rem 1.25rem; }
+.summary h2 { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.summary ul { margin-top: .6rem; }
+
+/* Callouts: note | caution | result */
+.callout { --c: var(--note); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); background: color-mix(in srgb, var(--c) 7%, var(--bg)); border-radius: 6px; padding: .8rem 1.1rem; }
+.callout.caution { --c: var(--caution); }
+.callout.result { --c: var(--result); }
+.callout > * { margin: 0; }
+.callout > * + * { margin-top: .5rem; }
+.callout > .label { font: 600 .72rem/1.3 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--c); }
+
+/* Parameters */
+dl.params { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .35rem 1.5rem; font: .95rem/1.5 var(--sans); }
+dl.params dt { color: var(--muted); }
+dl.params dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; font: .9rem/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+caption { caption-side: top; text-align: left; font-size: .875rem; color: var(--muted); padding-bottom: .4rem; }
+th, td { padding: .4rem .8rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+thead th { font-weight: 600; border-bottom: 1.5px solid var(--muted); }
+th.num, td.num { text-align: right; }
+
+/* Figures and charts */
+figure img { display: block; max-width: 100%; height: auto; margin-inline: auto; background: var(--img-bg); border-radius: 4px; }
+figcaption { font: .875rem/1.5 var(--sans); color: var(--muted); margin-top: .6rem; }
+figcaption::before { counter-increment: fig; content: "Figure " counter(fig) ". "; font-weight: 600; color: var(--fg); }
+main.no-autonum figcaption::before { content: none; }  /* the .md numbers its own figures */
+.flip .tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .75rem; }
+.flip .tabs button { font: 500 .85rem/1 var(--sans); padding: .45rem .85rem; border: 1px solid var(--rule); border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+.flip .tabs button:hover { color: var(--fg); border-color: var(--muted); }
+.flip .tabs button[aria-selected="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.flip .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chart, .plot { width: 100%; height: 22rem; }
+@media (max-width: 600px) { .chart, .plot { height: 17rem; } }
+figure details.data { margin-top: .5rem; }
+
+/* Disclosures, columns, wikilinks */
+details > summary { cursor: pointer; font: 500 .875rem/1.4 var(--sans); color: var(--muted); }
+details > summary:hover { color: var(--fg); }
+details[open] > summary { margin-bottom: .6rem; }
+details.more { border: 1px solid var(--rule); border-radius: 6px; padding: .6rem 1rem; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1.5rem; }
+.cols > * { min-width: 0; }
+.cols > * > * + * { margin-top: .75rem; }
+.wikilink { border-bottom: 1px dotted var(--muted); }
+.cite { font: .85em var(--sans); color: var(--muted); }
+blockquote { padding: .1rem 0 .1rem 1.1rem; border-left: 3px solid var(--rule); color: var(--muted); }
+blockquote > * { margin: 0; }
+blockquote > * + * { margin-top: .5rem; }
+ul.tasks { list-style: none; padding-left: 0; }
+ul.tasks li { position: relative; padding-left: 1.5rem; }
+ul.tasks li::before { content: "○"; position: absolute; left: 0; color: var(--muted); }
+ul.tasks li.done::before { content: "✓"; color: var(--result); font-weight: 600; }
+
+/* Visuals: interactive controls, framed panels, schematics, cards, source chips */
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.5rem; font: .875rem/1.4 var(--sans); color: var(--muted); margin-bottom: .6rem; }
+.controls label { display: inline-flex; align-items: center; gap: .6rem; }
+.controls input[type="range"] { width: min(12rem, 45vw); accent-color: var(--accent); }
+.controls output { min-width: 3.5em; font-variant-numeric: tabular-nums; color: var(--fg); }
+.controls button { font: 500 .85rem/1 var(--sans); padding: .45rem .85rem; border: 1px solid var(--rule); border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+.controls button:hover { color: var(--fg); border-color: var(--muted); }
+.controls button[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.controls button:focus-visible, .controls input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.panel { border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1.1rem; }
+.panel > * + * { margin-top: .75rem; }
+svg.schematic { display: block; width: 100%; height: auto; font-family: var(--sans); color: var(--fg); }
+svg.schematic .halo { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }  /* labels sitting on lines */
+.scroll-x { overflow-x: auto; }  /* wide schematics scroll on phones instead of shrinking past legibility */
+@media (max-width: 640px) { .scroll-x > svg.schematic { min-width: var(--minw, 600px); } }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .9rem; }
+.card { border: 1px solid var(--rule); border-radius: 6px; padding: .85rem 1rem; display: grid; gap: .35rem; align-content: start; min-width: 0; }
+.card .kicker { font: 600 .7rem/1.3 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.card .big { font: 600 1.45rem/1.15 var(--sans); font-variant-numeric: tabular-nums; }
+.card p { margin: 0; font-size: .92rem; line-height: 1.5; max-width: none; }
+.src { font: .78rem/1.3 var(--sans); color: var(--muted); }
+.formula { font-size: .95rem; margin: 0 0 .4rem; }
+.illustrative::after { content: "✱"; font-size: .7em; vertical-align: super; color: var(--accent); }
+.illustrative-note { font: .78rem/1.3 var(--sans); color: var(--muted); }
+table.matrix th, table.matrix td { text-align: center; vertical-align: middle; }
+table.matrix tbody th { font-weight: 600; }
+table.matrix td.empty { color: var(--muted); }
+table.matrix td.on { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); font-weight: 600; }
+
+@media print {
+  .toc, .flip .tabs, .controls { display: none; }
+  .page { display: block; max-width: none; padding: 0; }
+  body { font-size: 11pt; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="doc-head">
+    <p class="eyebrow">{{EYEBROW}}</p>
+    <h1>{{H1}}</h1>
+    <p class="meta">{{META}}</p>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <details open><summary>Contents</summary><ol id="toc-list"></ol></details>
+  </nav>
+
+<!--MAIN-->
+</div>
+
+<script>
+// Parse a table cell as a number, with an optional "± error"; null if it is not numeric.
+const num = s => {
+  s = s.replace(/−/g, '-').replace(/\s+/g, '');
+  const f = s.match(/^(\d+)\/(\d+)$/);  // a count like "3/10" plots as the fraction 0.3
+  if (f) return { v: f[1] / f[2], e: null };
+  const m = s
+    .match(/^([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)(?:±((?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?))?$/i);
+  return m ? { v: +m[1], e: m[2] === undefined ? null : +m[2] } : null;
+};
+
+// Contents built from the h2/h3 headings in <main>, highlighting the section being read.
+// Runs before MathJax (deferred), so math in headings is typeset in the contents too.
+(() => {
+  const list = document.getElementById('toc-list'), links = new Map();
+  let n = 0;
+  for (const h of document.querySelectorAll('main h2, main h3')) {
+    if (!h.id) h.id = 'sec-' + ++n;
+    const li = document.createElement('li'), a = document.createElement('a');
+    li.className = h.tagName.toLowerCase();
+    a.href = '#' + h.id;
+    a.textContent = h.textContent;
+    li.append(a);
+    list.append(li);
+    links.set(h, a);
+  }
+  if (!links.size) { document.querySelector('.toc').hidden = true; return; }
+  if (matchMedia('(max-width: 1099.98px)').matches) document.querySelector('.toc details').open = false;
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) {
+      links.forEach(a => a.removeAttribute('aria-current'));
+      links.get(e.target).setAttribute('aria-current', 'true');
+    }
+  }, { rootMargin: '0px 0px -70% 0px' });
+  links.forEach((_, h) => io.observe(h));
+})();
+
+// Right-align table columns whose body cells are all numbers.
+for (const t of document.querySelectorAll('main table')) {
+  const [head, ...body] = t.rows;
+  if (!head) continue;
+  [...head.cells].forEach((_, j) => {
+    const cells = body.map(r => r.cells[j]).filter(c => c && c.textContent.trim());
+    if (cells.length && cells.every(c => num(c.textContent))) [head, ...body].forEach(r => r.cells[j]?.classList.add('num'));
+  });
+}
+
+// Figure series on shared axes (<div class="flip"><figure data-tab="…">…</figure>…</div>):
+// one figure at a time behind tabs; every figure stays in the page and all of them print.
+for (const flip of document.querySelectorAll('.flip')) {
+  const figs = [...flip.children].filter(f => f.matches('figure')), bar = document.createElement('div');
+  bar.className = 'tabs';
+  bar.setAttribute('role', 'tablist');
+  const show = i => figs.forEach((f, j) => {
+    f.hidden = j !== i;
+    bar.children[j].setAttribute('aria-selected', j === i);
+    bar.children[j].tabIndex = j === i ? 0 : -1;
+  });
+  figs.forEach((f, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.textContent = f.dataset.tab || i + 1;
+    b.onclick = () => show(i);
+    b.onkeydown = e => {
+      const k = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+      if (k) { const n = (i + k + figs.length) % figs.length; show(n); bar.children[n].focus(); }
+    };
+    bar.append(b);
+  });
+  flip.prepend(bar);
+  show(0);
+}
+
+// A failed check prints "CHECK FAILED: …", which shot.sh reports. Give every computed visual
+// one or two checks against a known limit or sum rule.
+const check = (ok, msg) => { if (!ok) console.error('CHECK FAILED: ' + msg); };
+
+// Plotly theme read from the CSS tokens and shared by every plot. Plots register a draw function
+// in `redraws` so they repaint when the theme changes.
+const redraws = [];
+function plotTheme() {
+  const css = getComputedStyle(document.documentElement), tok = n => css.getPropertyValue(n).trim();
+  return {
+    tok,
+    axis: (o = {}) => ({
+      automargin: true, zeroline: false, ticks: 'outside',
+      gridcolor: tok('--rule'), linecolor: tok('--muted'), tickcolor: tok('--rule'),
+      ...o, title: { text: o.title ?? '', standoff: 10 },
+    }),
+    layout: {
+      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { family: tok('--sans'), color: tok('--fg'), size: 13 },
+      colorway: [1, 2, 3, 4, 5, 6, 7, 8].map(i => tok('--s' + i)),
+      legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom' },
+      hoverlabel: { bgcolor: tok('--bg'), bordercolor: tok('--rule'), font: { family: tok('--sans'), color: tok('--fg') } },
+      margin: { l: 8, r: 8, t: 12, b: 8 },
+    },
+    config: {
+      displaylogo: false, responsive: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+      displayModeBar: matchMedia('(min-width: 640px)').matches ? 'hover' : false,  // on phones the toolbar covers the legend
+    },
+  };
+}
+
+// Log axes get 1-2-5 ticks (decades only past 3 decades), labeled in full instead of Plotly's bare digits.
+function logTicks(vals) {
+  const v = vals.filter(y => y > 0), lo = Math.floor(Math.log10(Math.min(...v))), hi = Math.ceil(Math.log10(Math.max(...v)));
+  const t = [];
+  for (let k = lo; k <= hi; k++) for (const m of hi - lo > 3 ? [1] : [1, 2, 5]) t.push(+(m * 10 ** k).toPrecision(1));
+  const sup = n => String(n).replace(/./g, c => '⁻⁰¹²³⁴⁵⁶⁷⁸⁹'['-0123456789'.indexOf(c)]);
+  const label = v => {  // 0.5, 20, 500 stay plain; 1e4 and up, or below 1e-3, become 10⁴ or 2×10⁴
+    if (v < 1e4 && v >= 1e-3) return String(v);
+    const e = Math.floor(Math.log10(v) + 1e-9), m = Math.round(v / 10 ** e);
+    return (m === 1 ? '' : m + '×') + '10' + sup(e);
+  };
+  return { type: 'log', tickmode: 'array', tickvals: t, ticktext: t.map(label) };
+}
+
+// Text of a table cell without the source chips that sourceChips() may have appended.
+const cellText = c => { const k = c.cloneNode(true); k.querySelectorAll('.src, .illustrative-note').forEach(x => x.remove()); return k.textContent.trim(); };
+
+// Charts drawn from tables on the page, so a chart can never disagree with its data:
+// <div class="chart" data-table="ID" data-x="0" data-y="1,2" data-kind="line|scatter|bar"
+//      data-logx data-logy data-lead data-xlabel="…" data-ylabel="…"></div>
+// data-lead plots only the first number of each cell, e.g. "0.4687 (10/10) → 0.4812" -> 0.4687.
+function chartFromTable(el) {
+  const d = el.dataset, t = document.getElementById(d.table);
+  const head = [...t.rows[0].cells].map(cellText);
+  const body = [...t.rows].slice(1).map(r => [...r.cells].map(cellText));
+  const xj = +(d.x ?? 0), kind = d.kind || 'line';
+  const cell = s => num('lead' in d ? (s ?? '').split(/\s+/)[0] : s ?? '');
+  const x = body.map(r => cell(r[xj])?.v ?? r[xj]);
+  const traces = (d.y ?? '1').split(',').map(Number).map(j => {
+    const cells = body.map(r => cell(r[j]));
+    body.forEach((r, i) => check(!(r[j] ?? '').trim() || cells[i], `chart ${d.table}: cell "${r[j]}" is not a number`));
+    const errs = cells.map(c => c?.e ?? null);
+    return {
+      name: head[j], x, y: cells.map(c => c?.v ?? null), meta: 'table',
+      type: kind === 'bar' ? 'bar' : 'scatter', mode: kind === 'line' ? 'lines+markers' : 'markers',
+      line: { width: 2 }, marker: { size: 8 },
+      error_y: errs.some(e => e !== null) ? { type: 'data', array: errs.map(e => e ?? 0), thickness: 1.5, width: 4 } : undefined,
+    };
+  });
+  return () => {
+    const th = plotTheme();
+    Plotly.react(el, traces, {
+      ...th.layout,
+      xaxis: th.axis({ title: d.xlabel ?? head[xj], ...('logx' in d ? logTicks(x) : kind === 'bar' ? { type: 'category' } : {}) }),
+      yaxis: th.axis({ title: d.ylabel ?? (traces.length === 1 ? traces[0].name : ''), ...('logy' in d ? logTicks(traces.flatMap(tr => tr.y)) : {}) }),
+      showlegend: traces.length > 1, hovermode: kind === 'bar' ? 'closest' : 'x unified',
+      margin: { ...th.layout.margin, t: traces.length > 1 ? 36 : 12 },
+    }, th.config);
+  };
+}
+
+// Interactive plot of a formula from the notes. Sliders go above the plot; traces(p, theme) and the
+// optional layout(p, theme) receive the slider values p = { key: value }. Axis entries in the layout
+// are merged into the themed axes (pass title as a string).
+// livePlot('id', { formula, src, sliders: [{ key, label, min, max, step, value, fmt }], traces: p => [...], layout: p => ({...}), readout: p => 'text' })
+// Write TeX in JavaScript with String.raw`…`: in a plain string '\approx' loses its backslash.
+function livePlot(id, spec) {
+  const el = document.getElementById(id), p = {}, box = document.createElement('div');
+  box.className = 'controls';
+  for (const sl of spec.sliders || []) {
+    p[sl.key] = sl.value;
+    const lab = document.createElement('label'), inp = document.createElement('input'), out = document.createElement('output');
+    const fmt = sl.fmt || (v => String(v));
+    Object.assign(inp, { type: 'range', min: sl.min, max: sl.max, step: sl.step, value: sl.value, id: `${id}-${sl.key}` });
+    out.textContent = fmt(sl.value);
+    inp.addEventListener('input', () => { p[sl.key] = +inp.value; out.textContent = fmt(p[sl.key]); draw(); });
+    lab.append(sl.label, inp, out);
+    box.append(lab);
+  }
+  if (spec.formula) {  // the note's formula, shown above the plot and checked against the note by verify.py
+    const f = document.createElement('p');
+    f.className = 'formula';
+    f.dataset.tex = spec.formula;
+    if (spec.src) f.dataset.src = spec.src;
+    f.textContent = `$${spec.formula}$`;
+    el.before(f);
+  }
+  let readout = null;
+  if (spec.readout) {  // a computed value shown beside the sliders, exempt from source checks as computed output
+    readout = document.createElement('span');
+    readout.className = 'computed';
+    box.append(readout);
+  }
+  if (box.children.length) el.before(box);
+  const draw = () => {
+    if (readout) readout.textContent = spec.readout(p);
+    if (!window.Plotly) return;
+    const th = plotTheme(), lay = spec.layout ? spec.layout(p, th) : {}, tr = spec.traces(p, th);
+    const ax = (o = {}, k) => th.axis(o.type === 'log' && !o.tickvals ? { ...o, ...logTicks(tr.flatMap(t => t[k] || [])) } : o);
+    Plotly.react(el, tr, { ...th.layout, ...lay, xaxis: ax(lay.xaxis, 'x'), yaxis: ax(lay.yaxis, 'y') }, th.config);
+  };
+  redraws.push(draw);
+  return draw;
+}
+
+
+// Source chips. data-src="NoteA NoteB" on a block names the notes it rests on; verify.py checks the
+// block's numbers, quotes and citekeys against exactly those notes, and the chip shows the same names.
+// data-src="editorial" marks the report's own framing (no numbers allowed).
+function sourceChips() {
+  for (const el of document.querySelectorAll('main [data-src]')) {
+    const names = el.dataset.src.trim().split(/\s+/), chip = document.createElement('span');
+    chip.className = 'src';
+    chip.textContent = names[0] === 'editorial' ? 'framing by this report' : 'from: ' + names.join(', ');
+    const host = el.matches('figure') ? el.querySelector('figcaption') || el : el.matches('aside') ? el.querySelector('p:last-of-type') || el : el;
+    host.append(' ', chip);
+  }
+  for (const el of document.querySelectorAll('main figure, main p, main li, main .card')) {
+    if (!el.querySelector(':scope .illustrative') || el.parentElement.closest('figure, p, li, .card')) continue;
+    const note = document.createElement('span');
+    note.className = 'illustrative-note';
+    note.textContent = '✱ chosen by this report, not from the notes';
+    (el.matches('figure') ? el.querySelector('figcaption') || el : el).append(' ', note);
+  }
+}
+
+// Concept map of notes, drawn into <svg id=svgId> from a JSON spec in
+// <script type="application/json" class="concept-map" id=specId>:
+//   { columns: [[{ title, nodes: [stem, …] }, …], …], hub: stem, context: [stem], links: { stem: "#section" },
+//     edges: [{ from, to, label, dash, editorial }] }
+// from/to are note stems or group titles. verify.py requires a wikilink between the two notes of every
+// edge (a group stands for each of its notes) unless the edge says "editorial": true.
+function conceptMap(svgId, specId) {
+  const svg = document.getElementById(svgId), spec = JSON.parse(document.getElementById(specId).textContent);
+  const NH = 28, GAP = 10, GROUP_GAP = 30, TOP = 24, FS = 11.5, cw = s => s.length * FS * 0.56 + 20;
+  const name = s => s.replace(/_/g, ' '), pos = {}, colOf = {};
+  // a first pass places columns so that same-column brackets and their labels fit in the gap
+  const nodesIn = c => spec.columns[c].flatMap(g => g.nodes);
+  spec.columns.forEach((col, c) => col.forEach(g => { colOf[g.title] = c; g.nodes.forEach(n => { colOf[n] = c; }); }));
+  const slots = spec.columns.map(() => []);
+  for (const e of spec.edges) if (colOf[e.from] === colOf[e.to]) slots[colOf[e.from]].push(e);
+  let x = 10, H = 0, W = 0;
+  const groups = [];
+  spec.columns.forEach((col, c) => {
+    const w = Math.max(150, ...nodesIn(c).map(n => cw(name(n))));
+    let y = TOP;
+    for (const g of col) {
+      const top = y;
+      if (g.title) y += 12;
+      for (const n of g.nodes) { pos[n] = { x, y, w, h: NH }; y += NH + GAP; }
+      groups.push({ title: g.title, x: x - 8, y: top - 8, w: w + 16, h: y - top + 6 - GAP, c });
+      if (g.title) pos[g.title] = { x: x - 8, y: top - 8, w: w + 16, h: y - top + 6 - GAP };
+      y += GROUP_GAP;
+    }
+    H = Math.max(H, y - GROUP_GAP + 6);
+    const labW = Math.max(0, ...slots[c].map(e => cw(e.label || '')));
+    pos['#gap' + c] = x + w + 16 + slots[c].length * 12 + 8;  // where same-column labels start
+    W = Math.max(W, x + w + 10, slots[c].length ? pos['#gap' + c] + labW : 0);
+    x += w + Math.max(110, 40 + slots[c].length * 12 + labW);
+  });
+  svg.style.setProperty('--minw', `${Math.round(W * 0.95)}px`);
+  svg.style.maxWidth = `${Math.round(W * 1.25)}px`;  // a small map is not blown up to the column width
+  const el = (t, a, p = svg) => { const e = document.createElementNS('http://www.w3.org/2000/svg', t); for (const k in a) e.setAttribute(k, a[k]); p.append(e); return e; };
+  const txt = (p, x, y, t, a = {}) => { const e = el('text', { x, y, 'font-size': FS, fill: 'currentColor', ...a }, p); e.textContent = t; return e; };
+  const defs = el('defs', {}), m = el('marker', { id: svgId + '-a', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+  el('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'currentColor' }, m);
+  for (const g of groups) if (g.title) {
+    el('rect', { x: g.x, y: g.y, width: g.w, height: g.h, rx: 8, fill: 'var(--panel)' });
+    txt(svg, g.x + 10, g.y + 13, g.title.toUpperCase(), { 'font-size': 10.5, 'font-weight': 600, fill: 'var(--muted)', 'letter-spacing': '0.05em' });
+  }
+  const used = {};
+  spec.edges.forEach(e => {
+    const A = pos[e.from], B = pos[e.to], c = colOf[e.from];
+    if (!A || !B) return check(false, `concept map: unknown node ${!A ? e.from : e.to}`);
+    const style = { fill: 'none', stroke: 'currentColor', 'stroke-width': 1.2, 'marker-end': `url(#${svgId}-a)`, ...(e.dash ? { 'stroke-dasharray': '4 3' } : {}) };
+    const ay = A.y + A.h / 2, by = B.y + B.h / 2;
+    if (c === colOf[e.to]) {  // same column: a bracket on the right, label on the source's row
+      const k = (used[c] = (used[c] ?? -1) + 1), bx = A.x + A.w + 16 + k * 12;
+      el('path', { d: `M${A.x + A.w},${ay} H${bx} V${by} H${B.x + B.w + 3}`, ...style });
+      if (e.label) txt(svg, pos['#gap' + c], ay + 4, e.label, { class: 'halo', fill: 'var(--muted)', 'font-size': 11 });
+    } else {
+      const [x1, x2] = B.x > A.x ? [A.x + A.w, B.x - 3] : [A.x, B.x + B.w + 3], mx = (x1 + x2) / 2;
+      if (Math.abs(colOf[e.to] - c) > 1) {  // skips a column: route underneath it instead of across its nodes
+        const lane = H + 4 + 8 * (used.lane = (used.lane ?? 0) + 1), xa = x1 + 20, xb = x2 - 20;
+        el('path', { d: `M${x1},${ay} H${xa} V${lane} H${xb} V${by} H${x2}`, ...style });
+        H = Math.max(H, lane + 8);
+      } else el('path', { d: `M${x1},${ay} C${mx},${ay} ${mx},${by} ${x2},${by}`, ...style });
+      // labels sit at the target end, clear of the same-column labels on the source side
+      if (e.label) txt(svg, x2 - 4, by - 6, e.label, { class: 'halo', fill: 'var(--muted)', 'font-size': 11, 'text-anchor': B.x > A.x ? 'end' : 'start' });
+    }
+  });
+  svg.setAttribute('viewBox', `0 0 ${Math.ceil(W)} ${Math.ceil(H)}`);
+  for (const n in pos) {
+    if (n.startsWith('#gap') || !spec.columns.some(col => col.some(g => g.nodes.includes(n)))) continue;
+    const P = pos[n], a = el('a', spec.links?.[n] ? { href: spec.links[n] } : {});
+    el('rect', { x: P.x, y: P.y, width: P.w, height: P.h, rx: 4, fill: 'var(--bg)', stroke: n === spec.hub ? 'var(--accent)' : 'var(--muted)', 'stroke-width': n === spec.hub ? 2 : 1, ...(spec.context?.includes(n) ? { 'stroke-dasharray': '4 3' } : {}) }, a);
+    txt(a, P.x + P.w / 2, P.y + P.h / 2 + 4, name(n), { 'text-anchor': 'middle', 'font-weight': n === spec.hub ? 600 : 400 });
+  }
+}
+
+// Atlas: values of one shared parameter reported across studies, drawn from a table on the page, so the
+// table is the checked data. Columns: Category | Row | Values | Detail. Values are comma-separated
+// points (0.15), ranges (0.20–0.35 or 20%–35%), onsets (≳0.35, >0.33; drawn as ▶) or π/n; a leading ≈ or ∼ is dropped.
+// <div class="plot atlas" data-table="ID" data-xlabel="χ" data-xrange="-0.02,0.82"></div>
+function atlasFromTable(el) {
+  const d = el.dataset, rows = [...document.getElementById(d.table).tBodies[0].rows].map(r => [...r.cells].map(cellText));
+  const val = s => { s = s.replace(/^[≈∼~]\s*/, '').replace(/−/g, '-'); const m = s.match(/^π\s*\/\s*(\d+)$/); return m ? Math.PI / +m[1] : s.endsWith('%') ? Number(s.slice(0, -1)) / 100 : Number(s); };
+  const parsed = rows.map(([cat, label, values, detail]) => {
+    const r = { cat, label, detail, pts: [], rng: [], ons: [] };
+    for (const it of values.split(',').map(t => t.trim()).filter(Boolean)) {
+      const range = it.match(/^(.+?)\s*[–—]\s*(.+)$/) || it.match(/^([\d.]+)\s*-\s*([\d.]+)$/);
+      if (/^[≳>≥]/.test(it)) r.ons.push(val(it.replace(/^[≳>≥]\s*/, '')));
+      else if (range) r.rng.push([val(range[1]), val(range[2])]);
+      else r.pts.push(val(it));
+    }
+    return r;
+  });
+  check(parsed.every(r => [...r.pts, ...r.ons, ...r.rng.flat()].every(Number.isFinite)), `atlas ${d.table}: every value parses`);
+  if (!el.style.height) el.style.height = `${parsed.length * 28 + 110}px`;
+  const cats = [...new Set(parsed.map(r => r.cat))], tokens = ['--s1', '--s2', '--s3', '--s7', '--s5', '--s6', '--s8'];
+  return () => {
+    const th = plotTheme(), traces = [];
+    cats.forEach((cat, i) => {
+      const color = th.tok(tokens[i % tokens.length]), mine = parsed.filter(r => r.cat === cat), seg = { x: [], y: [], text: [] }, pt = { x: [], y: [], text: [], symbol: [] };
+      for (const r of mine) {
+        const hover = `${r.label}: ${r.detail}`;
+        for (const [a, b] of r.rng) { seg.x.push(a, b, null); seg.y.push(r.label, r.label, null); seg.text.push(hover, hover, null); }
+        for (const v of r.pts) { pt.x.push(v); pt.y.push(r.label); pt.text.push(hover); pt.symbol.push('circle'); }
+        for (const v of r.ons) { pt.x.push(v); pt.y.push(r.label); pt.text.push(hover); pt.symbol.push('triangle-right'); }
+      }
+      traces.push({ ...seg, meta: 'table', mode: 'lines', line: { width: 7, color }, opacity: 0.55, legendgroup: cat, showlegend: false, hovertemplate: '%{text}<extra></extra>' });
+      traces.push({ ...pt, meta: 'table', name: cat, mode: 'markers', legendgroup: cat, marker: { size: 10, color, symbol: pt.symbol, line: { width: 1.5, color: th.tok('--bg') } }, hovertemplate: '%{text}<extra></extra>' });
+    });
+    Plotly.react(el, traces, {
+      ...th.layout, margin: { ...th.layout.margin, t: 36 }, hovermode: 'closest',
+      xaxis: th.axis({ title: d.xlabel || '', ...(d.xrange ? { range: d.xrange.split(',').map(Number) } : {}) }),
+      yaxis: th.axis({ categoryorder: 'array', categoryarray: parsed.map(r => r.label), autorange: 'reversed', ticks: '' }),
+    }, th.config);
+  };
+}
+
+// Audit mode (page opened with #audit, as verify.py does): after math and plots are drawn, record
+// problems and figure boxes in <body data-audit>. Checks DOM state, never page text.
+function runAudit() {
+  const out = { problems: [], figures: [], height: document.documentElement.scrollHeight }, vw = document.documentElement.clientWidth;
+  const say = (p) => { if (out.problems.length < 60) out.problems.push(p); };
+  const snip = el => (el.id ? '#' + el.id + ' ' : '') + (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 50);
+  // merror is a parse error; red mtext is how MathJax's noundefined package shows an unknown macro
+  document.querySelectorAll('mjx-container').forEach(m => { if (m.querySelector('mjx-assistive-mml merror, mjx-assistive-mml [mathcolor="red"]')) say('TeX error: ' + (m.querySelector('mjx-assistive-mml')?.textContent || '').slice(0, 80)); });
+  const tw = document.createTreeWalker(document.querySelector('main') || document.body, NodeFilter.SHOW_TEXT, { acceptNode: n => n.parentElement.closest('script, style, code, pre, .js-plotly-plot') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  for (let n; (n = tw.nextNode());) if (/\$|\\\(|\\\[|\\begin\{/.test(n.textContent)) say('TeX not rendered (a $ or \\( left in the text): ' + n.textContent.trim().slice(0, 70));
+  document.querySelectorAll('main img').forEach(i => { if (!i.complete || i.naturalWidth === 0) say('image missing: ' + i.getAttribute('src')); });
+  document.querySelectorAll('main div.plot, main div.chart').forEach(p => { if (!p.hidden && !p.parentElement.closest('.js-plotly-plot') && !p.querySelector('.main-svg')) say('plot not rendered: ' + snip(p)); });
+  if (document.documentElement.scrollWidth > vw + 1) {
+    say(`page scrolls sideways (${document.documentElement.scrollWidth} > ${vw} px)`);
+    document.querySelectorAll('main *').forEach(e => {
+      if (e.closest('.table-wrap, .scroll-x, pre, mjx-container, .js-plotly-plot, svg')) return;
+      if (e.getBoundingClientRect().right > vw + 1 && e.parentElement.getBoundingClientRect().right <= vw + 1) say('wider than the screen: <' + e.tagName.toLowerCase() + '> ' + snip(e));
+    });
+  }
+  document.querySelectorAll('svg.schematic').forEach(svg => {
+    const where = (svg.closest('figure')?.querySelector('figcaption')?.textContent || svg.id || 'svg').trim().slice(0, 40);
+    const box = svg.getBoundingClientRect(), ts = [...svg.querySelectorAll('text')].filter(t => t.textContent.trim()).map(t => [t, t.getBoundingClientRect()]);
+    for (const [t, r] of ts) if (r.width && (r.left < box.left - 1 || r.right > box.right + 1 || r.top < box.top - 1 || r.bottom > box.bottom + 1)) say(`label clipped in “${where}”: "${t.textContent}"`);
+    for (let i = 0; i < ts.length; i++) for (let j = i + 1; j < ts.length; j++) {
+      const [a, ra] = ts[i], [b, rb] = ts[j], w = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left), h = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
+      if (w > 1 && h > 1 && w * h > 6) say(`labels overlap in “${where}”: "${a.textContent}" × "${b.textContent}"`);
+    }
+  });
+  document.querySelectorAll('main figure').forEach(f => { const r = f.getBoundingClientRect(); out.figures.push({ left: r.left + scrollX, top: r.top + scrollY, right: r.right + scrollX, bottom: r.bottom + scrollY }); });
+  // What verify.py checks against the notes: every typeset formula's original TeX, every quote's text
+  // with its formulas restored to TeX, and author-written Plotly text (table-backed traces excluded).
+  const tex = new Map();
+  for (const item of Array.from(window.MathJax?.startup?.document?.math || [])) if (item.typesetRoot) tex.set(item.typesetRoot, item.math);
+  const scope = n => (n.closest('[data-src]')?.dataset.src ?? null);
+  const skipped = n => !!n.closest('.controls, .computed, .src, .illustrative-note, header, nav');
+  const restore = n => n.nodeType === 3 ? n.textContent : n.nodeType !== 1 ? '' : n.matches('mjx-container') ? `$${tex.get(n) ?? ''}$` : n.matches('.src, .illustrative-note, script, style') ? '' : [...n.childNodes].map(restore).join('');
+  out.math = []; out.quotes = []; out.plots = [];
+  for (const [node, t] of tex) if (node.closest('main') && !skipped(node)) out.math.push({ tex: t, src: scope(node), illustrative: !!node.closest('.illustrative') });
+  document.querySelectorAll('main q, main blockquote').forEach(q => out.quotes.push({ text: restore(q), src: scope(q) }));
+  document.querySelectorAll('main .js-plotly-plot').forEach(pl => {
+    const texts = [], lay = pl.layout || {}, strip = s => String(s ?? '').replace(/%\{[^}]*\}|<[^>]*>/g, ' ');
+    for (const tr of pl.data || []) if (tr.meta !== 'table') for (const k of ['name', 'text', 'hovertext', 'hovertemplate']) [].concat(tr[k] ?? []).forEach(v => texts.push(strip(v)));
+    for (const a of lay.annotations || []) texts.push(strip(a.text));
+    for (const ax of ['xaxis', 'yaxis']) texts.push(strip(lay[ax]?.title?.text ?? lay[ax]?.title));
+    texts.push(strip(lay.title?.text ?? lay.title));
+    out.plots.push({ texts: texts.filter(t => t.trim()), src: scope(pl) });
+  });
+  document.body.setAttribute('data-audit', JSON.stringify(out));
+}
+if (location.hash === '#audit') addEventListener('load', () => Promise.resolve(window.MathJax?.startup?.promise).then(() => setTimeout(runAudit, 1000)));
+
+addEventListener('DOMContentLoaded', () => {
+  sourceChips();
+  for (const el of document.querySelectorAll('.chart[data-table]')) redraws.push(chartFromTable(el));
+  for (const el of document.querySelectorAll('.atlas[data-table]')) redraws.push(atlasFromTable(el));
+  if (!window.Plotly) {  // offline: show the data tables instead of empty plot boxes
+    document.querySelectorAll('.chart, .plot').forEach(c => {
+      c.hidden = true;
+      c.closest('figure')?.querySelector('details.data')?.setAttribute('open', '');
+      c.closest('figure')?.querySelectorAll('.controls').forEach(k => { k.hidden = true; });
+    });
+    return;
+  }
+  const all = () => redraws.forEach(f => f());
+  all();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', all);
+  new MutationObserver(all).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+});
+addEventListener('beforeprint', () => {
+  document.querySelectorAll('details').forEach(d => { d.open = true; });
+  document.querySelectorAll('.flip > figure').forEach(f => { f.hidden = false; });
+});
+</script>
+<script>
+/*VISUALS*/
+</script>
+</body>
+</html>

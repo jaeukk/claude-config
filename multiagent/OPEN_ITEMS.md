@@ -1,0 +1,231 @@
+# Open items — multiagent orchestration
+
+Snapshot 2026-09-30, after the Stage 2–3 cuts (`tasks/2026-09-29-cut-stage2-3/plan.md`, design-basis
+D17). This is the one place open work lives. Close an item by deleting it here; if it was a
+defect, note the fix in `_shared/learnings.md` or `_shared/design-basis.md`. The archived
+`_archive/docs/final-plan.md` is superseded by this file.
+
+## A. Gaps that shipped documented, not fixed
+
+| # | Gap | Why it matters | Documented at | What closes it |
+|---|---|---|---|---|
+| A1 | **Narrowed 2026-09-17.** `--write` lands files directly from a worker into one declared destination, so the patch route is no longer the only way code can arrive. What remains unbuilt is applying a *patch* a worker returned (the Codex case: `codex-core` is read-only and can only hand back a diff). | A Codex implementer still cannot land its work; a Claude implementer now can. | SKILL "Two gaps" | `apply-worker-patch`, unchanged in design: bind a recorded dispatch to a patch digest, require the live lease, validate every path against `write_scope`, apply those bytes. |
+| A2 | **Narrowed 2026-09-30.** A `--write --exec` producer can run commands. A CLI-dispatched Claude critic or verifier has no Bash; a Codex one can run commands, but its read-only sandbox blocks every write, temp files included, so a suite needing a temp directory errors (4 of 4 Stage 1 critic runs). Codex-authored work resolves to `claude-mid-team`, which reads tests but cannot run them. | Executed verification needs the conductor, or a native Claude verifier for Codex-authored work; a Codex conductor has no native Claude route. | SKILL "Two gaps" | Codex reviewers: built 2026-09-30 (`--review-copy`). Still open for Claude reviewers: a process-level sandbox. |
+| A3 | **Adapter built 2026-09-30** (`engine/adapters/codex_pretool.py`, registered in WSL `~/.codex/hooks.json`). It fails open: Codex runs a call when the hook is untrusted, crashes or times out, and editing the hook entry (command, matcher, timeout) voids its trust silently until the new hash is trusted. Tools that re-task an existing child (`followup_task`, `send_input`, `resume_agent`, …) are not checked; Claude's hook has the same gap with `SendMessage`. | Enforcement on Codex holds only while the hook is trusted and healthy, and only for Codex on WSL. | SKILL "Conductor host support" | After an Orca update or any edit to `~/.codex/hooks.json`, re-check the entry's trust with `codex app-server` `hooks/list` and re-trust it. |
+| A4 | `claude-frontier` pins `claude-opus-5-5`; sessions started outside `multiagent/` may use a different model. `validate-task` does not check the running model. | Contract asserts a conductor model that is false for such sessions. **User decision 2026-09-07: ignore.** Recorded so it is not rediscovered as a bug. | D12 in `_shared/design-basis.md` | Conduct from `multiagent/` (local settings pin Opus 5.5) or `/model claude-opus-5-5`. Or a check against the real session model, if the host ever exposes it. |
+| A7 | `codex-mid` and `codex-fast` pin the same model (`gpt-5.6-terra`); the tier there is effort only, while on Claude it is a different model. | "Tier" means two things across families. | — (this file) | Split when a lower-tier Codex model exists. |
+| A9 | Team-account routing covers CLI dispatch only: native subagents always run under the session login (`exclude_account_bound`). (`--host wsl` is gone and the Orca adapter archived, 2026-09-30.) | Team quota is spent only by `dispatch-worker`, `claude-worker` and the headless team driver. | `claude_pretool.py`, SKILL "Accounts" | A per-subagent account selector in Claude Code, if one ever exists. |
+| A10 | The rate-limit classifier keys on `api_error_status == 429` plus text patterns; no captured fixture of a real **team** rate-limit envelope exists yet. The Codex case is closed (2026-09-30): an exhausted Codex window prints `ERROR: You’ve hit your usage limit. …` with exit 1 and no 429, and the Codex dispatch path now records it as `rate_limited` (fixture in `test_cost_and_produce.py`). | A misclassified team failure either skips the private retry or retries a non-limit error once. | `engine/accounts.py` `classify` | Capture one real team 429 envelope per CLI version into `engine/tests` fixtures. |
+| A11 | `authorize_action` keys on role and path only; it does not consult the selected backend's `writes_mediated` / `write_mode`, and `validate_policy` only warns for a read-only backend. The registered Codex backends are safe because their dispatcher is hard-coded `--sandbox read-only`. | A future backend advertising mediated writes would pass validation without that protection; today the conductor, not the engine, keeps this true. | — (moved out of SKILL "Approval and enforcement", 2026-09-30) | Check the resolved backend's write mediation in `authorize_action` before any worker write path. |
+| A12 | The reviewer gate reads `roles_plan` as it stands, but only when nothing was observed. Observed authorship always wins and survives plan edits. The gap is **unobserved** production: a native producer run where the hook was not loaded, followed by a producer-free plan, lets a reviewer fall back to the conductor's family. | A conductor that produced natively without the hook, then drops the producer from the plan, can reach a same-family review. | — (moved out of SKILL "Authorship", 2026-09-30) | Record planned producers in the sidecar at first spawn, and read that history instead of the live plan. |
+| A13 | SKILL step 5 and `docs/task-contract.md` step 4 say to set `dispatch.current_role` in `task.yaml` before a native spawn, but during an active task the hook refuses that write: `task.yaml` is engine state and outside a normal `write_scope` (found 2026-09-30 while fixing the bench8 conductor defects). | A conductor following the text is refused, and may try workarounds, unless `target_repo`/`write_scope` happen to cover the task folder. | SKILL.md "Conductor procedure" step 5; `docs/task-contract.md` step 4 | An engine command that sets `dispatch.current_role` under the lease (like `_rewrite_contract_status`), or document setting it before `.active-task` is written. |
+| A14 | `release-lease` reads `tasks/.active-task` and then removes it without a lock shared with other tasks: if another task rewrites the pointer between the read and the removal, that task's pointer is removed (round-1 review, 2026-09-30; rejected as a contrived race). | Only with two conductors active in one installation at once, which the single pointer already does not support. | `_clear_active_pointer` | An installation-wide pointer lock taken by every pointer writer, if concurrent tasks per installation are ever supported. |
+
+## A-write. Known limitations of `--write`, recorded rather than fixed
+
+Named by the 2026-09-18 audit (three rounds, `codex-ceiling`) as limitations rather than blockers.
+Reviews in `tasks/2026-09-18-post-audit/workers/critic/`.
+
+- **`--assume-stopped` is a human judgment.** The reservation carries no worker PID and the
+  worker runs under `subprocess.run`, so the engine has no evidence a particular worker or an
+  orphaned child has stopped. Lease expiry does not establish it. Closing this means real process
+  identity tracking, which is a bigger thing than this patch.
+- **An interrupted *directory* replacement recovers by hand.** The workspace holding the
+  post-dispatch contents and the staged baseline is preserved and named in the refusal; putting it
+  back is manual.
+- **Nothing under `~/.claude` can be a `--write` destination.** The CLI gates those paths as
+  sensitive and asks a human, so a worker cannot edit this installation. Protective, but it means
+  the engine cannot be maintained through its own write path.
+- **`--exec` widens what a worker can write beyond the change set.** Bash can write outside the
+  destination, and those writes are neither refused nor recorded; the brief is the only
+  containment. This is the same trade the headless team driver already makes.
+- **TODO: a session-start preflight** that proves, through the real hook path, that the hook is
+  loaded before any native production starts. An unloaded hook records no native producer, which
+  later blocks or misdirects reviewer independence, and static inspection of settings cannot
+  prove it loaded.
+
+## A-clone. TODO: no direct writes into `~/.claude` or `~/.agents`; work in a clone, merge by command
+
+Decided 2026-09-18 as a todo. Since 2026-09-30 the clone workflow is the documented rule
+(`AGENTS.md`); the enforcement layer and `scripts/merge-config.sh` below are still unbuilt. Today a dispatched worker cannot write under
+`~/.claude` (the CLI's sensitive-path gate), but a conductor or native subagent can, under the
+session's own permissions -- which is how every change this week reached the live config.
+
+- **Enforcement layer.** A user-level permission deny that every session and subagent inherits,
+  scoped to the *tracked* config trees only (`agents/`, `commands/`, `hooks/`, `multiagent/`,
+  `scripts/`, `shell/`, `skills/`, `CLAUDE.md`, `README.md`, `settings*.json`) plus `~/.agents/**`
+  and `~/.codex/**`. Never `projects/` (memory), `cache/`, `backups/`, `.credentials.json`: deny
+  outranks allow, so a blanket rule cannot be carved back out. The user applies the rule; the
+  engine mirrors it in `authorize_action` for sessions that load the hook.
+- **Workflow.** A second checkout of `claude-config` is where conductors and workers edit, test
+  and commit -- `multiagent/engine/` included, which retires the "engine cannot maintain itself"
+  limitation. `scripts/merge-config.sh` fetches the branch, `git merge --ff-only` into `~/.claude`,
+  redeploys `~/.multiagent`. Bash, not Edit, by design: the only way into the live tree is a
+  fast-forward of something already committed and tested elsewhere.
+- **Costs.** Two checkouts to keep in sync; a hotfix made by hand in `~/.claude` must be committed
+  before the next merge or `--ff-only` refuses (correct, and a new habit); small doc fixes become
+  clone → commit → merge → deploy.
+- **Migration.** Move `temp/2026-09-18-worker-write` to the clone and continue there.
+
+## A-producer. TODO: the account carrying a task as a contract setting; Codex as a producer
+
+Proposed 2026-10-01 (session `orca-setting`, with a blindspot pass), not built. **Motivation:
+continuity.** When one account's window is spent, the conductor should steer producing work to
+another account or family by editing the contract, not by changing terminals. Today the family is
+chosen per call (`dispatch-worker --required-family`), the implementer is team-first from every
+terminal (D15), and a Codex producer can land nothing but `--out` text or a patch (A1).
+
+- **Field.** `producer_family` (`claude` | `codex`): producing roles resolve against it unless
+  `--required-family` overrides; `validate-task` requires `author_family` to match it when review
+  is planned; the hook refuses a native producer of the other family (in a Claude terminal with
+  `codex` set, an `Agent` spawn is a Claude producer). **Default is an open decision:** the
+  terminal's family (as proposed) inverts team-first on Codex terminals; team-first on every
+  terminal with the field as the override keeps the quota goal. Decide whether `bulk_worker` and
+  `runner`, which have their own pools, follow the field.
+- **Landing path for Codex producers: not a repository copy.** `--review-copy` refuses targets over
+  500 MB (`REVIEW_COPY_MAX_BYTES`) and the vault is 4.6 GB in 12,344 files, so a copy would refuse
+  the main producing workload. Use Codex's sandbox roots instead: an empty scratch cwd under
+  `workspace-write` plus `--add-dir <destination>`, so only the one destination is writable, and
+  reuse `--write`'s baseline, change set and restore unchanged (the 2026-09-27 lithography task
+  already ran Codex with `--add-dir` for a writable task folder). **Measure first**, as the
+  Claude `--restricted` flags were measured: a call asked to write inside and outside the added
+  directory, confirming the outside write is refused, with `/tmp` excluded as `--review-copy` does.
+- **Codex quota is the review pool and the engine cannot see it.** `accounts.probe` runs only for
+  backends with a `config_dir`, which Codex backends lack, and Codex's window is seven days. The
+  2026-09-23 benchmark's critic stayed blocked until 09-28 after Codex ran out. Port the Codex
+  reading `scripts/usage-watch.py` already makes into `accounts.probe`, and keep a review reserve
+  (say 30%) that producing work may not cross.
+- **Switch semantics.** Authorship accumulates, so one artifact produced by both families has no
+  eligible reviewer and the engine refuses a critic as mixed. Allow the switch at artifact
+  boundaries (a new note, not inside one: in the book-summarizer A/B the Codex arm silently
+  regularized six equation bodies), and make a task with a review budget decide at switch time
+  (review before switching, or drop the budget). One test for the post-switch behavior.
+- **Also:** the conductor's own turns always bill the terminal's login, so start conductors on the
+  account to keep; writes are never retried on a rate limit (by design), so document the recovery
+  sequence inspect the change set, `restore-write`, switch, re-dispatch; Codex workers do not get
+  `WORKER_BASELINE_PROMPT` (Claude `--append-system-prompt` only), so prepend it to Codex prompts.
+- **Order.** After the cut program: Stage 3 is still reshaping the engine this field would hook into.
+
+## A-goal. TODO: `/goal` as the loop for single-session work, outside the audit budget
+
+Proposed 2026-10-04 (session in `30_Codes/modules`), not built; deferred for lack of time.
+**Motivation:** the default is a single session (SKILL "Scope"), which matched the engine on
+test-oracle tasks at a fraction of the cost (2026-09-29/30). `/goal` is the host's own loop for
+that case: it keeps one session working until a condition holds, so the engine stays reserved for
+(a)–(c).
+
+- **What it is** (code.claude.com/docs/en/goal, read 2026-10-04): a session-scoped prompt-based
+  Stop hook. After each turn the small fast model (Haiku unless `ANTHROPIC_DEFAULT_HAIKU_MODEL` is
+  set) judges the condition from the transcript alone, calling no tools: not met, met, or
+  impossible. There is no turn or cost cap; the condition (up to 4,000 characters) must carry one.
+  It runs under `claude -p` to completion in one invocation, printing nothing until the end
+  without `--output-format stream-json --verbose`. Unavailable under `disableAllHooks` or
+  `allowManagedHooksOnly`.
+- **Codex's `/goal` differs.** `~/.codex/goals_1.sqlite` keeps a native `token_budget` and the
+  statuses `usage_limited` and `budget_limited`. A Stop hook's `continue:false` is ignored during
+  a Codex goal (multi-agent-starter design-basis D10, measured), so only an external
+  `thread/goal/clear` stops one.
+- **Candidate shape, cheapest first.**
+  1. SKILL "Scope": for work with a test oracle, run the single session under `/goal`, with a
+     condition that has (i) an end state shown by command output; (ii) constraints that close the
+     cheap path to it (the checker is not edited, no cache or checkpoint is reused, a file scope);
+     (iii) a turn cap, plus an acceptable outcome for a legitimate blocker ("record it as
+     blocked"), so a missing dependency neither churns nor reads as impossible.
+  2. A goal-condition template in `_templates/` with those three parts.
+  3. Only if 1–2 see use: a `produce` option that runs a team producer as `claude -p "/goal …"`.
+     Check first: the dispatch timeout against a multi-turn run, whether `total_cost_usd` covers
+     the whole loop, and permission prompts under `-p`.
+- **Rules to state with it.** The goal evaluator is not a review (same vendor, small model,
+  transcript only): it spends no `audit_cycles` and never stands in for a critic or verifier.
+  Never put a review inside a goal condition ("until the Codex review is clean"): that rebuilds
+  the open-ended audit loop the review discipline exists to stop, and once the budget is spent
+  `dispatch-worker` refuses the critic, so the goal churns until its turn cap. Sequence instead:
+  goal to the oracle-verified state, then at most one `review` call.
+- **Open decisions.** Whether 3 is worth building. Whether unattended goals should require the
+  `coach --hook` usage guard (D10; on Claude its `continue:false` stops a goal), which is not
+  installed on this machine as of 2026-10-04.
+- **Order.** 1 is a doc change and can land any time; 2–3 after the cut program, like A-producer.
+
+## A-cut. Left uncovered by the 2026-09-30 cuts
+
+- **Nothing forces review of conductor code edits.** The `direct_code_files` cap is gone;
+  `audit_cycles` is the only review lever, and it is opt-in.
+- **`--exec` Bash writes are outside the change set** (see A-write).
+- **The Codex critic still cannot execute suites that need temp files** (A2).
+
+## Archived with the Orca adapter
+
+The adapter moved to `_archive/engine/orca_worker_start.py` on 2026-09-30 (one development run,
+no tests, its own authorship store). A5, A6 and A8 no longer apply to anything live. Reviving Orca
+transport means restoring the adapter and writing item B's tests first.
+
+| # | Gap | Why it matters | Documented at | What closes it |
+|---|---|---|---|---|
+| A5 | Orca residual: a runtime-side mutation can complete after its client died; Orca gives no way to query a request whose id was never received. `abandoned` can then drop an attempt whose dispatch appears later. | The one path by which an adapter attempt loses its reservation with a worker alive. Bounded by the 600 s launch cap and the unchanged-baseline check, not eliminated. | `engine/adapters/orca_worker_start.py` docstring, SKILL | Orca feature: client-supplied idempotency key on `worker-start`, or a "pending mutations for task" query. Feature request, not local work. |
+| A6 | Engine sidecar (`tasks/<contract>/observed-author.json`) and Orca run record (`tasks/orca/<run_id>/`) are separate authorship stores. Crossing transports needs a hand-written bridge. | Reviewing an Orca-produced artifact through the engine path required recording the author manually (done once, 2026-09-08). | SKILL "Authorship is a separate state store", learnings 2026-09-08 #4 | A mapping engine `task_id` ↔ Orca `run_id` that both dispatchers consult; or one store keyed by both. |
+| A8 | The Orca adapter locks with `fcntl.flock`: Linux and WSL only. | Native-Windows `orca` cannot run it. | adapter docstring | `msvcrt.locking` branch or `portalocker`, when native Windows is actually a target. |
+
+### B. Missing regression test for the Orca adapter
+
+Seven review rounds hardened the adapter (now `_archive/engine/orca_worker_start.py`); every case was verified
+in-process during the session and none of it lives in the repo. Add
+`engine/tests/test_orca_worker_start.py`, standard library only, mocking `subprocess.run`,
+`invoke_start`, `run_id_for_task`, `conductor_host`, `current_dispatch`, `dispatch_status`, and
+`run_lock` as needed, with a temp `--root` holding a copy of `policy/`. The cases to cover, in
+the groups they were found in:
+
+- **Receipt trichotomy** (`receipt_metadata`): accepted; Orca refusal for a bad flag and for a
+  non-ready task (both `ok:false` + `error.code`) → rejected; `ok:false` with no error object,
+  error as string, error without code, `ok:true` without `dispatchId`, bad `dispatchId`,
+  garbage, top-level array → lost (held). Nested decoy `dispatchId` must not win.
+- **`current_dispatch` strictness**: `dispatch: null` → None; dict with SAFE_ID `id` → id;
+  `ok:true` without result, result without `dispatch` key, dispatch `[]`, dispatch without id,
+  refusal, garbage, top-level `[]`/`null`/`42`/`"str"` → `StateError`; a hanging CLI →
+  `StateError` within the query timeout; an unreachable CLI raises, never returns None.
+- **Settlement predicate**, for both unrecorded states (`starting`, `outcome_unknown`) ×
+  {review: `reviewed`; producer: `succeeded`, `retained-output`, `no-output`}: the baseline
+  dispatch is refused ("already existed"); a dispatch that is not Orca's current one is refused
+  ("not the task's current dispatch") — including the two-generation stale id; the current
+  dispatch ≠ baseline reconciles with the right family; current `None` with an id offered is
+  refused. `started` attempts: own dispatch settles, any other is refused.
+- **Abandon**: old + unchanged baseline → released, settled author kept (family survives); young
+  → refused; a new dispatch appeared → refused; a `started` attempt → refused; without
+  `--confirm-no-output` → refused; first-ever producer with no settled author → record removed.
+- **Reservation and launch**: the baseline snapshot is taken with the lock held;
+  `prior_dispatch_id` and `reserved_at` are recorded; a rejected fresh launch releases the
+  reservation; a rejected retry (`--resume-start`) keeps the original attempt; a launch
+  exceeding the cap → `outcome_unknown`, reservation held; mutual exclusion refuses a second
+  tracked launch; `--dry-run` refuses while an attempt is active and previews when the run is
+  free.
+- **Locks**: a second locker blocks while the holder lives; acquires immediately after the
+  holder is SIGKILLed with no stale file; `settle()` performs both Orca reads with the lock
+  held; abandon performs only the current-dispatch read.
+- **Record validation**: `reserved_at` required numeric; `prior_dispatch_id` string or null; a
+  stray `previous` key ignored; unsupported schema version, corrupt JSON, unknown family →
+  `UnreadableAuthorRecord`.
+- **CLI surface**: `--role conductor` refused; reserved passthrough (`--model`, `--terminal`)
+  refused; `--run` mismatch refused; unknown task refused; `--conductor-host` contradicting
+  attestation refused; exactly one of `--role`/`--settle`/`--resume-start`; settle without
+  `--dispatch-id` refused; `--settle` with `--dry-run` writes nothing.
+
+## W. Native Windows not verified (2026-09-30)
+
+The lease lock closes its descriptor before deleting `lease.lock` on native Windows, and compares file identity
+(`st_dev`, `st_ino`) from `os.fstat` and `os.stat`. Both are reasoned, and tested only by simulating `os.name` on
+POSIX (`test_the_windows_release_order_closes_before_deleting`); no native Windows host ran them. To close: on
+native Windows, acquire and re-acquire a lease, exit a `_lease_lock` body with an exception, and check that the
+descriptor is closed and `lease.lock` removed. Recorded as non-blocking by the scoped audit round 13
+(`tasks/2026-09-30-multiagent-150-audit/`).
+
+## W2. `--review-copy` on native Windows not verified (2026-09-30)
+
+The Codex sandbox flags (`workspace-write`, `sandbox_workspace_write.exclude_slash_tmp`), `TMPDIR`
+redirection, `copytree(symlinks=True)` and the cleanup were run on WSL only. To close: on native
+Windows, run a Codex verifier with `--review-copy` on a small repository and check the tests run in the
+copy, the original is not writable, and the engine's folder is removed.
+
+## C. Housekeeping
+
+- Whether anything on the Windows side still reads `~/.multiagent` (redeployed 2026-09-30 with
+  1.4.0) is unverified; retiring `global` mode is a later decision.
+- The System A files listed in `AGENTS.md` are legacy, kept pending their own retirement decision.

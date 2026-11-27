@@ -1,6 +1,6 @@
 ---
 name: runner
-description: Cheap chore runner (Haiku 4.5) for small unambiguous errands — run a shell command, read a log or file, grep/glob for files or symbols, collect listings or metadata. Read-only tools; cannot edit files. Use for mechanical lookups and command execution, never for anything requiring judgment or code changes.
+description: Cheap chore runner (Haiku 5.5) for small unambiguous errands — run a shell command, read a log or file, grep/glob for files or symbols, collect listings or metadata. Read-only tools; cannot edit files. Use for mechanical lookups and command execution, never for anything requiring judgment or code changes.
 tools: Bash, Read, Grep, Glob
 model: haiku
 effort: low

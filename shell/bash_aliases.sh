@@ -298,7 +298,8 @@ backupVault() {
 }
 
 _rsyncRun() {
-    local -a opts=(-avul --no-owner --no-group --no-perms --info=progress2)
+    # --no-links: the exFAT backup drive cannot store symlinks.
+    local -a opts=(-avul --no-links --no-owner --no-group --no-perms --info=progress2)
 
     if [ -f "${HOME}/.rsync-exclude" ]; then
         opts+=("--exclude-from=${HOME}/.rsync-exclude")

@@ -1,0 +1,245 @@
+---
+name: multiagent
+description: Conductor mode for Claude Code or Codex. The default is a single session; this skill adds the multiagent engine (task contracts, leases, independent review within an audit budget) only for cross-vendor review of consequential or untestable work, team-account routing, and contained writes or publication with a record. Use when invoked as /multiagent, when the user asks for multiagent conductor mode or a cross-vendor review, or when Claude and Codex should collaborate without recursively spawning conductors. Supervising Orca workers is Orca's `orchestration` skill, not this one.
+---
+
+# Multiagent
+
+## Scope: a single session first
+
+The default is **one producer and no review loop**: this session, a native subagent (Claude
+`Agent`, Codex `spawn_agent`; no contract), or one team-account worker with Bash
+(`dispatch-worker --write <dest> --exec`). Measured 2026-09-29/30 on two test-oracle code tasks: the
+multiagent arm scored within noise of a single session at 2–3.7× its cost, mostly because its
+implementer lacked Bash; one critic → fix round changed the score in 1 of 7 runs. Which account
+and model does the work is a separate choice: see "Accounts" and "Native spawns".
+
+Reach for the engine only for:
+
+- **(a) cross-vendor review** of consequential work, or of work with no test oracle
+  (`audit_cycles` ≥ 1);
+- **(b) team-account routing**: `dispatch-worker` is how a producer bills the team login with a
+  record;
+- **(c) contained writes or publication with a record**: `--write` (baseline, change set, restore)
+  and `--out`.
+
+With none of these planned, create no contract, lease or `.active-task`: do the work in this
+session, even when the request names a task ID. The ceremony costs turns (bench8: 5–12 extra tool
+calls per run at audit 0).
+
+**One review round of work this session produced** (or its family's team workers did) is one call,
+in the foreground (run from `multiagent/`, with `E=engine/policy_engine.py`):
+
+    python3 $E review --conductor-host claude-code --target-repo <abs> --brief <file> \
+        --out <findings.md> [--review-copy]        # a Codex conductor passes --conductor-host codex
+
+It writes a contract (one critic, `audit_cycles` 1, the author is this session's family), takes the
+lease, runs a reviewer of the other family, publishes its findings to `--out`, and releases the
+lease. Put the agreed review definitions (see "Review discipline") in the brief. Use the full
+procedure for work another family authored, several rounds on one contract, or a native reviewer.
+
+A PreToolUse hook enforces the contract on Claude Code (sessions launched from `multiagent/`) and
+on Codex (WSL `~/.codex`; sessions whose working directory is inside `multiagent/`), only while a
+task is active.
+Elsewhere the contract is validated and kept, not enforced: say **policy-validated**.
+
+## Load the local authority
+
+Policy is `multiagent/policy/{roles,bindings,backends,routing,approvals}.yaml`. The
+engine reads it from its own tree (`--root`, default: the installation holding
+`policy_engine.py`), never from `~/.multiagent`. Machine-readable policy wins over prose. Fix it in
+a clone of `~/.claude`, never in a deployed copy (`multiagent/AGENTS.md`). Contract fields and
+lifecycle: `multiagent/docs/task-contract.md`.
+
+## Conductor procedure
+
+1. `python3 $E validate-policy`; draft `tasks/<id>/task.yaml` from `_templates/task.yaml`;
+   `python3 $E validate-task --task tasks/<id>/task.yaml`. Neither calls the other: the first
+   checks the installation, the second whether this host may conduct and dispatch every planned
+   role. The template and `docs/task-contract.md` are the reference: do not open other tasks'
+   folders for examples, since they belong to other work and may hold material this task must not
+   see. A task ID is lowercase (`[a-z0-9][a-z0-9._-]*`).
+2. The contract names an absolute `target_repo`, `write_scope`, `roles_plan`, `audit_cycles`,
+   `author_family` when review is planned, and `conductor.lease_owner`.
+3. `python3 $E acquire-lease --task-dir tasks/<id> --owner <lease_owner>`. One conductor per
+   task. Options cannot be abbreviated, and `acquire-lease` and `append-event` refuse a folder with
+   no `task.yaml`.
+4. For the hook to enforce the task, put its ID in `tasks/.active-task`. If a native spawn is
+   planned, set `dispatch.current_role` to its role before this step: once the task is active
+   the hook refuses writes to `task.yaml`. To change the native role later, `release-lease`
+   (it clears the pointer), edit, then acquire the lease and write the pointer again.
+5. `python3 $E dispatch-worker --task tasks/<id>/task.yaml --role <role> --brief <file>`, plus
+   `--write` or `--out` (`references/workers.md`). `--dry-run` prints the resolved backend, account and
+   `enforcement` without launching; for `--write`, read `write.enforcement`, not the
+   base argv it shows. The hook authorizes a native spawn against `dispatch.current_role`
+   (step 4). Workers do not
+   spawn workers, widen scope, or synthesize the final answer. Never end your turn while a dispatch
+   you started is still running: run `dispatch-worker` in the foreground, or wait for a
+   backgrounded one to finish before you answer. A headless session (`claude -p`, `codex exec`)
+   ends with its turn and kills the worker; the review is lost and its usage goes unrecorded.
+6. Critic and verifier differ in family from the artifact's author (`references/authorship.md`).
+7. Retry only transport, timeout and rate-limit failures; surface the rest; never drop a shard
+   silently. Synthesize once, then `release-lease`: it also removes `tasks/.active-task` when that
+   names this task, which you cannot do yourself while the hook enforces it. Then mark the task
+   complete.
+
+**Audit budget.** `audit_cycles` is how many critic rounds the task may run. Absent means 0, and
+0 means no audit: the default. Set it from the user's instruction ("up to three audit cycles" is
+3), never above it; raising it is the user's call. A round is one critic dispatch whose attempt
+succeeded; a failed or rate-limited attempt spends nothing. `dispatch-worker` refuses a critic,
+dry runs included, while the budget is 0 or spent, and `validate-task` rejects a planned critic
+with a zero budget. The hook refuses a native critic at 0 but cannot count native rounds, so keep
+a native loop within budget yourself. The verifier is not budgeted. Nothing forces review of
+conductor code edits; set `audit_cycles` when they need it.
+
+**Review discipline.** Before the first critic round, agree four things with the user and put them
+in every critic brief: the threat model and scope, with the failure classes accepted up front; what
+blocks landing (a realistic trigger, such as ordinary use, a crash, one interrupt or a supported
+platform's normal behavior, plus its impact; anything else goes to the target project's open-items
+list, `OPEN_ITEMS.md` for multiagent); the round plan (round 1 reviews the whole change, later
+rounds only the fix diff) and budget; and the stop rule (by default, land after a clean round if the
+user agreed to that; stop and report when the budget is spent or every blocking finding is in code
+written that same round). Self-review the diff before each critic round (path ownership for every
+create, replace and delete; every exit path, interrupts included; Windows vs POSIX; mutation checks
+on new tests); it is not a critic dispatch and spends no `audit_cycles`. Triage each finding as fix,
+defer or reject with a reason, and prefer deleting mechanism to adding it. A round that leaves
+nothing to fix (no findings, or every one deferred or rejected) ends there: dispatch no fixer.
+
+## Tiers and bindings
+
+Backends are named `<family>-<tier>`. A tier is a routing role, not an effort level.
+
+| Tier | Role | Claude | Codex | Native agy model | Team backend |
+|---|---|---|---|---|---|
+| ceiling | critic | Fable 5.2, high | Astra, medium | `gemini-4-carbon-high` | — |
+| frontier | conductor | Opus 5.5, high (session assertion) | Astra, medium | `gemini-4-neon-high` | — |
+| core | implementer | Opus 5.5, high | GPT-6.1 Sol, high | `gemini-4-neon-high` | `claude-core-team` |
+| mid | verifier | Sonnet 5.5, medium | GPT-6.1 Terra, medium | `gemini-4-hydrogen-medium` | `claude-mid-team` |
+| fast | bulk_worker, runner | Haiku 5.5, low | GPT-6.1 Terra, low | `gemini-4-hydrogen-low` | `claude-fast-team` |
+
+Native agy workflows read the exact IDs from `native_tiers.agy.models` in
+`multiagent/policy/backends.yaml`. Select the frontier model when starting an agy conductor
+and pass the assigned model ID to `invoke_subagent` for a child. All five assignments share the
+Gemini family for reviewer independence. The policy engine dispatches through its registered
+Claude Code and Codex adapters.
+
+- `implementer`: `claude-core-team`, `claude-core`, `codex-core`, all at high effort (the
+  validator enforces it). A native spawn skips account-bound candidates, so it gets `claude-core`.
+- `critic`: the other family's ceiling. `verifier`: `codex-mid` for Claude-authored work;
+  `claude-mid-team`, then `claude-mid`, for Codex-authored work.
+- `bulk_worker`: high-volume, low-judgment production (extraction, reformatting, tagging,
+  per-item summaries a schema can check). Its output is the deliverable; a shard that needs
+  judgment is `implementer` work, however many shards there are. Order: `claude-fast-team`,
+  `codex-fast`, `claude-fast`, so exhausted team quota goes to Codex before private; the validator
+  requires both families. At volume, run the shards as native `model: "haiku"` subagents in a
+  session started with `claude-team` ("Fan-outs" under Accounts); one `dispatch-worker` call per
+  shard is for single recorded jobs.
+- `runner`: information for the conductor (a search, a command result, metadata), not a
+  deliverable. `codex-fast` first, because a dispatched Codex runner can run commands (read-only
+  sandbox) and a dispatched Claude one gets only `Read,Grep,Glob`; then `claude-fast-team`, then
+  `claude-fast`. A native `runner` spawn ignores this order (design-basis D19).
+
+"First, then" is preference, not failover: `resolve_binding` returns the first compatible
+candidate without a health check, and a failed worker is reported, not retried on the next one.
+The one exception is the team-quota route under "Accounts": a rate-limited team run falls back
+once, never in write mode. During a Codex outage, pass `--required-family claude`.
+
+`dispatch-worker` transmits effort on every CLI path. A native Claude spawn takes model and effort from its agent frontmatter,
+not from the binding; the hook checks only that a compatible binding exists. Keep the frontmatter
+in sync, and never report the resolved backend as the model that ran unless the frontmatter says
+so. The table names model families; the exact IDs each backend runs are pinned in
+`policy/backends.yaml` (Codex today: `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`), and a
+conductor's own model is whatever its session runs. Moving a tier to a newer model is a routing
+decision with recorded evidence (`_shared/capability-profile.md`;
+`references/model-refresh-2026-09-27.md`), not something to infer from a vendor catalog.
+
+**Native spawns: choose the type and model by tier.** A `general-purpose` subagent with no
+`model` runs at the session's model on the session's login: private, unless the session was
+started with `claude-team` (see "Fan-outs" under Accounts). Use `Explore` or
+`runner` (Haiku, no edit tools) for lookups and searches; pass `model: "haiku"` for mechanical shards
+and `model: "sonnet"` for routine production; keep the session's model only for judgment-heavy
+work. On Codex, set `model` and `reasoning_effort` on `spawn_agent` (with `fork_turns: "none"`).
+
+## Accounts
+
+Two Claude logins: **private** (`~/.claude`, the default for interactive sessions, with Fable)
+and **team** (`~/.claude-team`), which must never use Fable (the owner's rule). The account is
+fixed per process:
+
+- A native subagent always bills the session's login; no binding changes that.
+- The routes to team are `dispatch-worker` (it sets `CLAUDE_CONFIG_DIR` for the `*-team`
+  backends), the `claude-worker` CLI (`~/.local/bin/claude-worker`, no contract or record), and
+  the headless team driver (`references/workers.md`).
+- Quota routing is not a health check. Before selecting a team backend the engine probes that
+  account: `available` routes there, `exhausted` (a window at or past 95%) falls to the role's
+  next candidate (private; Codex for `bulk_worker`), and `unknown` (an unreadable or rate-limited
+  probe) routes to team anyway. A team run that comes back rate-limited gets one retry on that
+  next candidate, never in write mode; nothing else is retried.
+  `claude-worker` routes the same way.
+- **When to push a job to team.** Hand it to one team producer when it is self-contained (the
+  brief and readable files suffice; one destination), substantial (minutes of work, not a quick
+  edit), and needs neither this conversation's context nor Fable. Keep it here when it is short,
+  iterates with the user, or depends on what this session has loaded: moving it costs a brief and a
+  cold start. One call runs the whole route:
+
+      python3 $E produce --conductor-host claude-code --target-repo <abs> --brief <file> \
+          --write <dest> [--exec]          # or --out <path>; a Codex conductor passes --conductor-host codex
+
+  It writes a contract (one planned producer, `audit_cycles` 0) under `tasks/<id>`, takes and
+  releases the lease, dispatches, and prints the account, model and cost on stderr. `--exec`
+  adds Bash for code with a test oracle; its writes are not confined to `<dest>` and are outside
+  the change set and `restore-write` (`references/workers.md`). Use the full procedure for review,
+  several producers, or a contract you need to edit.
+- **Fan-outs: start the session on team.** For many self-contained jobs (wiki page builds,
+  literature searches, raw-builds; about ten or more), start the session with `claude-team`. Its
+  native subagents then bill team with no engine call, and the engine still reaches the private
+  and Codex backends, because it sets `CLAUDE_CONFIG_DIR` per backend. A running session cannot switch accounts: when a fan-out appears
+  mid-session, say so and offer the relaunch, or move a few jobs with `produce`. A team session
+  passes `CLAUDE_CONFIG_DIR=~/.claude-team` to every shell command, so a private call from it
+  must set it explicitly, e.g. a Fable consult:
+  `CLAUDE_CONFIG_DIR="$HOME/.claude" claude --model claude-fable-5-2 --tools Read,Grep,Glob -p`.
+  Nothing enforces the no-Fable rule on team, so never spawn `fable` from a team session; use
+  the route above. Unattended pipelines launch producers with
+  `CLAUDE_CONFIG_DIR="$HOME/.claude-team"` and no private fallback, as the vault's night runner
+  does.
+- **Cost records.** Every `worker_attempt` event carries account, model, outcome, and what the CLI
+  reported (Claude `usage` and `total_cost_usd`, Codex `tokens_used`). `python3 $E cost-report
+  [--tasks-root <dir>]... [--since <date>]` sums them by account and model; `uncosted` counts
+  attempts with no cost data (recorded before 1.4.0, or by a driver that passed none). Such records are accounting only and never count as an audit round. A headless driver
+  records each run with `python3 $E
+  record-attempt --task-dir … --event '<json>'` (`account`, `model`, `classification` required).
+  Native subagents leave no record.
+
+## Reference (read when needed)
+
+- `references/workers.md`: `--out` publication, `--write` and `--exec`, the headless team driver,
+  and what a dispatched worker inherits. Read it before dispatching a worker that publishes text or
+  writes files.
+- `references/authorship.md`: how a critic or verifier is cleared against the artifact's authors.
+  Read it when a reviewer is refused, or when more than one family produced the artifact.
+- `references/hosts.md`: Claude Code and Codex spawn limits, which hosts may conduct and how each
+  is enforced, and what cannot land or execute (`--review-copy`). Read it when conducting from
+  Codex, or when a reviewer must run tests.
+- `references/model-refresh-2026-09-27.md`: the model evidence behind the tier table.
+
+## Approval and enforcement
+
+The conductor may approve bounded worker calls and transient retries inside the contract. Get
+explicit user approval, recorded under `approvals.user`, for conductor handoff, scope expansion,
+destructive actions, external side effects, credentials, or policy overrides.
+
+The hook is wired in `multiagent/.claude/settings.json` (matcher
+`Edit|Write|NotebookEdit|Bash|Task|Agent|mcp__codex__.*`). It loads only in a session launched from
+`multiagent/`, acts only while `tasks/.active-task` exists, and fails closed. It checks writes
+against `write_scope`, denies shell mutation, requires approval for destructive commands, and checks
+native spawns (planned role, family, audit budget). It gates no worker process, and
+engine-mediated writes never reach it; the engine authorizes those itself.
+
+During an active task, write with file tools, not shell redirection or bulk shell commands: inside
+`write_scope`, or ordinary files in the task's own folder (briefs, notes, results). Engine state
+there (the contract, lease, events, authorship, state trees and dot-files) stays refused.
+`rm`, `mv`, `cp`, `tee`, `sed -i` and redirects into files are refused. `2>&1`, `>/dev/null` and a
+quoted `>` are fine. `release-lease` clears `.active-task`; edit `task.yaml` after that. Where
+no hook applies (a session outside `multiagent/`, or a Codex hook that is untrusted: it fails
+open, `references/hosts.md`), call `authorize` before a write, keep every mutation inside
+`write_scope`, and say policy-validated.

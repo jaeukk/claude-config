@@ -11,14 +11,18 @@
 !/.gitignore
 !/README.md
 !/CLAUDE.md
+!/research-conventions.md
 !/settings.base.json
 !/settings.machine.wsl.json
 !/settings.machine.windows.json
 !/settings.machine.linux.json
+!/settings.team.json
 !/scripts
 !/.gitattributes
 !/roo-to-claude.md
 !/skills
+# Anthropic skills synced by Claude itself (a machine-local cache, not config)
+/skills/synced/
 !/agents
 !/commands
 !/hooks
@@ -40,3 +44,9 @@ scripts/__pycache__/
 skills/find-skills
 skills/orca-cli
 skills/orchestration-orca
+
+# Python bytecode anywhere in re-included trees
+__pycache__/
+
+# Trash from skill managers (deleted skills)
+.trash/

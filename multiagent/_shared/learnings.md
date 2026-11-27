@@ -116,3 +116,140 @@
 **근거**: codex-critic(Sol, high) 3라운드 감사 — 9건 → 7건 → 6건, 전부 수용. Claude worker의 도구면은
 실측 확인(도구 나열 요청에 "Glob, Grep, Read"만 응답 = Bash·MCP 제거됨). agy 경로는 쿼터 소진으로 미검증.
 **worker**: orchestrator(설계·구현·검증), codex-critic=codex-high(3라운드 독립 감사)
+
+## [2026-09-08] [orca-adapter-authorship]
+**교훈 1 — 같은 결함이 라운드마다 다시 나오면, 인터리빙을 또 막지 말고 술어를 다시 유도하라.**
+4·5·6라운드는 한 버그를 세 번 잡은 것이다: 잠금 밖 스냅샷(TOCTOU) → `starting`만 막고
+`outcome_unknown`은 안 막음 → 결국 "baseline과 **다르면** 이 attempt의 것"이라는 술어 자체가
+틀렸음(baseline보다 **오래된** dispatch도 다르다). 앞의 두 수정은 기계적(잠금 안으로 옮기기,
+상태 하나 추가)이라 각각 사례 하나만 닫았고, 마지막 수정만 **의미적**이었다 — "Orca가 지금
+current라고 보고하는 dispatch(같은 잠금 아래에서 읽음)이면서 baseline과 다른 것"만 이 attempt의
+것. 그제서야 클래스가 닫혔다. 검토자는 7라운드에서 Orca 번들 소스의 SQL(`ORDER BY rowid DESC
+LIMIT 1`)까지 열어 "current"의 의미를 확정하고 SHIP을 냈다. → 리뷰 루프가 수렴하지 않으면
+타이밍이 아니라 **불변식의 정의**를 의심하라.
+
+**교훈 2 — 수정을 쓴 쪽이 저자다. 자기 발견을 자기가 고치면 미검토 산출물이 된다.**
+Codex가 2라운드 감사(11건)를 내고 스스로 전부 구현했다(150→627줄). 그 결과물은 아무도 보지
+않은 상태였고, 독립성 규칙대로 Claude ceiling(fable-5-1 high)에 보내자 9건이 나왔다 — 그중
+"성공 경로가 한 번도 실행된 적 없다"(receipt 키 이름·dispatch-show 형태·terminal 상태가 전부
+추측)와 "거부된 launch가 run을 영구 잠금"(P1)이 포함. 저자 family는 **마지막으로 파일을 쓴
+손**이며(last producer wins), 그게 검토자를 결정한다. 이번 세션에서 이 규칙을 엔진(sidecar)과
+Orca 어댑터(run별 record) 양쪽에 코드로 박았다.
+
+**교훈 3 — 추측 하나당 실측 하나. 한 번의 라이브 프로브가 한 라운드의 논쟁보다 싸다.**
+실측으로 확정한 것: worker-start receipt는 `result.dispatchId`/`requestId`(최상위); 거부
+envelope는 `ok:false` + `error:{code,message,data}`; dispatch 없는 task의 dispatch-show는
+`ok:true, dispatch:null`; receipt `timeoutMs=60000`. 각각 검토자의 가정 하나를 대체했고, 그
+전까지는 "동작할 것"이었지 "동작한다"가 아니었다. 모델 활동도 마찬가지 — Codex의 자기보고("아마
+gpt-6-astra")가 아니라 Orca receipt의 `requested==effective`가 근거다.
+
+**교훈 4 — 전송층을 바꾸면 저자 증거는 따라오지 않는다.**
+엔진 계약(task.yaml 옆 sidecar)과 Orca run(`tasks/orca/<run_id>/`)은 **별도 저장소**다.
+Codex가 Orca에서 만든 산출물을 엔진 경로로 검토하려니 conductor-family fallback이 "Claude가
+썼다"고 판정해 거부했다 — 정확한 동작이지만 진실은 아니었고, sidecar를 손으로 적어 다리를 놓아야
+했다(출처를 source 문자열에 남김). SKILL.md에 "separate store, 자동 이월 없음"으로 명문화.
+
+**비용**: codex-ceiling(astra medium) 7라운드 ≈ 43만 토큰 + Claude ceiling 1라운드 + 라이브 워커
+5개(runner·verifier). 삭제 리스트 적용으로 664→578줄; 최종 SHIP.
+**근거**: `multiagent/tasks/orca-adapter-audit/round{1..6}-findings.md`, `result7.md`(git 미추적);
+커밋 `406a662`.
+**worker**: orchestrator(구현·검증·라이브 프로브), codex-ceiling=gpt-6-astra medium(7라운드 감사),
+claude-ceiling=fable-5-1 high(Codex 산출물 1라운드 감사), Orca 워커 runner/verifier(라이브 검증)
+
+
+> Historical import, preserved verbatim from /home/jaeukk/_shared/learnings.md; snapshot: A.tgz.
+
+## [2026-07-22] [priorart-stipple-002-codex-cli-fallback]
+**교훈**: 세션에 `mcp__codex__*` MCP 도구가 아예 안 잡혀 있어도 codex-critic/verifier를 포기하지 말 것 — `codex` CLI 바이너리(`~/.local/bin/codex`)가 있으면 `codex exec -s read-only -C <target_repo> -m <model> -` (stdin으로 brief 전달)로 직접 호출 가능하며, backends.json의 fallback 항목이 이미 이 경로를 정의해 두었다. 다만 `~/.codex/config.toml`의 기본 모델(`gpt-5.1-codex-max`)은 ChatGPT-계정 인증에서 `400 invalid_request_error`로 거부될 수 있고, 그럴 때 다른 모델명을 추측해서 계속 호출 시도하는 것(실제로 5개 추측 모두 실패)은 실제 과금 API에 낭비 호출을 쌓는 짓이다 → 1-2회 추측 실패 시 즉시 멈추고 사용자에게 정확한 모델 문자열을 물을 것. 이번엔 사용자가 `gpt-5.6-sol`/`gpt-5.6-terra`를 제공, 스모크테스트 후 정상 작동 확인.
+**근거**: `codex doctor`가 `auth mode: chatgpt`를 보여줬고, config.toml 기본값과 5개 추측 모델 전부 동일한 400 에러. 사용자 제공 모델 2종은 즉시 성공(토큰 사용량 몇 천 수준의 저비용 smoke test로 먼저 확인 후 실제 브리핑 투입).
+**worker**: orchestrator(환경 진단·CLI 폴백 발견·과호출 방지 판단)
+
+
+> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `_archive/docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
+
+
+> Historical import, preserved verbatim from /home/jaeukk/_shared/learnings.md; snapshot: A.tgz.
+
+## [2026-07-31] [agy-integration]
+**교훈**: 백엔드 레지스트리에서 **host는 family를 결정하지 않는다**. agy 한 바이너리가 Gemini·Claude·gpt-oss 3개 벤더를 서빙하므로, `host: agy`를 보고 `family: gemini`를 추론하면 `model: claude-sonnet-4-6`을 등재해도 아무 에러 없이 통과하고 critic/verifier의 `different_family_from_author`가 **조용히** 무력화된다 — 시스템이 "독립 검증 완료"라고 기록하는 바로 그 지점에서 속성이 소실되는 유형이라 다운스트림 어디에서도 감지되지 않는다. 방어는 반드시 `validate_policy` 층이어야 하고(문서 규약은 검사되지 않는다), 접두사 검사만으로는 부족하다: `gemini-claude-sonnet-4-6`이 `startswith("gemini-")`를 통과한다 → family 일치 **AND** `gemini-\d…` 완전일치로 이중 검사할 것. 두 번째 교훈: **"3rd family = 벤더 장애 failover"는 과장이었다.** `resolve_binding`은 가용성을 탐지하지 않고 첫 적격 후보를 반환하므로 3순위 후보는 정상 경로에서 결코 선택되지 않는다 — 얻는 것은 "장애 시 갈 곳이 존재한다"는 구조적 여지이지 자동 전환이 아니다. 아키텍처 근거를 쓸 때 이 둘을 구분하지 않으면, 정작 그 장애가 났을 때 처음으로 들통난다.
+**근거**: codex-critic이 음성 테스트로 3가지 우회(family 위조·family 오기·접두사 위장)를 모두 PASS시켜 실증했고, resolver 실측으로 `agy-multimodal`이 어떤 정상 author 조합에서도 선택되지 않음을 보였다. 수정 후 4종 음성 테스트 전수 REJECTED·기준선 validate-policy/self-test 유지 확인. 교차 벤더 리뷰가 자기 설계의 과장을 잡아낸 사례 — 같은 family였으면 놓쳤을 가능성이 높다(이 페이지 자체가 그 논거다).
+**부수 교훈(운영)**: 외부 CLI를 `subprocess`로 부르는 코드의 **실패 경로**를 단위 테스트할 땐 반드시 `PATH`를 격리하고 돌릴 것. "실행파일 부재" 분기를 시험하려다 PATH를 그대로 둔 채 호출해 미승인 워커(agy)를 3회 실기동시키고 쿼터를 소모했다(승인 게이트 위반, log.md 09:23 자진 신고).
+**worker**: orchestrator(설계·구현·정정), codex-critic(독립 검증 — Blocking 7건 중 6건 인정)
+
+> Current-policy note: operational guidance above is superseded. Dispatch engine-managed workers through `policy_engine.py dispatch-worker`; this historical direct-CLI example is not current dispatch permission. D14 disables agy/Gemini workers. The historical full-match validation claim is not a claim about the current engine: its documented agy model check uses the `gemini-` prefix. See `_shared/design-basis.md` D14, `_archive/docs/architecture.md`, and `engine/adapters/claude_pretool.py`.
+
+## 2026-09-16 codex exec under the Claude Code Bash tool needs `</dev/null`
+
+**증상**: `codex exec "<prompt>"` hung 9 min then timed out (exit 124), log showed "Reading additional input from stdin...".
+**원인**: the Bash tool gives the child a piped stdin; codex appends stdin to the prompt and waits for EOF.
+**교훈**: always run `codex exec … < /dev/null` from an orchestrator. Also: when the codex MCP server fails to connect, `codex exec -m <model> -c model_reasoning_effort=<e> -s read-only --skip-git-repo-check -o <file>` is a working CLI fallback for a critic call.
+**worker**: codex-ceiling (task orca-two-accounts-plan)
+
+## 2026-09-17 what one team 5-h window actually buys
+
+**Measurement**: five Opus raw-build notes (26-46 KB each, literature notes from staged PDFs),
+dispatched as `implementer` -> `claude-core-team --out`, took the team 5-h session window from 8%
+to **100%**. Summed worker usage: 459 k output, 1.20 M cache write, 8.13 M cache read. The same
+batch moved private only 19% -> 26%, i.e. roughly 73% of Claude output tokens left the private
+account. Codex critics (five, cross-family) cost 500 k tokens on their own vendor.
+**교훈**: budget **about five Opus documents per team 5-h window**, and plan larger batches as
+waves across windows. Past 95% the probe reports `exhausted` and routing falls back to the
+private backend — recorded in each attempt event with its reason, so it is traceable, but it is
+*not* announced and nobody is asked. A batch that overruns the window quietly finishes on private
+quota, which is the opposite of what team-first routing is for. Check the window before dispatching
+a batch, not after.
+**부수 교훈**: a team worker is read-only and confined to `target_repo`, so every team-built
+document still needs a private or Codex pass afterwards for anything requiring Bash (verifier
+scripts, page renders, reference generation, edits). Team routing shifts *authoring* cost, not the
+whole pipeline. Separately, a long-lived conductor session dominated private cost through cache
+reads (46.9 M over 67 turns) — more than any routing change would save, so start a fresh conductor
+per batch.
+**worker**: implementer x5 (claude-core-team), critic x5 (codex-ceiling), fixer/ingest (native Opus)
+
+## 2026-09-22 book-summarizer on the team account: the headless driver, not dispatch-worker
+
+**측정**: chapter-20 preamble + §20.1 of Torquato 2002 (21 pages, 84 printed equations, 2 tables,
+3 figures) built by `book-summarizer` v1.3 as a headless `claude -p --agent` worker under
+`CLAUDE_CONFIG_DIR=~/.claude-team` (claude-sonnet-5): 15.3 min, $4.93, 160 turns. 84/84 tags in
+printed order, 79/79 table cells carried, all three crops correct on read-back, `agent:` exact,
+gates PASS (identity INDETERMINATE by contract). The same scope scored PARTIAL on 2026-09-10; this
+run's remaining unknown is equation-body fidelity, which only a page-image critic can judge.
+**원인**: a CLI-dispatched worker has no Bash (A2), so `dispatch-worker --write` cannot run an
+agent that renders pages and crops figures. The paper-reviewer precedent (16 papers, 2026-09-20)
+already ran outside the engine; this generalizes it into `_shared/adapters/book_summarizer_team.py`
+under a contract, with `record-author` after each chapter.
+**교훈**: (1) a *named* shell allowlist (`Bash(pdftoppm:*)` …) works for this agent instead of
+bare Bash, at a price: 11 of 160 turns were denied calls a prefix rule cannot match (leading
+`VAR=`/`export`, `for` loops, `cd` outside the vault, `bash script.sh`, `chmod`). The worker
+recovered every time; the brief now says to call tools directly, one per call. (2) A book root
+outside the vault (`--add-dir`) makes `check_wikilinks.py` index the real vault and report the
+figure embeds BROKEN — an artifact of isolation, not of the notes; read the crops back instead.
+(3) `record-author` is an assertion, so a cross-family critic on a team-built chapter still needs
+`authorship_assertion` under `approvals.user`. (4) Budget roughly $5 and 15 min per short section
+at Sonnet; a full chapter is several times that.
+**worker**: implementer (book-summarizer, claude-sonnet-5, team, headless); scoring by the conductor
+
+## 2026-09-23 Opus 5.5 vs Opus 5 benchmark: harness and monitor lessons
+
+**측정**: 90 implementer-shaped calls (10 frozen items, hidden `unittest` graders, argv taken from
+`policy_engine._claude_cli` by running it in a subprocess from `engine/`), 3 arms × 3 repeats,
+about $6.2 API-equivalent on the private Max account, 0 transport failures. Opus 5.5 high 30/30,
+Opus 5 high 29/30, Opus 5.5 medium 30/30; −27% cost per call at high, −41% at medium.
+**교훈**: (1) A `Monitor` loop gated on `pgrep -f '<script> <args>'` matches the monitor's own
+command line and never ends; gate on the pid (`kill -0`) or a pidfile. (2) In a
+`run_in_background` Bash call, a relative redirect after `cd … &&` failed with "No such file or
+directory" although the directory existed; use absolute paths for log targets. (3) A file-marker
+deliverable (`=== FILE … ===` / `=== END FILE ===`) still drew a markdown fence *inside* the
+markers from Opus 5 in 1 of 30 calls; decide before freezing whether the brief forbids fences or
+the grader strips them — leaving it implicit turns a format slip into a correctness miss. (4)
+Codex's exhausted-quota message ("You've hit your usage limit … try again at <date>") carries no
+429 and no "rate limit" text, so `accounts.classify` reports `error`, not `rate_limited`; the
+attempt event then reads like a worker failure rather than a quota stop. Recorded in
+OPEN_ITEMS rather than fixed — the classifier's patterns are meant to grow from captured
+fixtures, and this is one. (Fixed 2026-09-30: the Codex dispatch path now records such an exit as
+`rate_limited`, reading only Codex's last stderr lines.) (5) With two families, an exhausted Codex window blocks *every*
+cross-family review of Claude-authored work for the rest of the window (D14); check the Codex
+bar before planning a task whose acceptance needs a critic, the same way the team window is
+checked before a batch. (6) Obtaining the worker argv from the engine at run time, instead of
+copying it, kept the benchmark on the real dispatch path without a `sys.path` hack.
+**worker**: none completed; critic (codex-ceiling) refused by Codex quota, deferred to 2026-09-28.

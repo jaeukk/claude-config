@@ -1,6 +1,6 @@
 ---
 name: finding-unknowns
-description: Surface material unknowns before costly or hard-to-reverse work — the gap between what was asked for and what the work actually requires. Use when invoked as /finding-unknowns, when the user asks for a blindspot pass or says "what am I missing" about a technical task, or when an unresolved choice would materially change the physics, data model, interface, success criteria, or an expensive/irreversible action (a long HPC job, a migration, a design commitment). Apply only the cheapest technique that closes the gap. "New feature" or "refactor" alone is not sufficient reason. Do NOT use for well-specified, routine, or mechanical work, or for non-technical "interview me" requests.
+description: Surface material unknowns before costly or hard-to-reverse work — the gap between what was asked for and what the work actually requires. Use when invoked as /finding-unknowns, when the user asks for a blindspot pass or says "what am I missing" about a technical task, or when an unresolved choice would materially change the physics, data model, interface, success criteria, or an expensive/irreversible action (a long HPC job, a migration, a design commitment). Apply only the cheapest technique that closes the gap. "New feature" or "refactor" alone is not sufficient reason. Do not use for well-specified, routine, or mechanical work, or for non-technical "interview me" requests.
 ---
 
 # Finding Your Unknowns
@@ -89,7 +89,7 @@ recognize-it-when-I-see-it criterion. Precedent must not be allowed to suppress 
 whether the user still wants that precedent.
 
 Produce 2–4 *genuinely different* directions, not one option with three trims, in the cheapest
-medium that supports the comparison: a Markdown comparison by default; HTML/Artifact or plotted
+medium that supports the comparison: a Markdown comparison by default; an HTML page or plotted
 figures only when seeing them side by side is the whole point. People cannot specify taste, but
 they reject on sight.
 
@@ -123,8 +123,8 @@ measurable success criteria. Decision-first ordering does not license dropping t
 ### During — deviation record
 
 Record **material** deviations when you hit them, not from memory afterwards: what the plan
-said, what you did, and the edge case that forced it. Write them into an existing task or
-orchestration log if the project defines one; otherwise keep a running `Deviations` section in
+said, what you did, and the edge case that forced it. Write them into an existing task log if the
+project defines one; otherwise keep a running `Deviations` section in
 the active plan. For multi-attempt work that has to survive a handoff or a context reset, ask
 before creating a temporary note — the point is that the *next* attempt inherits the learning,
 which a summary written at the end cannot provide.
@@ -148,10 +148,9 @@ Summarize the material assumptions and deviations in the final response. That's 
 ## Proportionality
 
 Investigate only enough to resolve material uncertainty, scaled to cost and reversibility —
-then pick the minimum sufficient implementation (this machine's always-on `ponytail` ladder).
-Understanding and laziness are not in tension; the reading is what makes the small diff the
-*right* small diff.
+then pick the minimum sufficient implementation. Understanding and a small diff are not in
+tension; the reading is what makes the small diff the *right* small diff.
 
-**In orchestration mode:** the conductor resolves material known ambiguities before writing the
+**Under `multiagent`:** the conductor resolves material known ambiguities before writing the
 brief. Workers do not interview the user — they state remaining assumptions and report newly
 discovered unknowns or conflicts under Issues/Caveats for the conductor to follow up.

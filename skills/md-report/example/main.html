@@ -1,0 +1,60 @@
+  <main>
+    <section class="summary" aria-labelledby="key-results">
+      <h2 id="key-results">Key results</h2>
+      <ul>
+        <li data-src="Alpha"><q>Stealthy patterns have no scattering for probes with $2k\le K$</q>, until the sample is too thick.</li>
+        <li data-src="Beta"><q>Crystallization sets in around χ ∼ 0.5.</q></li>
+      </ul>
+    </section>
+
+    <h2 id="notes">The notes</h2>
+    <script type="application/json" class="concept-map" id="cmap-spec">
+      { "columns": [[{ "title": "", "nodes": ["Beta"] }], [{ "title": "Transparency", "nodes": ["Alpha"] }]],
+        "hub": "Beta", "links": { "Alpha": "#window" },
+        "edges": [{ "from": "Beta", "to": "Transparency", "label": "see also" }] }
+    </script>
+    <figure data-src="editorial">
+      <div class="scroll-x"><svg class="schematic" id="cmap" role="img" aria-label="Concept map: Beta links to Alpha"></svg></div>
+      <figcaption>Map of the two notes from their wikilinks.</figcaption>
+    </figure>
+
+    <h2 id="window">The transparency window</h2>
+    <p data-src="Alpha">The window closes once the sample is too thick, $L/\ell_s^0\ll k_r\ell_s^0$.</p>
+    <figure class="panel" data-src="Alpha">
+      <div class="plot" id="xi-plot"></div>
+      <figcaption>Computed in the page from the note's formula, prefactor set to <span class="illustrative">1</span>; the slider moves $\ell_t$.</figcaption>
+    </figure>
+    <figure data-src="Alpha">
+      <div class="chart" data-table="tbl-gaps" data-x="0" data-y="1" data-kind="bar" data-ylabel="Gap width (%)"></div>
+      <figcaption>Reported gap widths; different systems.</figcaption>
+      <details class="data"><summary>Data table</summary><div class="table-wrap"><table id="tbl-gaps">
+        <thead><tr><th>System</th><th>Gap width (%)</th></tr></thead>
+        <tbody><tr><td>2D rods</td><td>45</td></tr><tr><td>1D chain</td><td>21.65</td></tr><tr><td>3D network</td><td>14</td></tr><tr><td>Phononic</td><td>60</td></tr></tbody>
+      </table></div></details>
+    </figure>
+    <figure class="panel" data-src="Alpha Beta">
+      <div class="plot atlas" data-table="tbl-atlas" data-xlabel="χ" data-xrange="0,0.6"></div>
+      <figcaption>χ values as reported; hover for details.</figcaption>
+      <details class="data"><summary>Data table</summary><div class="table-wrap"><table id="tbl-atlas">
+        <thead><tr><th>Category</th><th>Row</th><th>Values</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>Transparency</td><td>Samples</td><td>0.15, 0.25, 0.40</td><td>transparency observed</td></tr>
+          <tr><td>Transparency</td><td>3D window</td><td>0.20–0.35</td><td>3D window</td></tr>
+          <tr><td>Gap</td><td>Gap onset</td><td>≳0.35</td><td>onset</td></tr>
+          <tr><td>Structure</td><td>Crystallization</td><td>∼0.5</td><td>sets in</td></tr>
+        </tbody>
+      </table></div></details>
+    </figure>
+    <figure data-src="Alpha">
+      <svg class="schematic" id="flow" viewBox="0 0 520 90" role="img" aria-label="Schematic: a probe crosses a stealthy sample without scattering">
+        <rect x="200" y="15" width="120" height="60" rx="4" fill="var(--panel)" stroke="var(--muted)"/>
+        <text x="260" y="50" text-anchor="middle" font-size="13" fill="currentColor">stealthy sample</text>
+        <line x1="40" y1="45" x2="196" y2="45" stroke="currentColor" stroke-width="2"/>
+        <text x="118" y="36" text-anchor="middle" font-size="12" fill="currentColor">probe, 2k ≤ K</text>
+        <line x1="324" y1="45" x2="480" y2="45" stroke="var(--s1)" stroke-width="2"/>
+        <text x="402" y="36" text-anchor="middle" font-size="12" fill="var(--s1)">no scattering</text>
+      </svg>
+      <figcaption>Schematic.</figcaption>
+    </figure>
+    <aside class="callout caution" data-src="Alpha"><p class="label">Thickness</p><p>Transparency is a finite-thickness effect.</p></aside>
+  </main>

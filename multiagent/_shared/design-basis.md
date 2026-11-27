@@ -41,13 +41,13 @@
 - **D2 (B7) codex-critic 선행조건** = "리뷰 대상 산출물 경로 존재 — 보통 claude-main result.md, 또는 brief에 명시된 기존 코드·문서·소스". claude-main 전용 아님. (2026-05-15 R2)
 - **D3 (R5) context.md 구조** = 4섹션 유지. 레퍼런스 5단(Intent/Files/Decisions/State/Next)은 *압축/핸드오프 체크리스트*지 context.md 템플릿 아님. `Files Modified/Decisions Made` 헤딩 도입 금지(히스토리 변질 → log.md 역할 침범). codex-critic 검증 완료. (2026-05-15)
 - **D4** gemini 백엔드 = **Antigravity `agy` CLI**(`_shared/backends.json` 정본, 디스패처 `_shared/adapters/call_worker.sh`). 기본 모델 = `gemini-3.1-pro-high`, 빠른 경로 = `gemini-3-flash`/`pro-low`, 폴백 = `api`(`adapters/gemini_api.sh`). 옛 단일 브리지 `mcp__gemini-pro__*`(antigravity-claude-proxy 의존)·CLI 래퍼 `mcp__gemini__*`는 **폐기**(잔존 활성 참조는 호출 실패). `pro-high`를 기본·폴백에서 제외했던 사유(로컬 프록시 `400 INVALID_ARGUMENT` 재현, learnings 2026-05-15)는 **agy 백엔드엔 비해당** — agy로 pro-high 정상 실증(2026-06-02). agy 모델은 전역·계정단위(`/model`)라 per-call 핀 불가 → gemini 전용 전역을 pro-high로 운용. 폴백 모델의 시스템 사실 주장은 권위문서로 교차검증 후 채택. (근거 갱신 2026-06-02: tasks/v2-harness-adapter-build/ — agy 백엔드 전환 spike+3자검수. 이전: 2026-05-19~20 단일 mcp__gemini-pro__ 브리지·pro-low 기본·pro-high 제외, 프록시 의존)
-- **D5** MultiAgent 작업은 인터랙티브 세션 전용, worktree/백그라운드 세션 금지. (orchestrator-rules.md §1)
+- **D5** Interactive sessions only. Orca-managed terminals in git worktrees are permitted. Background or headless conductor sessions are forbidden. Exactly one conductor terminal owns each task. All participants use the same explicit task directory for persistent task records. See orchestrator-rules.md section 1.
 - **D6** 작업 재진입 프로토콜(orchestrator-rules §3) + 토폴로지 4패턴(routing.md) 채택, Supervisor·Hierarchical Delegation **배제**. 배제 대상은 *개념*이 아니라 *추가 계층*임에 유의 — 기존 단일 orchestrator를 Supervisor로 재명명하는 게 아니라, 그 위에 (Supervisor) 별도 long-lived 조정자 worker/런타임 동적분배 계층, (Hierarchical) worker가 worker를 부르는 재귀 위임 트리를 추가하는 것을 배제한다. 근거: (a) 단일 orchestrator, (b) worker간 무통신(전부 orchestrator 경유+승인 게이트), (c) file-as-memory(런타임 0). 추가 계층은 (b)(c)와 승인·비용·감사를 무너뜨림. 재진입 프로토콜은 콜드세션 재정박 공백(사용자 보고 통증)을 메움. 부분재실행·에러처리·Fan-in 충돌해소는 모두 기존 불변식(append-only+provenance, never-trust-upstream, 최소 worker set)의 재배치 — 새 원칙 아님. 출처: harness(revfactory) 6패턴 중 4개 선별, tasks/harness-vup-reentry/ (codex-critic 검토 반영). 매뉴얼 동기화는 후속(manual sync pending). (2026-06-01)
 - **D7** 모델 식별자 표기 정책 = **휘발성 높은 식별자는 별칭으로, 안정적인 핀만 핀으로**. 근거: "현재 모델 식별자"는 시스템이 아니라 *환경*이 소유하는 사실이며 워커마다 변동성이 다르다. (a) **claude-main** = 별칭 `opus`(Anthropic이 최신 Opus로 해석) — 버전 문자열 핀 금지. (b) **codex** = `~/.codex/config.toml` 기본값이 정본 — repo에 버전 핀 금지(routing은 "예시"로만). (c) **gemini** = 백엔드 `agy` CLI, 기본 `gemini-3.1-pro-high` **핀 유지** — agy 모델은 전역·계정단위(`/model`)라 per-call 핀 불가하므로 backends.json에 명시 핀이 정본(별칭화 부적합). 모델 전환은 드문·의도적 이벤트. **gemini 세부 정책(백엔드·기본·폴백)의 정본은 D4** — D7은 표기 원칙만 다룬다. (옛 `pro-low`+프록시 핀은 D4 마이그레이션으로 폐기, 2026-06-02) **추론 강도(effort)**: claude-main은 frontmatter `effort: xhigh` **핀**(상속 끔) — 2026-07-28 변경 전에는 핀 없이 세션 `/effort` 상속이 기본이었다. codex는 config.toml에 `model_reasoning_effort: high`가 **지속 기본값**으로 박혀 있음(운영자 환경 기준 고정적이나 config·profile·brief·MCP 파라미터로 바뀔 수 있음 — "결정적"은 아님). 출처: tasks/model-policy-cleanup/ (codex-critic 검수 반영). (2026-06-01, effort 절 갱신 2026-07-28)
 
 - **D10 정책층(System B) 모델 식별자는 핀** = D7의 별칭 원칙은 **System A**(`_shared/backends.json`, agent frontmatter) 소관이고, **System B**(`policy/backends.yaml`)는 **명시 핀**을 쓴다. 근거: (a) `conductor` 바인딩은 `session_assertion`이라 핀이 `~/.claude/settings.json`의 실제 세션 모델과 **대조 가능**해야 한다 — 별칭은 이 대조를 불가능하게 만든다. (b) 레지스트리의 존재 이유는 **구분되는 티어를 명명**하는 것인데, 별칭을 쓰면 `claude-frontier`와 `claude-core`가 둘 다 `opus`로 읽혀 티어 구분이 소멸한다. (c) codex 백엔드는 `dispatch_codex`가 `--model`로 **실제 사용**하므로 핀이 load-bearing이다(D7b의 "repo에 핀 금지"는 System A 한정). 반대급부: 신모델 출시 시 `policy/backends.yaml`을 손봐야 하는 개정 부채 — 파일 1개·6줄이므로 수용. 주의: Claude 백엔드의 `model:` 값은 **선언적**이다(엔진은 codex에만 모델 문자열을 전달) → 모델 재배정 시 세션 레버(`multiagent/.claude/settings.json`, `install_wsl_orchestration.js`, agent frontmatter)를 함께 고쳐야 실제로 바뀐다. (2026-07-28, tasks 없음 — orchestrator 직접 수정)
 
-- **D8 카파시 4원칙 층별 적용** = 오케스트레이터 지침(CLAUDE.md "운영 원칙 (Operating Principles)" 섹션) 풀버전 verbatim 차용(도입 tradeoff·말미 성공지표 포함) / 워커층 유일 정본은 `_templates/worker-brief.md`의 "Worker 행동 규약" 고정 블록 — ②단순함·③외과수술식 그대로 + ①추측전질문은 **번역형**(워커는 one-shot/headless라 사용자 질문 채널 없음 → 가정 명시·불확실/불일치를 result.md Issues/Caveats에 표면화) / ④목표기반 loop은 오케스트레이터 전용(Verification Checklist 루프와 결합). 워커 brief·agent 정의에 "사용자에게 질문" 지시 금지, agent 정의에 규약 중복 금지(brief가 모든 워커에 닿는 유일 운반체 — call_worker.sh가 brief를 통째로 전달). 기존 D와 무충돌·동방향 보강(②=최소 worker set·토큰경제, ③=write_scope 4조건, ④=never-trust-upstream 검증, D6 구조 불변). 출처: multica-ai/andrej-karpathy-skills — MIT는 README·plugin.json 선언 기준이며 상류에 LICENSE 파일 없음(2026-06-10 확인), 재배포 표기는 `NOTICE` 정본. (2026-06-10, tasks/karpathy-wiki-upgrade/)
+- **D8 카파시 4원칙 층별 적용** = [Original decision of 2026-06-10; its first clause, the verbatim orchestrator copy, is superseded by the 2026-09-29 amendment at the end of this entry.] 오케스트레이터 지침(CLAUDE.md "운영 원칙 (Operating Principles)" 섹션) 풀버전 verbatim 차용(도입 tradeoff·말미 성공지표 포함) / 워커층 유일 정본은 `_templates/worker-brief.md`의 "Worker 행동 규약" 고정 블록 — ②단순함·③외과수술식 그대로 + ①추측전질문은 **번역형**(워커는 one-shot/headless라 사용자 질문 채널 없음 → 가정 명시·불확실/불일치를 result.md Issues/Caveats에 표면화) / ④목표기반 loop은 오케스트레이터 전용(Verification Checklist 루프와 결합). 워커 brief·agent 정의에 "사용자에게 질문" 지시 금지, agent 정의에 규약 중복 금지(brief가 모든 워커에 닿는 유일 운반체 — call_worker.sh가 brief를 통째로 전달). 기존 D와 무충돌·동방향 보강(②=최소 worker set·토큰경제, ③=write_scope 4조건, ④=never-trust-upstream 검증, D6 구조 불변). 출처: multica-ai/andrej-karpathy-skills — MIT는 README·plugin.json 선언 기준이며 상류에 LICENSE 파일 없음(2026-06-10 확인), 재배포 표기는 `NOTICE` 정본. (2026-06-10, tasks/karpathy-wiki-upgrade/) **Amended 2026-09-29**: the orchestrator's full version is no longer copied into CLAUDE.md/AGENTS.md. The section points to the `karpathy-guidelines` skill file as the one authoritative copy, read before conducting, and keeps only the success-indicator line, the layering rule and the attribution. Reason: two verbatim copies of one upstream text drift. The section heading stays (INV12a); INV12g checks that the skill file exists.
 
 - **D9 라우팅 2층 분리** = `routing.md`(안정층: 작업 유형→능력 슬롯 strategist·engineer·computer-use·reviewer·multimodal)와 `_shared/capability-profile.md`(가변층: 슬롯→담당 배정, 근거·날짜 필수, 이력 append-only). 트리의 담당명 병기는 편의 사본 — 프로필이 정본. 근거: 모델별 강점 우열은 신모델 출시마다 바뀌는 *환경 소유 사실*(D7 동방향)이라 시스템 파일에 구우면 세대마다 개정 부채가 된다. 초기 배정 근거 = 2026-07-13 외부 리뷰 10건 종합 판정(Anthropic vs OpenAI 최신 플래그십): 설계·UI/UX 디자인·전략·글쓰기 = Claude 우위, 대규모 구현·테스트·브라우저 조작·비용·속도·토큰 효율 = GPT 우위로 수렴 — computer-use 슬롯 신설 동근거. 갱신은 판정 자료 확보 시 프로필만(절차는 프로필 파일이 정본). 검증: validate C1(프로필 존재)+C5b(routing→profile 참조, 슬롯 5종). (2026-07-13)
 
@@ -124,6 +124,113 @@
   **복원 조건**: bindings 후보 + `dispatch_hosts` + backends.json 워커를 **함께** 복원해야 하며, 그 전에
   `_agy_cli` docstring의 두 전제(격리 입증·완료 관측)와 argv 길이 한계(Windows 32,767자)를 처리할 것.
   절반만 되살리면 D13 이전처럼 "등록됐지만 도달 불가한 죽은 설정"이 된다. (2026-08-26)
+
+- **D15 team account reaches core tier through the implementer binding** = `claude-core-team`
+  (Opus 5.5, high, `~/.claude-team`; model refreshed 2026-09-27) is rank 1 on `implementer`, ahead of `claude-core`. This is
+  not a preference for team over private on the same work: `resolve_binding` skips
+  account-bound candidates when the spawn is native (`policy_engine.py` ~line 379), so the
+  ranking splits the two cases by construction — a native subagent can only reach
+  `claude-core` and writes code under the hook, while a CLI dispatch reaches Opus on the team
+  account and can only return text. Nothing is given up, because a CLI-dispatched implementer
+  of either family was already text-only: its patch has no landing path (A1).
+  **Why it was needed**: the 2026-09-17 test run showed team-first routing working
+  mechanically (usage 2% → 7%) while every document of substance still fell back to private
+  Opus, because the only producing team backend was Haiku 4.5 and its output was rejected by
+  the critic. `bulk_worker` deliberately stays Haiku-first so mechanical shards do not become
+  Opus calls; document production is dispatched as `implementer` instead. **Cost**: team and
+  private tiers are separate registry entries with nothing linking them, so a model change
+  edits both. **Follow-on fix, same day**: the first live dispatch refused `--out` — the
+  workspace guard keyed on `role.may_write` plus a Claude host alone, and `implementer` may
+  write. The guard was first narrowed to require the resolved backend not be `result-only`, with
+  `validate_policy` enforcing that for account-bound backends. **Both were deleted on
+  2026-09-18** when `--write` replaced the workspace idea they described: the only real
+  conflict is `--write` with `--out`, checked directly. `write_mode` is documentation again. That is not a
+  loophole: a team backend is reachable by CLI dispatch only, and a CLI-dispatched Claude
+  worker runs `--tools Read,Grep,Glob`, so it never gets a workspace for the flag to conflict
+  with. Verified end to end: team session quota 0% → 8%, private unchanged, snapshot
+  byte-identical to the published file. (2026-09-17)
+
+- **D16 audit budget, default zero** = the contract field `audit_cycles` (non-negative integer,
+  absent = 0) is how many critic rounds a task may run; 0 means no audit. `dispatch-worker`
+  refuses a critic while the budget is 0 or spent, counting one round per critic dispatch whose
+  attempt succeeded (`events.ndjson`); `validate-task` rejects a critic planned with a zero
+  budget; the hook refuses a native critic at 0 but cannot count native rounds. The verifier is
+  outside the budget. **Why**: the practice had been an unwritten critic pass on every task plus
+  N rounds when the user said so; for simple or bulk work the review cost more than it caught,
+  and the user asked for audit to be opt-in, with the number of rounds explicit. **Kept**:
+  direct conductor code edits still require critic review (`approvals.yaml`), surfaced as a
+  `validate-task` warning when the budget is 0. (2026-09-29)
+
+- **D17 a single session by default; the engine is opt-in** = the skill's default is one producer
+  and no review loop: this session, a native subagent (no contract), or one team worker with
+  `dispatch-worker --write --exec`. The engine is for (a) cross-vendor review of consequential or
+  no-oracle work (`audit_cycles` ≥ 1), (b) team-account routing, (c) contained writes and
+  publication with a record. **Why**: on two code tasks with a test oracle (n = 4 per arm;
+  `tasks/2026-09-29-cut-stage1/results.md`, `tasks/2026-09-29-cut-stage1-repeats/results.md`) the
+  critic → fix loop changed the planted-bug score in 0 of 4 runs, and the implementer → critic →
+  fix arm scored within noise of a single session (8/8, 12, 12, 12 of 12 vs 8/8, 12, 12, 11) at
+  2.0–3.7× its cost, almost all of it the implementer having no Bash (2× output tokens, 2.2× wall
+  time). Both graders saturated, so this means "no advantage detectable on test-oracle code", not
+  "equal on hard work"; review stays opt-in for work with no oracle. Critic dispatch remains the
+  most-used engine feature (68 of 128 dispatches), which is why review is kept at all.
+  **Acceptance (2026-09-30, three trimmed runs `T1`–`T3` of the undirected `accounts.py` benchmark,
+  `tasks/2026-09-29-cut-stage2-3/results.md`)**: the new default path (one team worker with
+  `--exec`, no review) scored 11, 12, 12 of 12 (single session: 12, 12, 11) at the single session's
+  cost ($1.04–1.55 vs $1.34–1.72: same setup, within run-to-run spread; the saving against the
+  no-Bash implementer, $2.35, is thinking tokens that running the tests replaced); adding one review round gave 12/12 in all three (untrimmed loop: 12/12) at about
+  0.7× the untrimmed loop's cost and 0.6× its wall time. Review changed the score in 1 of 3 of these
+  runs (T1: the draft missed M10, the same bug the single session missed once), so across both
+  benchmarks the loop changed a score in 1 of 7 runs.
+  **Cut** (C1–C9 in `tasks/2026-09-29-cut-stage2-3/plan.md`): the `native_reason` gate, which
+  enforced "dispatch by default", the default the evidence reversed; the `direct_code_files` cap
+  and `approvals.yaml` `direct_conductor_edit`, which nothing incremented (this withdraws D16's
+  "Kept" clause: nothing now forces review of conductor code edits, and `audit_cycles` is the only
+  lever); the native count in `dispatch.active_workers` (withdraws the contract-side counter of
+  D13(a); the lease's CLI slot count stays); `dispatch-worker`'s `current_role == --role` check of
+  D13(b) (the hook still requires `current_role` before a native spawn, since it authorizes and
+  binds the spawn by it); `--host wsl`; the agy builder, `agy-*` backends and
+  `--required-family gemini` (withdraws D14's "kept so re-enabling is configuration"; revive from
+  `8e57af8`, and D14's single-outage gap remains); the Orca adapter, moved to `_archive/` (one
+  development run, its own authorship store). Contracts carrying the dropped fields are accepted
+  and ignored. **Added**: `--exec`, a named Bash allowlist for a Claude `--write` worker. Its trade
+  is stated rather than hidden: Bash writes fall outside the destination's permission rules and the
+  change set and are contained only by the brief, the same trade the headless team driver already
+  makes. **Rationale moved out of SKILL.md**: the measurements behind retained rules live beside
+  the code (a `Write(...)` permission rule authorizes nothing, `write_permission_settings`;
+  `--restricted` ignores user and project grants, the note above `PROTECTED_READ_LOCATIONS`;
+  `--allowedTools` grants without removing tools, `_claude_cli`). Fan-out counting bounds
+  accidental fan-out by one cooperating conductor and is not a security boundary (D13). Codex's
+  approval prompts ask about side effects, not about which vendor reviews whom, so they do not
+  substitute for the independence check. (2026-09-30)
+
+- **D18 `bulk_worker` is defined by what its output is for, not by the shape of the work** =
+  `runner` returns information to the conductor (a search, a command result, metadata);
+  `bulk_worker` produces the deliverable itself, in volume, where each shard is simple enough for
+  a fast-tier model and a schema can check the result; a shard that needs judgment is
+  `implementer` work. **Why**: the earlier wording ("process independent shards") described only
+  the shape, so conductors planned `bulk_worker` for judgment work. Three contracts of
+  2026-09-16 to 09-18 (equation-fidelity checks, literature relevance, page builds) planned it
+  and then ran the shards as native Opus subagents; from 2026-10-01 to 11-15 it was never
+  dispatched, while about 880 native spawns billed the private login. Removal was considered
+  (OPEN_ITEMS A16, closed by this entry) and rejected by the owner: high-volume simple production
+  is a real need and is not `runner` work. **Order**: `claude-fast-team`, `codex-fast`,
+  `claude-fast`: team first to spare private quota, and when team is exhausted or rate-limited
+  the shard goes to Codex before private Haiku. The one retry after a team rate limit can
+  therefore cross families; it stays read-only. **Volume route**: many shards run as native
+  `model: "haiku"` subagents in a session started with `claude-team` (SKILL "Fan-outs"); a
+  `dispatch-worker` call per shard is for single recorded jobs. (2026-11-15)
+
+- **D19 `runner` keeps `codex-fast` first for capability, not price** = an engine-dispatched Codex
+  runner can run commands (read-only sandbox); an engine-dispatched Claude runner gets only
+  `Read,Grep,Glob`, and running commands is part of the role. The 2026-07-31 measurement (equal
+  accuracy, 9 to 26 times fewer tokens) compared Codex with Haiku 4.5 and was not repeated after
+  the fast tier moved to Haiku 5.5 on 2026-11-15 (OPEN_ITEMS A18, closed by this entry without a
+  re-measurement). A re-measurement would settle nothing: a cheaper Haiku 5.5 would still not
+  justify a Claude-first order that cannot run commands, and the path has almost no traffic (one
+  engine runner dispatch on record; runner work runs as native spawns, which ignore this order,
+  can run commands and already use Haiku 5.5). **Revisit when** a dispatched Claude worker gains
+  command execution (the Claude half of OPEN_ITEMS A2), or engine-dispatched runner volume becomes
+  real. (2026-11-15)
 
 ## 4. 불변식
 

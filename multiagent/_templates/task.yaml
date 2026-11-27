@@ -9,11 +9,11 @@
   },
   "target_repo": "C:/absolute/path/to/repository",
   "write_scope": ["src/", "tests/"],
-  "roles_plan": ["implementer", "critic", "verifier"],
+  "roles_plan": ["implementer"],
+  "audit_cycles": 0,
   "approvals": {"user": []},
-  "dispatch": {"current_role": null, "active_workers": 0},
+  "dispatch": {"current_role": null},
   "author_family": null,
-  "direct_code_files": 0,
   "created_at": "YYYY-MM-DDTHH:MM:SSZ",
   "updated_at": "YYYY-MM-DDTHH:MM:SSZ"
 }

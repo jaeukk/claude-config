@@ -10,6 +10,8 @@ Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+**Asking vs proceeding (owner's rule):** ask when two readings lead to materially different work. For a reversible choice, state the assumption in one line and proceed.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**

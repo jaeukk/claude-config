@@ -1,6 +1,6 @@
 ---
 name: python-guidelines
-description: Python coding standards for computational-physics work — modern Python (3.11+) with type hints, NumPy-style docstrings with units on every public function, NumPy/SciPy vectorization and floating-point practices, reproducible RNG, performance rules (profile first, complexity before micro-optimization, numba/C++ as escalation), code-reuse rules, and uv/ruff/pytest tooling. Use whenever writing, editing, reviewing, refactoring, optimizing, or deduplicating ANY Python code (.py, .ipynb, pyproject.toml) — simulation and analysis scripts, pyMEEP/SMUTHI scattering code, plotting, data processing — even if the user doesn't say "Python" explicitly, e.g. "speed up this script", "clean up my analysis", "add a g(r) function".
+description: Python coding standards for computational-physics work — modern Python (3.11+) with type hints, NumPy-style docstrings with units on every public function, NumPy/SciPy vectorization and floating-point practices, reproducible RNG, performance rules (profile first, complexity before micro-optimization, numba/C++ as escalation), code-reuse rules, and uv/ruff/pytest tooling. Use whenever writing, editing, reviewing, refactoring, optimizing, or deduplicating Python code (.py, .ipynb, pyproject.toml) — simulation and analysis scripts, pyMEEP/SMUTHI scattering code, plotting, data processing — even if the user doesn't say "Python" explicitly, e.g. "speed up this script", "clean up my analysis", "add a g(r) function".
 license: MIT
 ---
 
@@ -14,7 +14,9 @@ dual-language codebase convention. When editing an existing file, its local styl
 
 ## 1. Language level
 
-Target **Python ≥ 3.11**. Modern, typed, standard-library-first:
+New code targets **Python ≥ 3.11**: modern, typed, standard-library-first. A file that runs
+somewhere older keeps its documented floor (code executed on an HPC login node, such as the
+Python 3.6 checker `simupdate.py` sends to Nurion's data mover).
 
 - Type-hint public function signatures with builtin generics — `list[float]`,
   `dict[str, NDArray]`, `float | None` — so the contract is machine-checkable.
@@ -27,14 +29,15 @@ Target **Python ≥ 3.11**. Modern, typed, standard-library-first:
 - Comprehensions when they fit on a line or two; a plain loop once nesting or
   conditions make the comprehension a puzzle.
 
-## 2. Environment — uv
+## 2. Environment
 
-- Run and manage everything through **uv**: `uv run script.py`, `uv add numpy`,
-  `uv run pytest`. Bare `python` is not guaranteed on PATH (notably on this
-  Windows setup) and bypasses the project environment.
-- Project dependencies live in `pyproject.toml`. For a standalone analysis
-  script, use PEP 723 inline metadata (`# /// script … dependencies = […] # ///`)
-  so `uv run` resolves it without a project.
+- Use the environment and launch command the project already has; do not introduce
+  a second one. On this machine that is conda's `python3`, with shared modules
+  installed editable (`pip install -e`, the global research-code workflow). A
+  script run under a different environment loses those editable installs.
+- Use `uv run` / `uv add` only in a project that already uses uv (a `uv.lock`, or
+  a script with PEP 723 inline metadata). Project dependencies live in
+  `pyproject.toml`.
 
 ## 3. Docstrings — NumPy style, units mandatory
 
@@ -84,8 +87,11 @@ unit conversions.
   quadratic). Preallocate, or collect in a list and `np.stack` once at the end.
 - **Views vs copies:** basic slicing returns views — mutate deliberately; use
   `.copy()` when the original must survive.
-- **No `==` on floats.** `np.isclose`/`np.allclose` (or `math.isclose`) with
-  explicitly chosen `rtol`/`atol`; in tests, `np.testing.assert_allclose`.
+- **No `==` between computed floats.** `np.isclose`/`np.allclose` (or
+  `math.isclose`) with explicitly chosen `rtol`/`atol`; in tests,
+  `np.testing.assert_allclose`. An exact test stays only where exactness is the
+  contract (a zero guard before a division, a sentinel value): say so in a
+  comment, and never swap it for a tolerance that changes the result.
 - **Cancellation:** reach for `np.expm1`, `np.log1p`, `np.hypot` instead of the
   naive expressions they replace. For precision-critical scalar sums use
   `math.fsum` (`np.sum` is already pairwise, which usually suffices).
@@ -122,8 +128,12 @@ algorithm before the constant factor:
   binning, tolerance comparison — into one shared module so a fix lands once.
 - **One home for constants and parameters** — a constants module or a config
   dataclass, never the same literal repeated across scripts.
-- **Scripts get a `main()`** behind `if __name__ == "__main__":` with `argparse`
-  for inputs — importable for reuse and testing, runnable standalone.
+- **A reusable script gets a `main()`** behind `if __name__ == "__main__":` with
+  `argparse` for inputs — importable for reuse and testing, runnable standalone.
+  A single-use script that lives beside its dataset (global research-code
+  workflow) takes no inputs: constants at the top, paths resolved from
+  `Path(__file__).resolve().parent`. Giving it an input interface makes it
+  reusable code, which belongs in the repo.
 
 ## 7. Errors
 
@@ -137,8 +147,10 @@ algorithm before the constant factor:
 ## 8. Lint, format, type-check
 
 - **ruff is the single style tool** (replaces black/isort/flake8). After touching
-  Python files: `uv run ruff format <files>`, then `uv run ruff check --fix
-  <files>`, then `uv run ruff check <files>`. If a warning survives two passes,
+  Python files: `uvx ruff format <files>`, then `uvx ruff check --fix <files>`,
+  then `uvx ruff check <files>`. (`uvx` runs ruff without installing it; ruff is
+  not on PATH here, and `uv run ruff` fails outside a project that declares it.
+  Use the project's own ruff where it has one.) If a warning survives two passes,
   surface it instead of looping.
 - Only lint code you touched — not vendored or generated files.
 - Type-check with pyright/mypy when the project already does; don't bolt it onto
@@ -155,12 +167,3 @@ algorithm before the constant factor:
 
 A test that encodes a physical invariant survives refactoring; a test that pins
 a magic number to 12 decimals breaks on the first legitimate change.
-
-## Review checklist
-
-Before calling Python work done: every public function has a NumPy-style
-docstring with units · type hints on public signatures · no Python loops over
-array elements · no array growth inside loops · no `==` on floats ·
-`default_rng` with explicit seed · no reimplemented NumPy/SciPy functionality ·
-repeated helpers extracted into a shared module · ruff format + check clean ·
-run via `uv run`.

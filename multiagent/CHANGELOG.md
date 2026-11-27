@@ -3,6 +3,132 @@
 이 파일은 MultiAgent orchestration 시스템의 주요 변경을 기록한다.
 형식은 [Keep a Changelog](https://keepachangelog.com/), 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따른다.
 
+## [Unreleased]
+
+### Added
+- `engine/adapters/codex_pretool.py`: the Claude hook's rules on Codex through its `PreToolUse` hook
+  (shell, `apply_patch` per file, `spawn_agent` as family `codex`), for sessions inside `multiagent/`
+  while a task is active. The Claude hook's decision is now a shared `evaluate()`.
+- SKILL.md "Review discipline": agree the threat model, the blocking bar, the round plan and the stop
+  rule before the first critic round (the global CLAUDE.md rule reaches Claude sessions only; Codex
+  conductors read the skill).
+- `dispatch-worker --review-copy` (Codex critic or verifier): a writable sandbox in a disposable
+  copy of `target_repo`, so the reviewer can run the tests; the original stays read-only.
+
+### Changed
+- `bulk_worker` redefined (design-basis D18): high-volume, low-judgment production, told apart
+  from `runner` by what the output is for. Order is now `claude-fast-team`, `codex-fast`,
+  `claude-fast`, so exhausted team quota goes to Codex before private Haiku.
+- A Codex usage-limit exit is recorded as `rate_limited`, not `error` (only the last stderr lines are
+  read).
+- SKILL.md: a review round that leaves nothing to fix (no findings, or all deferred or rejected)
+  dispatches no fixer (step-7 benchmark: three empty reviews each paid an unchanged $0.41 fix).
+- Conductor defects seen in the bench8 benchmark (8 headless conductor sessions):
+  - `release-lease` also removes `tasks/.active-task` when it names the released installation task; the
+    hook refuses a conductor's own removal, so 6 of 8 left a stale pointer.
+  - A conductor may write ordinary files in its active task's own folder (briefs, notes, results); engine
+    state there stays refused. Before this, a critic brief could not be written mid-task at all.
+  - SKILL.md: never end a turn while a dispatch you started is running (a headless session killed its
+    critic); do not open other tasks' folders as examples; task IDs are lowercase.
+- Fewer conductor turns (bench8: multiagent runs took 2–5× vanilla's turns, most of them ceremony):
+  - `policy_engine.py review --conductor-host … --target-repo … --brief … --out … [--review-copy]`: one review round in one
+    foreground call (`produce` with a critic or verifier role; the author is the conductor's family).
+  - The shell rule refuses file writes only: a quoted `>`, `2>&1`, `/dev/null` and `>(…)` pass (bench8's 23
+    refusals drop to the 8 real writes); refusal messages say what to do instead.
+  - SKILL.md: no contract, lease or pointer when nothing is dispatched or reviewed.
+  - `multiagent/CLAUDE.md`/`AGENTS.md`: reading the karpathy guidelines in full is no longer a required first step.
+  - SKILL.md 3,530 → 2,094 words: `--out`/`--write`/driver/inheritance, Authorship and the host sections
+    moved verbatim to `references/{workers,authorship,hosts}.md`, with a read-when index.
+
+## [1.5.0] - 2026-09-30
+
+Items 1–2 of the post-cut plan (`tasks/2026-09-30-multiagent-next/synthesis.md`), worked out with
+one codex-ceiling consultation.
+
+### Added
+- **`policy_engine.py cost-report`** sums every `worker_attempt` event under one or more task
+  roots by account and model: attempts, outcomes, Claude output tokens and `total_cost_usd`, Codex
+  `tokens_used`, and `uncosted` (attempts with no cost data). Overlapping roots are read once;
+  `--since YYYY-MM-DD`; `--json`.
+- **`policy_engine.py record-attempt`** lets a headless driver record a worker the engine did not
+  launch (`source: external`; `account`, `model`, `classification` required; no lease, like
+  `record-author`). Fields are type-checked, and external events never count as an audit
+  round. The book driver records each attempt (best effort) with the CLI outcome, whether the
+  chapter was built, and the envelope's usage and cost.
+- **`policy_engine.py produce`** is the one-producer route: contract (one planned producer,
+  `audit_cycles` 0), lease, dispatch (`--write [--exec]` or `--out`), release, and a summary on
+  stderr, in one call. It validates the policy and the contract, creates the task folder
+  exclusively after reading the brief (an existing folder or link is refused), writes the contract
+  `pending`, activates it and later finalizes it only under the lease lock while this run owns the
+  lease, and never writes it when the lease was not acquired; cleanup never raises. It deletes
+  nothing but its own lease file (generation-checked) and its own `lease.lock` (identity-checked): a setup that fails after creating the folder
+  leaves it as a record (rerun with another task ID), the brief is created exclusively, and the
+  hidden `.task-initial.*.json` hard link to the first contract stays. `--dry-run` creates nothing.
+- Contract status `failed` is now valid (the benchmark driver already wrote it).
+
+### Changed
+- SKILL.md: native spawns choose the type and model by tier (`Explore`/`runner` for lookups;
+  `model: "haiku"`/`"sonnet"` on `Agent` for shards and routine production). A `general-purpose`
+  spawn with no model otherwise runs at the session's model on the private login. Also added: a rule
+  for when to push a job to the team account, and the cost commands. SKILL.md is 2,882 words
+  (1.4.0: 2,598).
+
+## [1.4.0] - 2026-09-30
+
+Cut program, stages 2–3 (`tasks/2026-09-29-cut-stage2-3/plan.md`; design-basis D17). Stage 1 found
+that a single session matched an implementer → critic → fix loop on test-oracle code within noise
+at 2–3.7× lower cost, so the engine becomes opt-in.
+
+### Changed
+- **Single session is the default.** `skills/multiagent/SKILL.md` rewritten (7,088 → about 2,600
+  words): the engine is for cross-vendor review of consequential or no-oracle work, team-account
+  routing, and contained writes or publication with a record. Authorship is stated once; the Orca
+  and Gemini sections are gone; stale claims fixed (Codex has PreToolUse hooks but no multiagent
+  adapter yet; the hook matcher covers `Agent` and `Task`; `fork_turns` defaults to `all`; a Codex
+  critic or verifier usually cannot run a suite; Codex-authored work's verifier is
+  `claude-mid-team` first).
+- **`AGENTS.md` / `CLAUDE.md`** are now an English maintainer file (tests, self-test, the
+  edit-in-a-clone rule, where lessons go). The System A rules moved to
+  `_archive/system-a/AGENTS.md`; the remaining System A files are labeled legacy.
+- `docs/task-contract.md` absorbs `references/policy-layout.md` (now a pointer). README fixes: the
+  implementer tier, "an unreadable probe skips team" (it routes to team), and
+  `CLAUDE_TEAM_MAX_PERCENT` (nothing reads it); the WSL paragraph and the picture-book pointer
+  moved in.
+- **Mid tier re-pinned to Sonnet 5.5** — `claude-mid` and `claude-mid-team` now pin
+  `claude-sonnet-5-5` (medium), and the book driver defaults to it. Evidence: the 2026-09-29 local check
+  (capability profile) and the vendor comparison. Core stays on Opus 5.5.
+
+### Added
+- **Audit budget `audit_cycles`** (design-basis D16) — critic rounds a task may run; absent or 0
+  skips audit. Enforced by `dispatch-worker` (zero or spent budget refuses a critic) and
+  `validate-task`; the hook refuses a native critic at 0. Templates default to 0.
+- `dispatch-worker --write <dest> --exec`: Bash with a named command allowlist for a Claude write
+  worker. Bash writes are not confined to the destination and are outside the change set; the
+  recorded `enforcement` says so.
+- `worker_attempt` events carry cost: the Claude envelope's `usage` and `total_cost_usd`, and
+  Codex's `tokens used`.
+
+### Removed
+- The `native_reason` gate, the `direct_code_files` cap (`approvals.yaml` `direct_conductor_edit`),
+  the native fan-out count from `dispatch.active_workers`, and `dispatch-worker`'s
+  `current_role == --role` check. Contracts carrying these fields are accepted and ignored; the
+  hook still needs `dispatch.current_role` before a native spawn.
+- `--host wsl`; the agy/Gemini builder, backends and `--required-family gemini` (revive from
+  `8e57af8`); policy keys nothing read. Archived with `git mv`: the Orca adapter,
+  `install_wsl_orchestration.js`, `gemini_api.sh`, `gemini_raw_build.py`, and `docs/final-plan.md`,
+  `docs/architecture.md`, `docs/team-account-routing.md` (to `_archive/`).
+
+### Fixed
+- The CLI no longer accepts abbreviated options, and `acquire-lease` / `append-event` refuse a
+  folder with no `task.yaml` (the 2026-09-27 stray task folder).
+
+## [1.3.1] - 2026-09-29
+
+### Changed
+- **CLAUDE.md / AGENTS.md "운영 원칙"** — the verbatim copy of the four principles is replaced by a pointer to the
+  `karpathy-guidelines` skill file, the one authoritative copy. The success-indicator line, the layering rule and the
+  attribution stay. NOTICE, design-basis D8 and INV12 (new INV12g: the skill file exists) updated.
+
 ## [1.3.0] - 2026-07-13
 
 ### Added

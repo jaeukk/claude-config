@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare arXiv Submission"
+  short_description: "Convert published papers into clean arXiv sources"
+  default_prompt: "Use $prepare-arxiv-submission to reconcile my published paper with its LaTeX source and produce a clean, self-contained arXiv submission."

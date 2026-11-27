@@ -8,5 +8,30 @@
     "additionalDirectories": [
       "/home/jaeukk/.claude/agents"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/obsidian-link.sh",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/research-note-check.sh",
+            "timeout": 20,
+            "statusMessage": "Checking research note…"
+          }
+        ]
+      }
+    ]
   }
 }

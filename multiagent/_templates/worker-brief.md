@@ -9,6 +9,8 @@
 - 외과수술식 수정: 기존 스타일 유지, 무관 코드 비접촉
 - 사용자 대화 채널 없음: 가정은 명시하고, 불확실·불일치는 result의 Issues/Caveats에 표면화
 
+- 영문 텍스트는 미국식 철자 (코드 주석·docstring·노트·result.md 포함)
+
 ## Execution Context (codex-main / codex-critic 필수)
 
 ```yaml
